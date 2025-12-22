@@ -55,7 +55,22 @@ impl<'a> GrammarParser<'a> {
             None => Grammar::new(name),
         };
 
-        // Parse rules
+        self.parse_rules_into(&mut grammar)?;
+        Ok(grammar)
+    }
+
+    /// Parse an anonymous grammar: `{ rules }` (for grammar literals).
+    pub fn parse_anonymous(&mut self) -> Result<Grammar> {
+        self.skip_whitespace();
+        self.expect_char('{')?;
+
+        let mut grammar = Grammar::new(SmolStr::new("<anonymous>"));
+        self.parse_rules_into(&mut grammar)?;
+        Ok(grammar)
+    }
+
+    /// Parse rules into an existing grammar until closing brace.
+    fn parse_rules_into(&mut self, grammar: &mut Grammar) -> Result<()> {
         loop {
             self.skip_whitespace();
             if self.peek_char() == Some('}') {
@@ -73,7 +88,7 @@ impl<'a> GrammarParser<'a> {
             grammar.add_rule(rule_name, rule);
         }
 
-        Ok(grammar)
+        Ok(())
     }
 
     /// Parse a single rule: `name = pattern (=> action)?`
@@ -419,7 +434,7 @@ impl<'a> GrammarParser<'a> {
 
         // Parse as FMPL expression
         let tokens = Lexer::new(action_src).tokenize()?;
-        let expr = ExprParser::new(&tokens).parse()?;
+        let expr = ExprParser::with_source(&tokens, action_src).parse()?;
         Ok(expr)
     }
 
@@ -685,6 +700,26 @@ mod tests {
                 assert!(matches!(&items[0], Pattern::Super(n) if n == "word"));
             }
             _ => panic!("expected Seq pattern"),
+        }
+    }
+
+    #[test]
+    fn test_parse_action_with_grammar_literal() {
+        let src = r#"
+            grammar test::action {
+                digit = [0-9] => grammar { inner = [0-9] }
+            }
+        "#;
+
+        let mut parser = GrammarParser::new(src);
+        let grammar = parser.parse().unwrap();
+        let rule = grammar.rules.get("digit").unwrap();
+
+        match rule.action.as_ref() {
+            Some(Expr::GrammarLiteral(inner)) => {
+                assert!(inner.rules.contains_key("inner"));
+            }
+            _ => panic!("expected grammar literal action"),
         }
     }
 }
