@@ -53,8 +53,10 @@ use std::sync::Arc;
 pub struct Grammar {
     /// Fully qualified grammar name (e.g., "mud::commands").
     pub name: SmolStr,
-    /// Parent grammar for inheritance (e.g., "base::parser").
+    /// Parent grammar name for registry lookup (legacy).
     pub parent: Option<SmolStr>,
+    /// Direct parent grammar reference (for first-class grammars).
+    pub parent_grammar: Option<Arc<Grammar>>,
     /// Named rules in this grammar.
     pub rules: HashMap<SmolStr, Rule>,
 }
@@ -64,14 +66,27 @@ impl Grammar {
         Self {
             name,
             parent: None,
+            parent_grammar: None,
             rules: HashMap::new(),
         }
     }
 
+    /// Create grammar with named parent (for registry lookup).
     pub fn with_parent(name: SmolStr, parent: SmolStr) -> Self {
         Self {
             name,
             parent: Some(parent),
+            parent_grammar: None,
+            rules: HashMap::new(),
+        }
+    }
+
+    /// Create grammar with direct parent reference (for first-class grammars).
+    pub fn with_parent_grammar(name: SmolStr, parent: Arc<Grammar>) -> Self {
+        Self {
+            name,
+            parent: None,
+            parent_grammar: Some(parent),
             rules: HashMap::new(),
         }
     }
@@ -526,5 +541,27 @@ mod tests {
         assert!(base.rules.contains_key("digit"));
         assert!(base.rules.contains_key("letter"));
         assert!(base.rules.contains_key("spaces"));
+    }
+
+    #[test]
+    fn test_grammar_with_arc_parent() {
+        // Create a parent grammar
+        let mut parent = Grammar::new(SmolStr::new("parent"));
+        parent.add_rule(
+            SmolStr::new("foo"),
+            Rule::new(Pattern::Literal(SmolStr::new("foo"))),
+        );
+        let parent = Arc::new(parent);
+
+        // Create child with Arc parent
+        let mut child = Grammar::with_parent_grammar(SmolStr::new("child"), parent.clone());
+        child.add_rule(
+            SmolStr::new("bar"),
+            Rule::new(Pattern::Literal(SmolStr::new("bar"))),
+        );
+
+        // Child should have access to parent
+        assert!(child.parent_grammar.is_some());
+        assert_eq!(child.parent_grammar.as_ref().unwrap().name, "parent");
     }
 }

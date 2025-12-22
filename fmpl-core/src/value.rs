@@ -2,6 +2,7 @@
 
 use crate::compiler::CompiledCode;
 use crate::error::{Error, Result};
+use crate::grammar::Grammar;
 use crate::object::ObjectId;
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -23,6 +24,8 @@ pub enum Value {
     Lambda(Arc<Lambda>),
     /// Partially applied function.
     Partial(Arc<Partial>),
+    /// First-class grammar.
+    Grammar(Arc<Grammar>),
 }
 
 /// A lambda closure.
@@ -75,6 +78,7 @@ impl Value {
             Value::Object(_) => "object",
             Value::Lambda(_) => "lambda",
             Value::Partial(_) => "partial",
+            Value::Grammar(_) => "grammar",
         }
     }
 
@@ -316,6 +320,7 @@ impl fmt::Display for Value {
             Value::Object(id) => write!(f, "<object #{}>", id),
             Value::Lambda(_) => write!(f, "<lambda>"),
             Value::Partial(_) => write!(f, "<partial>"),
+            Value::Grammar(g) => write!(f, "<grammar {}>", g.name),
         }
     }
 }
@@ -323,5 +328,32 @@ impl fmt::Display for Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         self.equals(other)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::grammar::Grammar;
+
+    #[test]
+    fn test_grammar_value_type_name() {
+        let grammar = Grammar::new(SmolStr::new("test"));
+        let val = Value::Grammar(Arc::new(grammar));
+        assert_eq!(val.type_name(), "grammar");
+    }
+
+    #[test]
+    fn test_grammar_value_display() {
+        let grammar = Grammar::new(SmolStr::new("my::grammar"));
+        let val = Value::Grammar(Arc::new(grammar));
+        assert_eq!(format!("{}", val), "<grammar my::grammar>");
+    }
+
+    #[test]
+    fn test_grammar_value_is_truthy() {
+        let grammar = Grammar::new(SmolStr::new("test"));
+        let val = Value::Grammar(Arc::new(grammar));
+        assert!(val.is_truthy());
     }
 }

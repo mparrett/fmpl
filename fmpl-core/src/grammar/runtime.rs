@@ -155,7 +155,16 @@ impl<'a> PegRuntime<'a> {
             return Ok(rule.clone());
         }
 
-        // Check parent chain
+        // Check direct parent_grammar chain (for first-class grammars)
+        let mut parent_grammar = self.grammar.parent_grammar.clone();
+        while let Some(pg) = parent_grammar {
+            if let Some(rule) = pg.rules.get(name) {
+                return Ok(rule.clone());
+            }
+            parent_grammar = pg.parent_grammar.clone();
+        }
+
+        // Check named parent chain via registry (for registered grammars)
         let mut parent_name = self.grammar.parent.clone();
         while let Some(pname) = parent_name {
             if let Some(parent) = self.registry.get(&pname) {
@@ -176,6 +185,17 @@ impl<'a> PegRuntime<'a> {
 
     /// Find a rule from parent grammar (for super calls).
     fn find_parent_rule(&self, name: &SmolStr) -> Result<Rule> {
+        // First check direct parent_grammar
+        if let Some(pg) = &self.grammar.parent_grammar {
+            return pg.rules.get(name).cloned().ok_or_else(|| {
+                Error::Runtime(format!(
+                    "rule {} not found in parent grammar {}",
+                    name, pg.name
+                ))
+            });
+        }
+
+        // Fall back to named parent via registry
         let parent_name = self.grammar.parent.as_ref().ok_or_else(|| {
             Error::Runtime(format!(
                 "super call in grammar {} which has no parent",
@@ -1394,5 +1414,31 @@ mod tests {
         );
         let result2 = runtime2.parse("single_int").unwrap();
         assert!(result2.is_failure());
+    }
+
+    #[test]
+    fn test_arc_parent_rule_inheritance() {
+        // Create parent grammar with a rule
+        let mut parent = Grammar::new(SmolStr::new("parent"));
+        parent.add_rule(
+            SmolStr::new("greeting"),
+            super::super::Rule::new(Pattern::Literal(SmolStr::new("hello"))),
+        );
+        let parent = Arc::new(parent);
+
+        // Create child with Arc parent reference (no registry lookup needed)
+        let child = Grammar::with_parent_grammar(SmolStr::new("child"), parent.clone());
+
+        // Parse using child grammar - should inherit "greeting" rule from parent
+        let registry = GrammarRegistry::new();
+        let mut runtime = PegRuntime::new("hello", &registry, Arc::new(child));
+        let result = runtime.parse("greeting").unwrap();
+
+        assert!(result.is_success());
+        if let ParseResult::Success(Value::String(s), _) = result {
+            assert_eq!(s, "hello");
+        } else {
+            panic!("expected string result");
+        }
     }
 }
