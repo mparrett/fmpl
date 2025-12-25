@@ -9,6 +9,7 @@
 //! - Grammar (OMeta-style extensible PEG grammars)
 
 pub mod ast;
+pub mod bytecode;
 pub mod compiler;
 pub mod error;
 pub mod grammar;
@@ -31,7 +32,7 @@ pub use vm::Vm;
 /// Evaluate FMPL source code and return the result.
 pub fn eval(vm: &mut Vm, source: &str) -> Result<Value> {
     let tokens = Lexer::new(source).tokenize()?;
-    let ast = Parser::new(&tokens).parse()?;
+    let ast = Parser::with_source(&tokens, source).parse()?;
     let code = Compiler::new().compile(&ast)?;
     vm.run(&code)
 }
