@@ -2,18 +2,33 @@
 
 use crate::ast::*;
 use crate::error::{Error, Result};
+use crate::grammar::Grammar;
+use crate::grammar::parser::GrammarParser;
 use crate::lexer::{SpannedToken, Token};
 use smol_str::SmolStr;
 
 /// Parser state.
 pub struct Parser<'a> {
     tokens: &'a [SpannedToken],
+    source: Option<&'a str>,
     pos: usize,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(tokens: &'a [SpannedToken]) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            source: None,
+            pos: 0,
+        }
+    }
+
+    pub fn with_source(tokens: &'a [SpannedToken], source: &'a str) -> Self {
+        Self {
+            tokens,
+            source: Some(source),
+            pos: 0,
+        }
     }
 
     /// Parse a complete program (sequence of expressions/definitions).
@@ -230,15 +245,46 @@ impl<'a> Parser<'a> {
                 let right = self.parse_or()?;
                 left = Expr::Binary(Box::new(left), BinOp::Pipe, Box::new(right));
             } else if self.check(&Token::At) {
-                // Grammar application: expr @ grammar.rule
+                // Grammar application: expr @ grammar_expr.rule
+                // grammar_expr can be a qualified name, identifier, or any primary expression
                 self.advance();
-                let grammar = self.parse_qualified_name()?;
-                self.expect(&Token::Dot)?;
-                let rule = self.expect_ident()?;
+                let grammar_expr = self.parse_postfix()?;
+
+                // The grammar_expr should end with .rule access
+                // Extract the rule name from the last PropAccess
+                let (grammar, rule) = match grammar_expr {
+                    Expr::PropAccess(base, prop) => (*base, prop),
+                    Expr::Qualified(qn) => {
+                        // Handle qualified::name.rule case
+                        if qn.parts.len() >= 2 {
+                            // Last part is the rule name
+                            let rule = qn.parts.last().unwrap().clone();
+                            let grammar_parts = qn.parts[..qn.parts.len() - 1].to_vec();
+                            (
+                                Expr::Qualified(QualifiedName {
+                                    parts: grammar_parts,
+                                }),
+                                rule,
+                            )
+                        } else {
+                            return Err(self.error("grammar application requires grammar.rule"));
+                        }
+                    }
+                    _ => return Err(self.error("grammar application requires grammar.rule")),
+                };
+
                 left = Expr::GrammarApply {
                     input: Box::new(left),
-                    grammar,
+                    grammar: Box::new(grammar),
                     rule,
+                };
+            } else if self.check(&Token::Inherits) {
+                // Grammar extension: base <: { rules }
+                self.advance();
+                let rules = self.parse_grammar_body()?;
+                left = Expr::GrammarExtend {
+                    base: Box::new(left),
+                    rules,
                 };
             } else {
                 break;
@@ -566,8 +612,103 @@ impl<'a> Parser<'a> {
             Token::Return => self.parse_return(),
             Token::Spawn => self.parse_spawn(),
             Token::Match => self.parse_match(),
+            Token::Stream => self.parse_stream_literal(),
+            Token::Grammar => self.parse_grammar_literal(),
             _ => Err(self.error(&format!("unexpected token: {:?}", token))),
         }
+    }
+
+    /// Parse grammar literal: `grammar { rules }`
+    fn parse_grammar_literal(&mut self) -> Result<Expr> {
+        self.expect(&Token::Grammar)?;
+
+        // We need source access to parse grammar body
+        let source = self
+            .source
+            .ok_or_else(|| self.error("grammar literals require source access"))?;
+
+        // Find the opening brace token and its position
+        let lbrace_pos = self.pos;
+        self.expect(&Token::LBrace)?;
+        let start = self.tokens[lbrace_pos].span.start;
+
+        // Find matching closing brace (handling nesting)
+        let mut depth = 1;
+        while depth > 0 && !self.is_at_end() {
+            match self.peek_token() {
+                Some(Token::LBrace) => depth += 1,
+                Some(Token::RBrace) => depth -= 1,
+                _ => {}
+            }
+            if depth > 0 {
+                self.advance();
+            }
+        }
+
+        if depth != 0 {
+            return Err(self.error("unmatched brace in grammar literal"));
+        }
+
+        // Get the end position (including the closing brace)
+        let end = self.tokens[self.pos].span.end;
+        self.advance(); // consume the closing brace
+
+        // Extract the grammar body source (from { to })
+        let grammar_source = &source[start..end];
+
+        // Parse using GrammarParser
+        let mut grammar_parser = GrammarParser::new(grammar_source);
+        let grammar = grammar_parser.parse_anonymous()?;
+
+        Ok(Expr::GrammarLiteral(grammar))
+    }
+
+    /// Parse stream literal: `stream { expr }`
+    fn parse_stream_literal(&mut self) -> Result<Expr> {
+        self.expect(&Token::Stream)?;
+        let expr = self.parse_sequence()?;
+        Ok(Expr::StreamLiteral(Box::new(expr)))
+    }
+
+    /// Parse grammar body: `{ rules }` (used by grammar literals and extensions)
+    fn parse_grammar_body(&mut self) -> Result<Grammar> {
+        // We need source access to parse grammar body
+        let source = self
+            .source
+            .ok_or_else(|| self.error("grammar extensions require source access"))?;
+
+        // Find the opening brace token and its position
+        let lbrace_pos = self.pos;
+        self.expect(&Token::LBrace)?;
+        let start = self.tokens[lbrace_pos].span.start;
+
+        // Find matching closing brace (handling nesting)
+        let mut depth = 1;
+        while depth > 0 && !self.is_at_end() {
+            match self.peek_token() {
+                Some(Token::LBrace) => depth += 1,
+                Some(Token::RBrace) => depth -= 1,
+                _ => {}
+            }
+            if depth > 0 {
+                self.advance();
+            }
+        }
+
+        if depth != 0 {
+            return Err(self.error("unmatched brace in grammar"));
+        }
+
+        // Get the end position (including the closing brace)
+        let end = self.tokens[self.pos].span.end;
+        self.advance(); // consume the closing brace
+
+        // Extract the grammar body source (from { to })
+        let grammar_source = &source[start..end];
+
+        // Parse using GrammarParser
+        let mut grammar_parser = GrammarParser::new(grammar_source);
+        grammar_parser.parse_anonymous()
     }
 
     /// Parse list literal.
@@ -981,7 +1122,7 @@ mod tests {
 
     fn parse(source: &str) -> Result<Expr> {
         let tokens = Lexer::new(source).tokenize()?;
-        Parser::new(&tokens).parse()
+        Parser::with_source(&tokens, source).parse()
     }
 
     #[test]
@@ -1034,5 +1175,36 @@ mod tests {
     fn test_pipe() {
         let expr = parse("x |> f |> g").unwrap();
         assert!(matches!(expr, Expr::Binary(_, BinOp::Pipe, _)));
+    }
+
+    #[test]
+    fn test_grammar_literal() {
+        let expr = parse("grammar { digit = [0-9] }").unwrap();
+        match expr {
+            Expr::GrammarLiteral(grammar) => {
+                assert!(grammar.rules.contains_key("digit"));
+            }
+            _ => panic!("expected GrammarLiteral, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_grammar_extension() {
+        let expr = parse("base <: { hex = [0-9a-f] }").unwrap();
+        match expr {
+            Expr::GrammarExtend { base, rules } => {
+                // base should be an identifier
+                assert!(matches!(*base, Expr::Ident(ref name) if name == "base"));
+                // rules should have the hex rule
+                assert!(rules.rules.contains_key("hex"));
+            }
+            _ => panic!("expected GrammarExtend, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_stream_literal() {
+        let expr = parse("stream { 1 + 2 }").unwrap();
+        assert!(matches!(expr, Expr::StreamLiteral(_)));
     }
 }

@@ -2,10 +2,13 @@
 
 use crate::ast::*;
 use crate::error::{Error, Result};
+use crate::grammar::Grammar;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+use std::sync::Arc;
 
 /// Bytecode instruction.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instruction {
     // Literals
     LoadNull,
@@ -98,16 +101,22 @@ pub enum Instruction {
     DefineProp(SmolStr),
     DefineFacet(SmolStr, usize, bool), // facet name, member count, terminal
 
-    // Grammar application
-    GrammarApply(SmolStr, SmolStr), // grammar name, rule name
+    // Grammar application (input and grammar on stack, rule name in instruction)
+    GrammarApply(SmolStr), // rule name
+
+    // Grammar values
+    LoadGrammar(Arc<Grammar>),
+    ExtendGrammar(Grammar), // rules to add (base is on stack)
 }
 
 /// Compiled bytecode.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledCode {
     pub instructions: Vec<Instruction>,
     /// Nested code blocks (for lambdas, methods).
     pub nested: Vec<CompiledCode>,
+    /// Original source code (for reflection/decompilation).
+    pub source: Option<SmolStr>,
 }
 
 impl CompiledCode {
@@ -115,6 +124,15 @@ impl CompiledCode {
         Self {
             instructions: Vec::new(),
             nested: Vec::new(),
+            source: None,
+        }
+    }
+
+    pub fn with_source(source: SmolStr) -> Self {
+        Self {
+            instructions: Vec::new(),
+            nested: Vec::new(),
+            source: Some(source),
         }
     }
 
@@ -550,9 +568,33 @@ impl Compiler {
                 rule,
             } => {
                 self.compile_expr(input)?;
-                self.code.emit(Instruction::GrammarApply(
-                    SmolStr::new(grammar.to_string()),
-                    rule.clone(),
+                // Special case: qualified names are treated as grammar registry lookups
+                match grammar.as_ref() {
+                    Expr::Qualified(qn) => {
+                        // Emit as string for registry lookup
+                        self.code
+                            .emit(Instruction::LoadString(SmolStr::new(qn.to_string())));
+                    }
+                    _ => {
+                        // Dynamic grammar expression
+                        self.compile_expr(grammar)?;
+                    }
+                }
+                self.code.emit(Instruction::GrammarApply(rule.clone()));
+            }
+            Expr::GrammarLiteral(grammar) => {
+                self.code
+                    .emit(Instruction::LoadGrammar(Arc::new(grammar.clone())));
+            }
+            Expr::GrammarExtend { base, rules } => {
+                // Evaluate base expression (should be a grammar)
+                self.compile_expr(base)?;
+                // Emit instruction to extend with new rules
+                self.code.emit(Instruction::ExtendGrammar(rules.clone()));
+            }
+            Expr::StreamLiteral(_) => {
+                return Err(Error::Compiler(
+                    "stream literals not yet implemented".to_string(),
                 ));
             }
         }

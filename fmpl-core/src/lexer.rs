@@ -43,6 +43,8 @@ pub enum Token {
     When,
     #[token("as")]
     As,
+    #[token("stream")]
+    Stream,
     #[token("grammar")]
     Grammar,
 

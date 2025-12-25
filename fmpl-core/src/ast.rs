@@ -1,9 +1,11 @@
 //! Abstract Syntax Tree for FMPL.
 
+use crate::grammar::Grammar;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 /// A qualified name like `foo::bar::baz`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QualifiedName {
     pub parts: Vec<SmolStr>,
 }
@@ -19,7 +21,7 @@ impl QualifiedName {
 }
 
 /// Binary operators.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum BinOp {
     Add,
     Sub,
@@ -38,14 +40,14 @@ pub enum BinOp {
 }
 
 /// Unary operators.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum UnaryOp {
     Neg,
     Not,
 }
 
 /// Visibility for object bindings.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum Visibility {
     #[default]
     Private,
@@ -54,7 +56,7 @@ pub enum Visibility {
 }
 
 /// A binding in an object definition.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Binding {
     pub name: SmolStr,
     pub params: Vec<SmolStr>,
@@ -63,7 +65,7 @@ pub struct Binding {
 }
 
 /// An object definition.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ObjectDef {
     pub name: QualifiedName,
     pub params: Vec<SmolStr>,
@@ -73,7 +75,7 @@ pub struct ObjectDef {
 }
 
 /// A facet definition within an object.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FacetDef {
     pub name: SmolStr,
     pub members: Vec<SmolStr>,
@@ -81,7 +83,7 @@ pub struct FacetDef {
 }
 
 /// Pattern for match expressions.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Pattern {
     /// Matches anything, binds to name.
     Var(SmolStr),
@@ -106,7 +108,7 @@ pub enum Pattern {
 }
 
 /// A match case (pattern => expression).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MatchCase {
     pub pattern: Pattern,
     pub guard: Option<Box<Expr>>,
@@ -114,14 +116,14 @@ pub struct MatchCase {
 }
 
 /// Let binding (possibly with destructuring).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LetBinding {
     Simple(SmolStr, Option<Box<Expr>>),
     Destructure(Pattern, Box<Expr>),
 }
 
 /// The core expression type.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
     /// Integer literal.
     Int(i64),
@@ -217,22 +219,32 @@ pub enum Expr {
     Placeholder,
 
     /// Grammar application: expr @ grammar.rule
+    /// The grammar can be a qualified name (static) or any expression (dynamic).
     GrammarApply {
         input: Box<Expr>,
-        grammar: QualifiedName,
+        grammar: Box<Expr>,
         rule: SmolStr,
     },
+
+    /// Anonymous grammar literal: grammar { rules }
+    GrammarLiteral(Grammar),
+
+    /// Grammar extension: base <: { rules }
+    GrammarExtend { base: Box<Expr>, rules: Grammar },
+
+    /// Stream literal: stream { expr }
+    StreamLiteral(Box<Expr>),
 }
 
 /// Map entry (key: val or expr => expr).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MapEntry {
     Symbol(SmolStr, Expr),
     Computed(Expr, Expr),
 }
 
 /// Function argument (may be placeholder for partial application).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Arg {
     Expr(Expr),
     Placeholder,
