@@ -4,13 +4,14 @@ use crate::compiler::CompiledCode;
 use crate::error::{Error, Result};
 use crate::grammar::Grammar;
 use crate::object::ObjectId;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
 /// Runtime value.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value {
     Null,
     Bool(bool),
@@ -26,10 +27,27 @@ pub enum Value {
     Partial(Arc<Partial>),
     /// First-class grammar.
     Grammar(Arc<Grammar>),
+    /// Stream value with lazy operations.
+    Stream(Arc<Stream>),
+}
+
+/// Stream operation pipeline.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Stream {
+    pub source: Value,
+    pub ops: Vec<StreamOp>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum StreamOp {
+    Map(Value),
+    Filter(Value),
+    FlatMap(Value),
+    Reduce(Value),
 }
 
 /// A lambda closure.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lambda {
     pub params: Vec<SmolStr>,
     pub code: Arc<CompiledCode>,
@@ -37,7 +55,7 @@ pub struct Lambda {
 }
 
 /// A partially applied function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Partial {
     pub func: Value,
     pub args: Vec<Option<Value>>,
@@ -79,6 +97,7 @@ impl Value {
             Value::Lambda(_) => "lambda",
             Value::Partial(_) => "partial",
             Value::Grammar(_) => "grammar",
+            Value::Stream(_) => "stream",
         }
     }
 
@@ -321,6 +340,7 @@ impl fmt::Display for Value {
             Value::Lambda(_) => write!(f, "<lambda>"),
             Value::Partial(_) => write!(f, "<partial>"),
             Value::Grammar(g) => write!(f, "<grammar {}>", g.name),
+            Value::Stream(_) => write!(f, "<stream>"),
         }
     }
 }

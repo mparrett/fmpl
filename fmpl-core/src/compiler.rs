@@ -92,6 +92,13 @@ pub enum Instruction {
     // Pipe operator (function application)
     Pipe,
 
+    // Streams
+    MakeStream,
+    StreamMap,
+    StreamFilter,
+    StreamFlatMap,
+    StreamReduce,
+
     // Pattern matching
     MatchPattern(usize), // jump target if no match
 
@@ -288,6 +295,10 @@ impl Compiler {
                         self.code.patch_jump(jump, end);
                     }
                     BinOp::Pipe => {
+                        if self.try_compile_stream_pipe(left, right)? {
+                            return Ok(());
+                        }
+
                         // x |> f compiles to f(x)
                         self.compile_expr(left)?;
                         self.compile_expr(right)?;
@@ -592,13 +603,47 @@ impl Compiler {
                 // Emit instruction to extend with new rules
                 self.code.emit(Instruction::ExtendGrammar(rules.clone()));
             }
-            Expr::StreamLiteral(_) => {
-                return Err(Error::Compiler(
-                    "stream literals not yet implemented".to_string(),
-                ));
+            Expr::StreamLiteral(expr) => {
+                self.compile_expr(expr)?;
+                self.code.emit(Instruction::MakeStream);
             }
         }
         Ok(())
+    }
+
+    fn try_compile_stream_pipe(&mut self, left: &Expr, right: &Expr) -> Result<bool> {
+        let Expr::Call(func, args) = right else {
+            return Ok(false);
+        };
+        let Expr::Ident(name) = func.as_ref() else {
+            return Ok(false);
+        };
+
+        let instr = match name.as_str() {
+            "map" => Instruction::StreamMap,
+            "filter" => Instruction::StreamFilter,
+            "flatMap" => Instruction::StreamFlatMap,
+            "reduce" => Instruction::StreamReduce,
+            _ => return Ok(false),
+        };
+
+        if args.len() != 1 {
+            return Err(Error::Compiler(format!(
+                "stream operator {} expects 1 argument",
+                name
+            )));
+        }
+
+        self.compile_expr(left)?;
+        if let Arg::Expr(expr) = &args[0] {
+            self.compile_expr(expr)?;
+        } else {
+            return Err(Error::Compiler(
+                "stream operator arguments must be expressions".to_string(),
+            ));
+        }
+        self.code.emit(instr);
+        Ok(true)
     }
 
     fn compile_object_def(&mut self, def: &ObjectDef) -> Result<()> {

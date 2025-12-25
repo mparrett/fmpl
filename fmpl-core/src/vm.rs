@@ -2,9 +2,9 @@
 
 use crate::compiler::{CompiledCode, Instruction};
 use crate::error::{Error, Result};
-use crate::grammar::{GrammarRegistry, runtime};
+use crate::grammar::{Grammar, GrammarRegistry, runtime};
 use crate::object::{Facet, Method, ObjectDb, ObjectId};
-use crate::value::{Lambda, Value};
+use crate::value::{Lambda, Stream, StreamOp, Value};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -444,6 +444,26 @@ impl Vm {
                     self.stack.push(arg);
                     self.call_value(func, 1)?;
                 }
+                Instruction::MakeStream => {
+                    let source = self.pop()?;
+                    let stream = Stream {
+                        source,
+                        ops: Vec::new(),
+                    };
+                    self.stack.push(Value::Stream(Arc::new(stream)));
+                }
+                Instruction::StreamMap => {
+                    self.push_stream_op(StreamOp::Map)?;
+                }
+                Instruction::StreamFilter => {
+                    self.push_stream_op(StreamOp::Filter)?;
+                }
+                Instruction::StreamFlatMap => {
+                    self.push_stream_op(StreamOp::FlatMap)?;
+                }
+                Instruction::StreamReduce => {
+                    self.push_stream_op(StreamOp::Reduce)?;
+                }
                 Instruction::MatchPattern(_) => {
                     // Pattern matching handled differently
                     // This is a placeholder for more complex patterns
@@ -492,8 +512,10 @@ impl Vm {
                         self.objects.define_facet(id, name, facet)?;
                     }
                 }
-                Instruction::GrammarApply(grammar_name, rule_name) => {
+                Instruction::GrammarApply(rule_name) => {
+                    let grammar_val = self.pop()?;
                     let input = self.pop()?;
+
                     let input_str = match &input {
                         Value::String(s) => s.as_str(),
                         _ => {
@@ -504,24 +526,94 @@ impl Vm {
                         }
                     };
 
-                    match runtime::parse_full(input_str, &self.grammars, &grammar_name, &rule_name)
-                    {
+                    // Grammar can be either a Value::Grammar or a qualified name string
+                    let result = match grammar_val {
+                        Value::Grammar(grammar) => {
+                            // Dynamic grammar: use the grammar value directly
+                            runtime::parse_full_with_grammar(
+                                input_str,
+                                &grammar,
+                                &self.grammars,
+                                &rule_name,
+                            )
+                        }
+                        Value::String(grammar_name) => {
+                            // Static grammar: look up by name in registry
+                            runtime::parse_full(
+                                input_str,
+                                &self.grammars,
+                                &grammar_name,
+                                &rule_name,
+                            )
+                        }
+                        _ => {
+                            return Err(Error::Type {
+                                expected: "grammar or string".to_string(),
+                                got: grammar_val.type_name().to_string(),
+                            });
+                        }
+                    };
+
+                    match result {
                         Ok(Some(value)) => self.stack.push(value),
                         Ok(None) => {
                             return Err(Error::ParseFailed {
                                 position: 0,
-                                message: format!(
-                                    "failed to parse with grammar {} rule {}",
-                                    grammar_name, rule_name
-                                ),
+                                message: format!("failed to parse with rule {}", rule_name),
                             });
                         }
                         Err(e) => return Err(e),
                     }
                 }
+                Instruction::LoadGrammar(grammar) => {
+                    self.stack.push(Value::Grammar(grammar));
+                }
+                Instruction::ExtendGrammar(new_rules) => {
+                    let base = self.pop()?;
+                    match base {
+                        Value::Grammar(base_grammar) => {
+                            // Create a new grammar with base as parent
+                            let mut extended = Grammar::with_parent_grammar(
+                                SmolStr::new("<extended>"),
+                                base_grammar,
+                            );
+                            // Add the new rules
+                            for (name, rule) in &new_rules.rules {
+                                extended.add_rule(name.clone(), rule.clone());
+                            }
+                            self.stack.push(Value::Grammar(Arc::new(extended)));
+                        }
+                        _ => {
+                            return Err(Error::Type {
+                                expected: "grammar".to_string(),
+                                got: base.type_name().to_string(),
+                            });
+                        }
+                    }
+                }
             }
         }
 
+        Ok(())
+    }
+
+    fn push_stream_op(&mut self, op: fn(Value) -> StreamOp) -> Result<()> {
+        let func = self.pop()?;
+        let stream = self.pop()?;
+        let Value::Stream(stream) = stream else {
+            return Err(Error::Type {
+                expected: "stream".to_string(),
+                got: stream.type_name().to_string(),
+            });
+        };
+
+        let mut ops = stream.ops.clone();
+        ops.push(op(func));
+        let next = Stream {
+            source: stream.source.clone(),
+            ops,
+        };
+        self.stack.push(Value::Stream(Arc::new(next)));
         Ok(())
     }
 
@@ -817,5 +909,78 @@ mod tests {
         // Trying to parse a letter with digit rule should fail
         let result = eval(&mut vm, r#""a" @ base::parser.digit"#);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_grammar_literal() {
+        let mut vm = Vm::new();
+        // Create a grammar literal and verify it returns a grammar value
+        let result = eval(&mut vm, r#"grammar { digit = [0-9] }"#).unwrap();
+        match result {
+            Value::Grammar(g) => {
+                assert!(g.rules.contains_key("digit"));
+            }
+            _ => panic!("expected grammar value, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_grammar_extension() {
+        let mut vm = Vm::new();
+        // Create a base grammar and extend it
+        let result = eval(
+            &mut vm,
+            r#"
+            let (base = grammar { digit = [0-9] })
+            base <: { hex = [0-9a-f] }
+        "#,
+        )
+        .unwrap();
+        match result {
+            Value::Grammar(g) => {
+                // Extended grammar should have the new rule
+                assert!(g.rules.contains_key("hex"));
+                // Extended grammar should have parent reference
+                assert!(g.parent_grammar.is_some());
+                // Parent should have digit
+                assert!(
+                    g.parent_grammar
+                        .as_ref()
+                        .unwrap()
+                        .rules
+                        .contains_key("digit")
+                );
+            }
+            _ => panic!("expected grammar value, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_dynamic_grammar_apply() {
+        let mut vm = Vm::new();
+        // Use grammar literal directly with @ operator
+        let result = eval(
+            &mut vm,
+            r#"
+            let (g = grammar { digit = [0-9] })
+            "5" @ g.digit
+        "#,
+        )
+        .unwrap();
+        assert!(matches!(result, Value::String(s) if s == "5"));
+    }
+
+    #[test]
+    fn test_stream_map_filter_flatmap() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            r#"
+            let (s = stream { [1, 2, 3] })
+            s |> map(\x x + 1) |> filter(\x x > 2)
+        "#,
+        )
+        .unwrap();
+        assert!(matches!(result, Value::Stream(_)));
     }
 }
