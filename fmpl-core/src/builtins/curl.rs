@@ -1,7 +1,7 @@
 //! curl built-in for HTTP and other URL-based protocols.
 
 use crate::error::Result;
-use crate::stream::{StreamEvent, StreamHandle, next_id};
+use crate::stream::{StreamEvent, StreamHandle, StreamSource, next_id};
 use crate::value::Value;
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -18,8 +18,9 @@ impl CurlBuiltin {
         let url = url.to_string();
         let (tx, rx) = mpsc::channel(32);
 
+        let url_for_task = url.clone();
         handle.spawn(async move {
-            match Self::do_get(&url).await {
+            match Self::do_get(&url_for_task).await {
                 Ok(body) => {
                     let _ = tx
                         .send(StreamEvent::Ok(Value::String(SmolStr::new(body))))
@@ -37,7 +38,11 @@ impl CurlBuiltin {
             }
         });
 
-        let stream = StreamHandle::new(rx, next_id());
+        let source_meta = StreamSource::HttpGet {
+            url: SmolStr::new(url),
+            headers: HashMap::new(),
+        };
+        let stream = StreamHandle::with_source(rx, next_id(), source_meta);
         let source = Value::AsyncStream(Arc::new(std::sync::Mutex::new(stream)));
 
         // Return %{source: stream, sink: null}
@@ -57,8 +62,10 @@ impl CurlBuiltin {
         let body = body.to_string();
         let (tx, rx) = mpsc::channel(32);
 
+        let url_clone = url.clone();
+        let body_clone = body.clone();
         handle.spawn(async move {
-            match Self::do_post(&url, &body).await {
+            match Self::do_post(&url_clone, &body_clone).await {
                 Ok(response) => {
                     let _ = tx
                         .send(StreamEvent::Ok(Value::String(SmolStr::new(response))))
@@ -76,7 +83,12 @@ impl CurlBuiltin {
             }
         });
 
-        let stream = StreamHandle::new(rx, next_id());
+        let source_meta = StreamSource::HttpPost {
+            url: SmolStr::new(url),
+            body: SmolStr::new(body),
+            headers: HashMap::new(),
+        };
+        let stream = StreamHandle::with_source(rx, next_id(), source_meta);
         let source = Value::AsyncStream(Arc::new(std::sync::Mutex::new(stream)));
 
         let result: HashMap<SmolStr, Value> = [

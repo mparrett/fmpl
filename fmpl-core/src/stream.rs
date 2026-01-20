@@ -1,6 +1,12 @@
 //! Async stream types for FMPL.
+//!
+//! Streams support serialization via [`StreamSource`] metadata, enabling
+//! durable suspension and resumption of async operations across process restarts.
 
 use crate::value::Value;
+use serde::{Deserialize, Serialize};
+use smol_str::SmolStr;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 /// Event emitted by an async stream.
@@ -14,22 +20,100 @@ pub enum StreamEvent {
     Err(Value),
 }
 
+/// Metadata describing how to recreate a stream for durable suspension.
+///
+/// When a stream is serialized (e.g., for ParseState persistence), this
+/// captures enough information to reconnect or recreate the stream on resume.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum StreamSource {
+    /// HTTP GET request - can be retried/resumed.
+    HttpGet {
+        url: SmolStr,
+        headers: HashMap<SmolStr, SmolStr>,
+    },
+    /// HTTP POST request - may not be safely retryable.
+    HttpPost {
+        url: SmolStr,
+        body: SmolStr,
+        headers: HashMap<SmolStr, SmolStr>,
+    },
+    /// WebSocket connection.
+    WebSocket { url: SmolStr },
+    /// File stream - can be resumed from position.
+    File { path: SmolStr, position: u64 },
+    /// LLM completion stream - needs conversation context to resume.
+    LlmCompletion {
+        model: SmolStr,
+        /// Serialized conversation context for resumption.
+        context: SmolStr,
+    },
+    /// In-memory mock stream (for testing) - cannot be resumed.
+    Mock,
+    /// Stream created programmatically - cannot be resumed.
+    Ephemeral,
+    /// Disconnected placeholder after failed resume attempt.
+    Disconnected {
+        original: Box<StreamSource>,
+        reason: SmolStr,
+    },
+}
+
+impl StreamSource {
+    /// Check if this stream source can potentially be resumed.
+    pub fn is_resumable(&self) -> bool {
+        match self {
+            StreamSource::HttpGet { .. } => true,
+            StreamSource::WebSocket { .. } => true,
+            StreamSource::File { .. } => true,
+            StreamSource::LlmCompletion { .. } => true,
+            StreamSource::HttpPost { .. } => false, // POST may not be idempotent
+            StreamSource::Mock => false,
+            StreamSource::Ephemeral => false,
+            StreamSource::Disconnected { .. } => false,
+        }
+    }
+}
+
 /// Handle to an async stream (source).
 #[derive(Debug)]
 pub struct StreamHandle {
     pub(crate) receiver: mpsc::Receiver<StreamEvent>,
     pub(crate) id: u64,
+    /// Source metadata for reconnection on resume.
+    pub(crate) source: StreamSource,
 }
 
 impl StreamHandle {
-    /// Create a new stream handle.
+    /// Create a new stream handle with source metadata.
     pub fn new(receiver: mpsc::Receiver<StreamEvent>, id: u64) -> Self {
-        Self { receiver, id }
+        Self {
+            receiver,
+            id,
+            source: StreamSource::Ephemeral,
+        }
+    }
+
+    /// Create a stream handle with explicit source metadata.
+    pub fn with_source(
+        receiver: mpsc::Receiver<StreamEvent>,
+        id: u64,
+        source: StreamSource,
+    ) -> Self {
+        Self {
+            receiver,
+            id,
+            source,
+        }
     }
 
     /// Get the stream ID.
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Get the source metadata for serialization.
+    pub fn source(&self) -> &StreamSource {
+        &self.source
     }
 
     /// Receive the next event (blocking).
@@ -38,22 +122,72 @@ impl StreamHandle {
     }
 }
 
+/// Metadata describing how to recreate a sink for durable suspension.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SinkSource {
+    /// HTTP response body sink.
+    HttpResponse { request_id: SmolStr },
+    /// WebSocket connection sink.
+    WebSocket { url: SmolStr },
+    /// File output sink.
+    File { path: SmolStr },
+    /// In-memory sink (for testing) - cannot be resumed.
+    Mock,
+    /// Sink created programmatically - cannot be resumed.
+    Ephemeral,
+    /// Disconnected placeholder after failed resume attempt.
+    Disconnected {
+        original: Box<SinkSource>,
+        reason: SmolStr,
+    },
+}
+
+impl SinkSource {
+    /// Check if this sink source can potentially be resumed.
+    pub fn is_resumable(&self) -> bool {
+        match self {
+            SinkSource::WebSocket { .. } => true,
+            SinkSource::File { .. } => true,
+            SinkSource::HttpResponse { .. } => false, // Response already sent
+            SinkSource::Mock => false,
+            SinkSource::Ephemeral => false,
+            SinkSource::Disconnected { .. } => false,
+        }
+    }
+}
+
 /// Handle to a sink (destination for stream values).
 #[derive(Debug, Clone)]
 pub struct SinkHandle {
     pub(crate) sender: mpsc::Sender<Value>,
     pub(crate) id: u64,
+    /// Source metadata for reconnection on resume.
+    pub(crate) source: SinkSource,
 }
 
 impl SinkHandle {
     /// Create a new sink handle.
     pub fn new(sender: mpsc::Sender<Value>, id: u64) -> Self {
-        Self { sender, id }
+        Self {
+            sender,
+            id,
+            source: SinkSource::Ephemeral,
+        }
+    }
+
+    /// Create a sink handle with explicit source metadata.
+    pub fn with_source(sender: mpsc::Sender<Value>, id: u64, source: SinkSource) -> Self {
+        Self { sender, id, source }
     }
 
     /// Get the sink ID.
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Get the source metadata for serialization.
+    pub fn source(&self) -> &SinkSource {
+        &self.source
     }
 
     /// Send a value to the sink.
@@ -79,5 +213,5 @@ pub fn mock_stream(events: Vec<StreamEvent>) -> StreamHandle {
     for event in events {
         let _ = tx.try_send(event);
     }
-    StreamHandle::new(rx, next_id())
+    StreamHandle::with_source(rx, next_id(), StreamSource::Mock)
 }
