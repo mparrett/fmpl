@@ -32,25 +32,23 @@ pub enum ParseNext {
     End,
 }
 
+/// Serialization support for ParseState (requires fjall-persistence feature).
+#[cfg(feature = "fjall-persistence")]
+impl ParseState {
+    /// Serialize to bytes for Fjall storage.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec(self)
+    }
+
+    /// Deserialize from bytes.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        serde_json::from_slice(bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_state_serialization() {
-        let state = ParseState {
-            position_index: 5,
-            rule_stack: vec![("digit".into(), 3), ("integer".into(), 0)],
-            bindings: [("x".into(), Value::Int(42))].into_iter().collect(),
-        };
-
-        let serialized = serde_json::to_string(&state).unwrap();
-        let deserialized: ParseState = serde_json::from_str(&serialized).unwrap();
-
-        assert_eq!(deserialized.position_index, 5);
-        assert_eq!(deserialized.rule_stack.len(), 2);
-        assert_eq!(deserialized.bindings.get("x"), Some(&Value::Int(42)));
-    }
 
     #[test]
     fn test_parse_next_variants() {
@@ -62,5 +60,76 @@ mod tests {
 
         let end: ParseNext = ParseNext::End;
         assert!(matches!(end, ParseNext::End));
+    }
+
+    /// Tests that require serde_json (available in dev-dependencies or with fjall-persistence feature)
+    #[cfg(any(test, feature = "fjall-persistence"))]
+    mod serialization_tests {
+        use super::*;
+
+        #[test]
+        fn test_parse_state_serialization() {
+            let state = ParseState {
+                position_index: 5,
+                rule_stack: vec![("digit".into(), 3), ("integer".into(), 0)],
+                bindings: [("x".into(), Value::Int(42))].into_iter().collect(),
+            };
+
+            let serialized = serde_json::to_string(&state).unwrap();
+            let deserialized: ParseState = serde_json::from_str(&serialized).unwrap();
+
+            assert_eq!(deserialized.position_index, 5);
+            assert_eq!(deserialized.rule_stack.len(), 2);
+            assert_eq!(deserialized.bindings.get("x"), Some(&Value::Int(42)));
+        }
+    }
+
+    /// Tests that require fjall-persistence feature (for to_bytes/from_bytes)
+    #[cfg(feature = "fjall-persistence")]
+    mod persistence_tests {
+        use super::*;
+
+        #[test]
+        fn test_parse_state_binary_roundtrip() {
+            let mut bindings = HashMap::new();
+            bindings.insert(SmolStr::new("x"), Value::Int(42));
+            bindings.insert(SmolStr::new("name"), Value::String("test".into()));
+
+            let state = ParseState {
+                position_index: 100,
+                rule_stack: vec![(SmolStr::new("outer"), 0), (SmolStr::new("inner"), 50)],
+                bindings,
+            };
+
+            // Serialize to bytes
+            let bytes = state.to_bytes().unwrap();
+
+            // Deserialize
+            let restored = ParseState::from_bytes(&bytes).unwrap();
+
+            assert_eq!(restored.position_index, 100);
+            assert_eq!(restored.rule_stack.len(), 2);
+            assert_eq!(restored.rule_stack[0].0, "outer");
+            assert_eq!(restored.rule_stack[1].0, "inner");
+            assert_eq!(
+                restored.bindings.get(&SmolStr::new("x")),
+                Some(&Value::Int(42))
+            );
+            assert_eq!(
+                restored.bindings.get(&SmolStr::new("name")),
+                Some(&Value::String("test".into()))
+            );
+        }
+
+        #[test]
+        fn test_parse_state_empty_roundtrip() {
+            let state = ParseState::default();
+            let bytes = state.to_bytes().unwrap();
+            let restored = ParseState::from_bytes(&bytes).unwrap();
+
+            assert_eq!(restored.position_index, 0);
+            assert!(restored.rule_stack.is_empty());
+            assert!(restored.bindings.is_empty());
+        }
     }
 }
