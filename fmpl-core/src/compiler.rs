@@ -705,7 +705,7 @@ impl Compiler {
 
         // Compile and set properties/methods
         for binding in &def.bindings {
-            if binding.params.is_empty() {
+            if !binding.has_params {
                 // Property
                 self.compile_expr(&binding.value)?;
                 self.code

@@ -107,13 +107,16 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <style>
         :root {
-            --bg: #1e1e2e;
-            --surface: #313244;
-            --text: #cdd6f4;
-            --subtext: #a6adc8;
-            --accent: #89b4fa;
-            --error: #f38ba8;
-            --success: #a6e3a1;
+            --bg: #f6efe5;
+            --surface: #fff7ec;
+            --surface-strong: #f0e1cf;
+            --text: #1f1b17;
+            --subtext: #6d6357;
+            --accent: #2b6f6a;
+            --accent-2: #c06a3c;
+            --error: #c65a5a;
+            --success: #2f7d57;
+            --shadow: rgba(31, 27, 23, 0.14);
         }
 
         * {
@@ -121,56 +124,85 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
         }
 
         body {
-            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
-            background: var(--bg);
+            font-family: "Space Grotesk", "Avenir Next", "Helvetica Neue", sans-serif;
+            background:
+                radial-gradient(circle at 15% 15%, rgba(43, 111, 106, 0.18), transparent 45%),
+                radial-gradient(circle at 85% 10%, rgba(192, 106, 60, 0.16), transparent 55%),
+                linear-gradient(180deg, #f6efe5 0%, #efe2d2 100%);
             color: var(--text);
             margin: 0;
             padding: 0;
-            height: 100vh;
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
         }
 
         header {
-            background: var(--surface);
-            padding: 1rem;
-            border-bottom: 1px solid var(--subtext);
+            padding: 1.5rem 2rem 1rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 1.5rem;
+        }
+
+        header .brand {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
         }
 
         header h1 {
             margin: 0;
-            font-size: 1.25rem;
-            color: var(--accent);
+            font-size: 1.6rem;
+            letter-spacing: 0.02em;
+        }
+
+        header p {
+            margin: 0;
+            color: var(--subtext);
+            font-size: 0.95rem;
         }
 
         header nav {
             display: flex;
-            gap: 1rem;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: center;
         }
 
+        header a,
         header button {
-            background: transparent;
-            border: 1px solid var(--subtext);
-            color: var(--text);
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(43, 111, 106, 0.3);
+            color: var(--accent);
+            padding: 0.55rem 1rem;
+            border-radius: 999px;
             cursor: pointer;
             font-family: inherit;
-            font-size: 0.875rem;
+            font-size: 0.85rem;
+            text-decoration: none;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            box-shadow: 0 10px 18px -14px var(--shadow);
         }
 
+        header button.secondary {
+            border-color: rgba(31, 27, 23, 0.18);
+            color: var(--text);
+        }
+
+        header a:hover,
         header button:hover {
-            background: var(--surface);
-            border-color: var(--accent);
+            transform: translateY(-1px);
+            box-shadow: 0 16px 22px -16px var(--shadow);
         }
 
         main {
             flex: 1;
             overflow-y: auto;
-            padding: 1rem;
+            padding: 1.5rem 2rem;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 300px;
+            gap: 1.5rem;
         }
 
         #output {
@@ -179,9 +211,28 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
             gap: 0.5rem;
         }
 
+        .panel {
+            background: var(--surface);
+            border-radius: 16px;
+            padding: 1.5rem;
+            border: 1px solid rgba(31, 27, 23, 0.08);
+            box-shadow: 0 24px 40px -28px var(--shadow);
+        }
+
+        .panel h2 {
+            margin: 0 0 0.75rem;
+            font-size: 1.1rem;
+        }
+
         .entry {
-            padding: 0.5rem;
-            border-radius: 4px;
+            padding: 0.6rem 0.75rem;
+            border-radius: 10px;
+            background: #fffdf9;
+            border: 1px solid rgba(31, 27, 23, 0.08);
+        }
+
+        .entry + .entry {
+            margin-top: 0.35rem;
         }
 
         .entry .input {
@@ -207,39 +258,79 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
             font-style: italic;
         }
 
+        .log {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .log-entry {
+            background: #fffdf9;
+            border-radius: 10px;
+            padding: 0.6rem 0.7rem;
+            border: 1px solid rgba(31, 27, 23, 0.08);
+            font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace;
+            font-size: 0.82rem;
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .log-entry span {
+            color: var(--subtext);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .log-entry.pending {
+            border-color: rgba(43, 111, 106, 0.25);
+        }
+
+        .log-entry.error {
+            border-color: rgba(198, 90, 90, 0.5);
+            color: var(--error);
+        }
+
         footer {
-            background: var(--surface);
-            padding: 1rem;
-            border-top: 1px solid var(--subtext);
+            padding: 1.5rem 2rem 2rem;
         }
 
         #input-form {
             display: flex;
             gap: 0.5rem;
+            background: var(--surface);
+            padding: 0.75rem;
+            border-radius: 16px;
+            border: 1px solid rgba(31, 27, 23, 0.08);
+            box-shadow: 0 24px 40px -28px var(--shadow);
         }
 
         #code-input {
             flex: 1;
-            background: var(--bg);
-            border: 1px solid var(--subtext);
+            background: #fffdf9;
+            border: 1px solid rgba(31, 27, 23, 0.1);
             color: var(--text);
             padding: 0.75rem;
-            font-family: inherit;
+            font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace;
             font-size: 1rem;
-            border-radius: 4px;
+            border-radius: 12px;
         }
 
         #code-input:focus {
             outline: none;
             border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(43, 111, 106, 0.15);
         }
 
         #input-form button[type="submit"] {
             background: var(--accent);
             border: none;
-            color: var(--bg);
-            padding: 0.75rem 1.5rem;
-            border-radius: 4px;
+            color: #f6efe5;
+            padding: 0.75rem 1.6rem;
+            border-radius: 12px;
             cursor: pointer;
             font-family: inherit;
             font-weight: bold;
@@ -256,30 +347,64 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
         }
 
         .help kbd {
-            background: var(--surface);
+            background: #fffdf9;
             padding: 0.125rem 0.375rem;
-            border-radius: 3px;
-            border: 1px solid var(--subtext);
+            border-radius: 6px;
+            border: 1px solid rgba(31, 27, 23, 0.12);
+        }
+
+        .tips {
+            display: flex;
+            flex-direction: column;
+            gap: 0.9rem;
+            color: var(--subtext);
+            font-size: 0.9rem;
+        }
+
+        .tips strong {
+            color: var(--accent-2);
+        }
+
+        @media (max-width: 900px) {
+            main {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
     <header>
-        <h1>FMPL REPL v0.1.0</h1>
+        <div class="brand">
+            <h1>FMPL REPL</h1>
+            <p>Live image console · single-vat session</p>
+        </div>
         <nav>
-            <button hx-post="/reset" hx-target="#output" hx-swap="beforeend" onclick="scrollToBottom()">
+            <a href="/play">Open Storylet</a>
+            <button class="secondary" hx-post="/reset" hx-target="#output" hx-swap="beforeend" onclick="scrollToBottom()">
                 Reset VM
             </button>
-            <button onclick="document.getElementById('output').innerHTML = ''">
+            <button class="secondary" onclick="document.getElementById('output').innerHTML = ''">
                 Clear Output
             </button>
         </nav>
     </header>
 
     <main>
-        <div id="output">
-            <div class="entry system">Welcome to FMPL! Type expressions below to evaluate them.</div>
-        </div>
+        <section class="panel">
+            <h2>Output Stream</h2>
+            <div id="output">
+                <div class="entry system">Welcome to FMPL! Type expressions below to evaluate them.</div>
+            </div>
+        </section>
+        <aside class="panel">
+            <h2>Command Log</h2>
+            <div id="command-log" class="log"></div>
+            <div class="tips">
+                <div><strong>Tip:</strong> Outputs persist across this tick until reset.</div>
+                <div><strong>Try:</strong> <code>stream { [1,2,3] } |> map(\x x + 1)</code></div>
+                <div><strong>Next:</strong> Use the storylet view to test continuation flow.</div>
+            </div>
+        </aside>
     </main>
 
     <footer>
@@ -308,9 +433,73 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
             main.scrollTop = main.scrollHeight;
         }
 
-        // Handle history with up/down arrows
+        function escapeHtml(input) {
+            return input
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/\"/g, "&quot;")
+                .replace(/'/g, "&#39;");
+        }
+
         let history = [];
         let historyIndex = -1;
+        let logCounter = 0;
+        let lastLogEntry = null;
+
+        function logCommand(command) {
+            const log = document.getElementById('command-log');
+            logCounter += 1;
+            const entry = document.createElement('div');
+            entry.className = 'log-entry pending';
+            entry.innerHTML = `<span>Command #${logCounter}</span><div>${escapeHtml(command)}</div>`;
+            log.appendChild(entry);
+            lastLogEntry = entry;
+        }
+
+        document.getElementById('input-form').addEventListener('submit', (e) => {
+            const input = document.getElementById('code-input');
+            const value = input.value.trim();
+            if (!value) {
+                e.preventDefault();
+                return;
+            }
+            logCommand(value);
+        });
+
+        document.body.addEventListener('htmx:afterRequest', (evt) => {
+            if (!lastLogEntry) {
+                return;
+            }
+            if (evt.detail.successful) {
+                lastLogEntry.classList.remove('pending');
+            } else {
+                lastLogEntry.classList.remove('pending');
+                lastLogEntry.classList.add('error');
+                lastLogEntry.innerHTML += '<div>Request failed.</div>';
+            }
+        });
+
+        document.body.addEventListener('htmx:afterSwap', (evt) => {
+            if (!lastLogEntry) {
+                return;
+            }
+            const entries = document.querySelectorAll('#output .entry');
+            const last = entries[entries.length - 1];
+            if (!last) {
+                return;
+            }
+            const output = last.querySelector('.output, .error');
+            if (!output) {
+                return;
+            }
+            const text = output.textContent.trim();
+            if (text) {
+                lastLogEntry.innerHTML += `<div>${escapeHtml(text)}</div>`;
+                lastLogEntry.classList.remove('pending');
+                lastLogEntry = null;
+            }
+        });
 
         document.getElementById('code-input').addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -338,5 +527,4 @@ const INDEX_HTML: &str = r##"<!DOCTYPE html>
         });
     </script>
 </body>
-</html>
-"##;
+</html>"##;

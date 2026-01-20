@@ -19,6 +19,7 @@ struct Frame {
     locals: HashMap<SmolStr, Value>,
     this: Option<ObjectId>,
     caller: Option<ObjectId>,
+    next_nested: usize,
 }
 
 impl Frame {
@@ -30,6 +31,7 @@ impl Frame {
             locals: HashMap::new(),
             this: None,
             caller: None,
+            next_nested: 0,
         }
     }
 }
@@ -480,10 +482,10 @@ impl Vm {
                     // Pop the object we're defining on
                     let obj = self.peek()?;
                     if let Value::Object(id) = obj {
-                        let frame = self.frames.last().unwrap();
-                        // Get the nested code for this method
-                        // TODO: track which nested code corresponds to which method
-                        if let Some(code) = frame.code.nested.first() {
+                        let frame = self.frames.last_mut().unwrap();
+                        let nested_idx = frame.next_nested;
+                        frame.next_nested += 1;
+                        if let Some(code) = frame.code.nested.get(nested_idx) {
                             let method = Method {
                                 params: Vec::new(), // TODO: proper params
                                 code: Arc::new(code.clone()),

@@ -11,6 +11,7 @@ logos = { workspace = true }
 thiserror = { workspace = true }
 smol_str = { workspace = true }
 serde = { workspace = true }
+rkyv = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

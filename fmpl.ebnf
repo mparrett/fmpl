@@ -198,11 +198,16 @@ NAMESPACE_TAG, GRAMMAR_TAG
               <TAG> '(' <pattern_list> ')'
               <pattern> <AS> <TAG>
 
-<pattern_list> ::= [ <pattern> ]
-                   [ <pattern_list> ',' <pattern> ]
+-- Pattern with optional default value
+-- Used in destructuring: let ([a, b = 0] = list) ...
+<pattern_with_default> ::= <pattern>
+                           <pattern> <EQ> <exp>
 
-<pattern_maplist> ::= [ <TAG> ':' <pattern> ]
-                      [ <pattern_maplist> ',' <TAG> ':' <pattern> ]
+<pattern_list> ::= [ <pattern_with_default> ]
+                   [ <pattern_list> ',' <pattern_with_default> ]
+
+<pattern_maplist> ::= [ <TAG> ':' <pattern_with_default> ]
+                      [ <pattern_maplist> ',' <TAG> ':' <pattern_with_default> ]
 
 -- ============================================================
 -- FUNCTION CALLS AND CURRYING

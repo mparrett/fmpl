@@ -863,6 +863,21 @@ pub fn parse_full(
     }
 }
 
+/// Parse using a provided grammar value (for first-class grammars).
+pub fn parse_full_with_grammar(
+    input: &str,
+    grammar: &Arc<Grammar>,
+    registry: &GrammarRegistry,
+    rule_name: &str,
+) -> Result<Option<Value>> {
+    let mut runtime = PegRuntime::new(input, registry, grammar.clone());
+    match runtime.parse(rule_name)? {
+        ParseResult::Success(v, pos) if pos == input.len() => Ok(Some(v)),
+        ParseResult::Success(_, _) => Ok(None), // Didn't consume all input
+        ParseResult::Failure => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::CharRange;

@@ -8,6 +8,16 @@ FMPL ("of Accardi") is a prototype-based OOP language from UC Berkeley's Experim
 
 ---
 
+## North Star
+
+FMPL is a prototype-based object-oriented language with lambda-calculus constructs, designed as a live, image-based multi-user programming environment. The image is the source of truth: a persistent object graph plus compiled code and source blobs. The system is event-driven, responding primarily to IO streams (local and network), and it supports pretty-printing of internally represented code back into readable FMPL.
+
+The system has a **system root** object that anchors global state and services, alongside **player roots** for users with authoring rights. Other objects may also act as roots (for example, world/region objects), enabling modular ownership and capability boundaries. Reflection is first-class: objects can be inspected, methods and properties enumerated, and source recovered from compiled code when available. This aligns with the live image model and inspiration from LambdaMOO and Self, while retaining FMPL's distinct grammar and storylet capabilities.
+
+The long-term design borrows from VPRI FoNC's emphasis on live, inspectable systems and small-core semantics. The target is a stable, understandable core that supports interactive editing, persistence, and narrative-centric workflows while remaining general-purpose.
+
+---
+
 ## Technical Stack
 
 | Layer | Technology | Purpose |
@@ -113,6 +123,16 @@ grammar mud::parser <: base::parser {
 -- Apply grammar
 "take sword" @ mud::parser.command
 ```
+
+Grammar inheritance patterns should match the approach in "Extensible Parsing for Domain-Specific Languages" (A. Warth et al., 2007), with OMeta-style grammars and inheritance semantics.
+
+**Inheritance and application semantics (OMeta-style delegation):**
+- `grammar child <: parent { ... }` creates a grammar that delegates to `parent` for missing rules.
+- Rules in `child` override same-named rules in `parent`.
+- `super` rule calls invoke the parent rule explicitly (implemented as `<rule>`).
+- `grammar { ... }` creates an anonymous grammar literal.
+- `base <: { ... }` creates a new grammar that delegates to `base` (no mutation of `base`).
+- `input @ grammar.rule` applies `rule` within `grammar`; lookup checks current grammar first, then delegates.
 
 ### Scope Markers (Positional)
 
@@ -332,6 +352,16 @@ No explicit save/load. Objects just exist:
 
 ---
 
+## Event Streams and Dataflow
+
+FMPL treats event streams as a primitive type with ReactiveX-style operators. A `stream { ... }` literal creates a lazy stream thunk; evaluation outside a stream context counts as subscription. Stream operators (`map`, `filter`, `flatMap`, `reduce`) are core language primitives that accept any expression resolving to a function (including lambdas and method refs). Semantics follow standard stream behavior: `map` is 1→1, `filter` drops events, `flatMap` is 0/1/N, and `reduce` folds within a defined window (tick-scoped for the initial spike).
+
+Grammar application is `@` sugar for `parse(grammar, rule, source)`. Streams can use either `stream |> parse(g.rule)` or `stream |> flatMap(\x x @ g.rule)`; parse failures emit nothing, acting as a combined filter/transform. Purity analysis drives automatic memoization: nodes are marked impure if they write to object properties or call IO-related builtins. Pure nodes are memoized within a session/tick, then discarded.
+
+The initial spike is single-vat: each HTTP request is a tick, and stream evaluation is synchronous within that tick. Additional event sources (SSH/telnet) can be added later as stream roots.
+
+---
+
 ## References
 
 - [Indexed RPN](https://burakemir.ch/post/indexed-rpn/) - Interpreter architecture
@@ -341,3 +371,4 @@ No explicit save/load. Objects just exist:
 - [Fallen London](https://fallenlondon.wiki/) - Game mechanics inspiration
 - [Seaside](https://en.wikipedia.org/wiki/Seaside_(software)) - Continuation-based web
 - [OMeta](https://en.wikipedia.org/wiki/OMeta) - Grammar patterns
+- [Extensible Parsing for Domain-Specific Languages](http://www.tinlizzie.org/~awarth/papers/dls07.pdf) - OMeta-style grammar inheritance

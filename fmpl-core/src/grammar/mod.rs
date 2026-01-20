@@ -44,12 +44,13 @@ pub mod runtime;
 
 use crate::ast::Expr;
 use crate::value::Value;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 /// A grammar definition with rules and optional parent.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Grammar {
     /// Fully qualified grammar name (e.g., "mud::commands").
     pub name: SmolStr,
@@ -97,7 +98,7 @@ impl Grammar {
 }
 
 /// A grammar rule (pattern with optional semantic action).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Rule {
     /// The pattern to match.
     pub pattern: Pattern,
@@ -122,7 +123,7 @@ impl Rule {
 }
 
 /// PEG pattern for matching input.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Pattern {
     /// Match nothing, always succeed.
     Empty,
@@ -243,7 +244,7 @@ pub enum Pattern {
 }
 
 /// A character range for character classes.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CharRange {
     /// Single character.
     Char(char),

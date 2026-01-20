@@ -19,4 +19,5 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 fjall = { workspace = true }
 blake3 = { workspace = true }
+base64 = "0.22"
 tower = { workspace = true }

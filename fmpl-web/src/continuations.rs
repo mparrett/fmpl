@@ -1,7 +1,11 @@
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use fjall::{Config, PartitionCreateOptions, PartitionHandle};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+pub const MAX_STREAM_PAYLOAD_BYTES: usize = 4096;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -73,12 +77,79 @@ impl ContinuationStore {
         Ok(env)
     }
 
+    pub fn update_last_action(&self, session_id: &str, token: &str, choice: &str) -> Result<()> {
+        let mut env = self.load(session_id, token)?;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut payload: serde_json::Value =
+            serde_json::from_slice(&env.payload).unwrap_or_else(|_| serde_json::json!({}));
+        if !payload.is_object() {
+            payload = serde_json::json!({});
+        }
+
+        if payload.get("stream").is_none() {
+            payload["stream"] = serde_json::json!({ "source": [], "ops": [] });
+        }
+
+        if !payload["stream"]["source"].is_array() {
+            payload["stream"]["source"] = serde_json::json!([]);
+        }
+        let event = serde_json::json!({
+            "choice": choice,
+            "timestamp": timestamp
+        });
+        let size_with_event = {
+            let mut probe = payload.clone();
+            probe["stream"]["source"]
+                .as_array_mut()
+                .unwrap()
+                .push(event.clone());
+            serde_json::to_vec(&probe)?.len()
+        };
+        if size_with_event > MAX_STREAM_PAYLOAD_BYTES {
+            let previous_stream = payload["stream"].clone();
+            let prev_token = self.generate_token(session_id);
+            let prev_env = SnapshotEnvelope {
+                schema_version: env.schema_version,
+                bytecode_version: env.bytecode_version,
+                engine_version: env.engine_version,
+                created_at: timestamp,
+                payload_format: "json-v1".to_string(),
+                payload: serde_json::to_vec(&serde_json::json!({
+                    "stream": previous_stream
+                }))?,
+            };
+            let prev_key = format!("{}:{}", session_id, prev_token);
+            let prev_bytes = serde_json::to_vec(&prev_env)?;
+            self.partition.insert(prev_key, prev_bytes)?;
+            payload["stream"] = serde_json::json!({
+                "source": [event],
+                "ops": [],
+                "prev": { "token": prev_token }
+            });
+        } else {
+            payload["stream"]["source"]
+                .as_array_mut()
+                .unwrap()
+                .push(event);
+        }
+
+        env.payload = serde_json::to_vec(&payload)?;
+        let key = format!("{}:{}", session_id, token);
+        let bytes = serde_json::to_vec(&env)?;
+        self.partition.insert(key, bytes)?;
+        Ok(())
+    }
+
     fn generate_token(&self, session_id: &str) -> String {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
         let seed = format!("{}-{}", session_id, nanos);
-        blake3::hash(seed.as_bytes()).to_hex().to_string()
+        let digest = blake3::hash(seed.as_bytes());
+        URL_SAFE_NO_PAD.encode(&digest.as_bytes()[..16])
     }
 }

@@ -60,6 +60,7 @@ pub enum Visibility {
 pub struct Binding {
     pub name: SmolStr,
     pub params: Vec<SmolStr>,
+    pub has_params: bool,
     pub value: Expr,
     pub visibility: Visibility,
 }

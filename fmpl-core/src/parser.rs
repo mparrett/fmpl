@@ -69,7 +69,8 @@ impl<'a> Parser<'a> {
         };
 
         // Parse optional parameters
-        let params = if self.check(&Token::LParen) {
+        let has_params = self.check(&Token::LParen);
+        let params = if has_params {
             self.parse_param_names()?
         } else {
             Vec::new()
@@ -151,7 +152,8 @@ impl<'a> Parser<'a> {
         let name = self.expect_ident()?;
 
         // Check for method params
-        let params = if self.check(&Token::LParen) {
+        let has_params = self.check(&Token::LParen);
+        let params = if has_params {
             self.parse_param_names()?
         } else {
             Vec::new()
@@ -163,6 +165,7 @@ impl<'a> Parser<'a> {
         Ok(Binding {
             name,
             params,
+            has_params,
             value,
             visibility,
         })
