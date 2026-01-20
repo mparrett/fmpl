@@ -12,6 +12,10 @@ thiserror = { workspace = true }
 smol_str = { workspace = true }
 serde = { workspace = true }
 rkyv = { workspace = true }
+tokio = { version = "1", features = ["sync", "rt"] }
+curl = "0.4"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
+tokio = { version = "1", features = ["full", "test-util"] }
+wiremock = "0.6"

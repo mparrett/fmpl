@@ -51,6 +51,10 @@ pub struct Vm {
     scopes: Vec<Scope>,
     /// The current user (for `user` builtin).
     pub current_user: Option<ObjectId>,
+    /// Exception handler stack: (catch_ip, stack_depth, scope_depth)
+    exception_handlers: Vec<(usize, usize, usize)>,
+    /// Tokio runtime handle for async operations
+    runtime: Option<tokio::runtime::Handle>,
 }
 
 impl Vm {
@@ -62,7 +66,26 @@ impl Vm {
             frames: Vec::new(),
             scopes: vec![Scope::default()],
             current_user: None,
+            exception_handlers: Vec::new(),
+            runtime: None,
         }
+    }
+
+    /// Create a VM with a tokio runtime handle.
+    pub fn with_runtime(handle: tokio::runtime::Handle) -> Self {
+        let mut vm = Self::new();
+        vm.runtime = Some(handle);
+        vm
+    }
+
+    /// Set the runtime handle.
+    pub fn set_runtime(&mut self, handle: tokio::runtime::Handle) {
+        self.runtime = Some(handle);
+    }
+
+    /// Get the runtime handle, if set.
+    pub fn runtime(&self) -> Option<&tokio::runtime::Handle> {
+        self.runtime.as_ref()
     }
 
     /// Run compiled code and return the result.
@@ -230,7 +253,7 @@ impl Vm {
                 Instruction::Div => {
                     let b = self.pop()?;
                     let a = self.pop()?;
-                    self.stack.push(a.div(&b)?);
+                    self.try_op(|_| a.div(&b))?;
                 }
                 Instruction::Mod => {
                     let b = self.pop()?;
@@ -403,10 +426,27 @@ impl Vm {
                     // (no distinction from regular call)
                 }
                 Instruction::AsyncCall => {
-                    // TODO: async calls in Phase 2
-                    return Err(Error::Runtime(
-                        "async calls not yet implemented".to_string(),
-                    ));
+                    let value = self.pop()?;
+
+                    // For now, <- on a non-callable just wraps in a completed stream
+                    // Real async calls will come with curl integration
+                    if self.runtime.is_none() {
+                        return Err(Error::Runtime(
+                            "async call requires runtime handle - use Vm::with_runtime()"
+                                .to_string(),
+                        ));
+                    }
+
+                    // Create a stream that immediately completes with the value
+                    use crate::stream::{StreamEvent, StreamHandle, next_id};
+                    use tokio::sync::mpsc;
+
+                    let (tx, rx) = mpsc::channel(1);
+                    let _ = tx.try_send(StreamEvent::Ok(value));
+
+                    let handle = StreamHandle::new(rx, next_id());
+                    self.stack
+                        .push(Value::AsyncStream(Arc::new(std::sync::Mutex::new(handle))));
                 }
                 Instruction::MakeList(count) => {
                     let mut items = Vec::new();
@@ -524,6 +564,40 @@ impl Vm {
                     // Pattern matching handled differently
                     // This is a placeholder for more complex patterns
                 }
+                Instruction::ExtractMapKey(key) => {
+                    let map = self.pop()?;
+                    match map {
+                        Value::Map(m) => {
+                            let value = m.get(&key).cloned().ok_or_else(|| {
+                                Error::Runtime(format!("key '{}' not found in map", key))
+                            })?;
+                            self.stack.push(value);
+                        }
+                        _ => {
+                            return Err(Error::Type {
+                                expected: "map".to_string(),
+                                got: map.type_name().to_string(),
+                            });
+                        }
+                    }
+                }
+                Instruction::ExtractListIndex(idx) => {
+                    let list = self.pop()?;
+                    match list {
+                        Value::List(l) => {
+                            let value = l.get(idx).cloned().ok_or_else(|| {
+                                Error::Runtime(format!("index {} out of bounds", idx))
+                            })?;
+                            self.stack.push(value);
+                        }
+                        _ => {
+                            return Err(Error::Type {
+                                expected: "list".to_string(),
+                                got: list.type_name().to_string(),
+                            });
+                        }
+                    }
+                }
                 Instruction::DefineObject(name) => {
                     let id = self.objects.create(None);
                     self.objects.register_name(name.clone(), id);
@@ -627,6 +701,21 @@ impl Vm {
                         }
                     }
                 }
+
+                // Exception handling
+                Instruction::PushHandler(catch_ip) => {
+                    let stack_depth = self.stack.len();
+                    let scope_depth = self.frames.last().map(|f| f.locals.len()).unwrap_or(0);
+                    self.exception_handlers
+                        .push((catch_ip, stack_depth, scope_depth));
+                }
+                Instruction::PopHandler => {
+                    self.exception_handlers.pop();
+                }
+                Instruction::Throw => {
+                    let error = self.pop()?;
+                    self.throw_exception(error)?;
+                }
             }
         }
 
@@ -681,7 +770,50 @@ impl Vm {
         self.stack.last().cloned().ok_or(Error::StackUnderflow)
     }
 
+    fn throw_exception(&mut self, error: Value) -> Result<()> {
+        if let Some((catch_ip, stack_depth, _scope_depth)) = self.exception_handlers.pop() {
+            // Unwind stack to handler depth
+            while self.stack.len() > stack_depth {
+                self.stack.pop();
+            }
+            // Push error value for binding
+            self.stack.push(error);
+            // Jump to catch block
+            if let Some(frame) = self.frames.last_mut() {
+                frame.ip = catch_ip;
+            }
+            Ok(())
+        } else {
+            // No handler - propagate as Rust error
+            Err(Error::Runtime(format!("uncaught exception: {}", error)))
+        }
+    }
+
+    /// Execute an operation that may fail, routing errors to exception handlers if available.
+    fn try_op<F>(&mut self, op: F) -> Result<()>
+    where
+        F: FnOnce(&mut Self) -> Result<Value>,
+    {
+        match op(self) {
+            Ok(val) => {
+                self.stack.push(val);
+                Ok(())
+            }
+            Err(e) if !self.exception_handlers.is_empty() => {
+                let error = Value::String(SmolStr::new(e.to_string()));
+                self.throw_exception(error)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     fn lookup_var(&self, name: &str) -> Result<Value> {
+        // Check builtins first
+        if name == "curl" {
+            // Return a symbol that will be recognized during method calls
+            return Ok(Value::Symbol(SmolStr::new("__builtin_curl")));
+        }
+
         // Check scopes (innermost first)
         for scope in self.scopes.iter().rev() {
             if let Some(val) = scope.bindings.get(name) {
@@ -767,8 +899,49 @@ impl Vm {
         Ok(())
     }
 
+    /// Call a built-in method.
+    fn call_builtin(&mut self, object: &str, method: &str, args: Vec<Value>) -> Result<Value> {
+        match (object, method) {
+            ("__builtin_curl", "get") => {
+                let url = match args.first() {
+                    Some(Value::String(s)) => s.as_str(),
+                    _ => return Err(Error::Runtime("curl.get requires string URL".to_string())),
+                };
+                let handle = self
+                    .runtime
+                    .as_ref()
+                    .ok_or_else(|| Error::Runtime("curl requires runtime handle".to_string()))?;
+                crate::builtins::CurlBuiltin::get(url, handle)
+            }
+            ("__builtin_curl", "post") => {
+                let url = match args.first() {
+                    Some(Value::String(s)) => s.as_str(),
+                    _ => return Err(Error::Runtime("curl.post requires string URL".to_string())),
+                };
+                let body = match args.get(1) {
+                    Some(Value::String(s)) => s.as_str(),
+                    _ => return Err(Error::Runtime("curl.post requires string body".to_string())),
+                };
+                let handle = self
+                    .runtime
+                    .as_ref()
+                    .ok_or_else(|| Error::Runtime("curl requires runtime handle".to_string()))?;
+                crate::builtins::CurlBuiltin::post(url, body, handle)
+            }
+            _ => Err(Error::Runtime(format!(
+                "unknown builtin: {}.{}",
+                object, method
+            ))),
+        }
+    }
+
     fn call_method(&mut self, receiver: Value, name: &str, args: Vec<Value>) -> Result<()> {
         match receiver {
+            Value::Symbol(ref s) if s.starts_with("__builtin_") => {
+                let result = self.call_builtin(s.as_str(), name, args)?;
+                self.stack.push(result);
+                return Ok(());
+            }
             Value::Object(id) => {
                 if let Some(method) = self.objects.get_method(id, name).cloned() {
                     let mut frame = Frame::new(method.code, self.stack.len());
@@ -1113,5 +1286,64 @@ mod tests {
             "got {:?}",
             result
         );
+    }
+
+    #[test]
+    fn test_try_catch_no_error() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, "try { 42 } catch e { 0 }").unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_try_catch_with_error() {
+        let mut vm = Vm::new();
+        // Division by zero should be caught
+        let result = eval(&mut vm, "try { 1 / 0 } catch e { 99 }").unwrap();
+        assert_eq!(result, Value::Int(99));
+    }
+
+    #[test]
+    fn test_async_call_without_runtime() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, "<- 42");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("runtime"));
+    }
+
+    #[test]
+    fn test_let_destructure_map() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            r#"
+            let (%{x: a, y: b} = %{x: 1, y: 2}) a + b
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_let_destructure_list() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            r#"
+            let ([first, second] = [10, 20]) first + second
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(30));
+    }
+
+    #[tokio::test]
+    async fn test_curl_builtin_exists() {
+        let mut vm = Vm::with_runtime(tokio::runtime::Handle::current());
+        // Just test that curl is accessible - actual HTTP test needs mock server
+        let result = eval(&mut vm, "curl");
+        assert!(result.is_ok());
+        // Should return the builtin symbol
+        assert!(matches!(result.unwrap(), Value::Symbol(s) if s == "__builtin_curl"));
     }
 }

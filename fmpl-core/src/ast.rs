@@ -213,6 +213,13 @@ pub enum Expr {
     /// Async call (<- expr).
     AsyncCall(Box<Expr>),
 
+    /// Try/catch expression.
+    TryCatch {
+        body: Box<Expr>,
+        error_binding: SmolStr,
+        catch_body: Box<Expr>,
+    },
+
     /// Facet access (expr.as(:facet)).
     FacetAccess(Box<Expr>, SmolStr),
 
