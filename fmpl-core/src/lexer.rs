@@ -37,6 +37,10 @@ pub enum Token {
     Return,
     #[token("spawn")]
     Spawn,
+    #[token("try")]
+    Try,
+    #[token("catch")]
+    Catch,
     #[token("match")]
     Match,
     #[token("when")]
@@ -279,5 +283,14 @@ mod tests {
         assert_eq!(tokens.len(), 2);
         assert!(matches!(tokens[0].token, Token::Ident(_)));
         assert!(matches!(tokens[1].token, Token::Ident(_)));
+    }
+
+    #[test]
+    fn test_try_catch_tokens() {
+        let tokens = Lexer::new("try { } catch e { }").tokenize().unwrap();
+        assert_eq!(tokens[0].token, Token::Try);
+        assert_eq!(tokens[1].token, Token::LBrace);
+        assert_eq!(tokens[2].token, Token::RBrace);
+        assert_eq!(tokens[3].token, Token::Catch);
     }
 }

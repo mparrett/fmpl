@@ -345,6 +345,18 @@ impl Display for Expr {
             Expr::SyncCall(expr) => write!(f, "${}", expr),
             Expr::AsyncCall(expr) => write!(f, "<- {}", expr),
 
+            Expr::TryCatch {
+                body,
+                error_binding,
+                catch_body,
+            } => {
+                write!(
+                    f,
+                    "try {{ {} }} catch {} {{ {} }}",
+                    body, error_binding, catch_body
+                )
+            }
+
             Expr::FacetAccess(expr, facet) => write!(f, "{}.as(:{})", expr, facet),
 
             Expr::Placeholder => write!(f, "_"),
@@ -544,6 +556,8 @@ impl SourceRepr for Value {
             Value::Stream(s) => s.source_repr(),
             // Objects require ObjectDb access - return a placeholder that can be filled in
             Value::Object(id) => format!("<object #{}>", id),
+            Value::AsyncStream(s) => format!("<async_stream #{}>", s.lock().unwrap().id()),
+            Value::Sink(s) => format!("<sink #{}>", s.id()),
         }
     }
 }

@@ -627,6 +627,7 @@ impl<'a> Parser<'a> {
             Token::Return => self.parse_return(),
             Token::Spawn => self.parse_spawn(),
             Token::Match => self.parse_match(),
+            Token::Try => self.parse_try_catch(),
             Token::Stream => self.parse_stream_literal(),
             Token::Grammar => self.parse_grammar_literal(),
             _ => Err(self.error(&format!("unexpected token: {:?}", token))),
@@ -906,14 +907,26 @@ impl<'a> Parser<'a> {
 
         let mut bindings = Vec::new();
         while !self.check(&Token::RParen) && !self.is_at_end() {
-            let name = self.expect_ident()?;
-            let init = if self.check(&Token::Eq) {
-                self.advance();
-                Some(Box::new(self.parse_expr()?))
+            // Check if this is a pattern or simple binding
+            let binding = if self.check(&Token::Percent) || self.check(&Token::LBracket) {
+                // Pattern destructuring: %{...} = expr or [...] = expr
+                let pattern = self.parse_pattern()?;
+                self.expect(&Token::Eq)?;
+                let init = self.parse_expr()?;
+                LetBinding::Destructure(pattern, Box::new(init))
             } else {
-                None
+                // Simple binding: name = expr or just name
+                let name = self.expect_ident()?;
+                let init = if self.check(&Token::Eq) {
+                    self.advance();
+                    Some(Box::new(self.parse_expr()?))
+                } else {
+                    None
+                };
+                LetBinding::Simple(name, init)
             };
-            bindings.push(LetBinding::Simple(name, init));
+
+            bindings.push(binding);
 
             if !self.check(&Token::RParen) {
                 if self.check(&Token::Comma) {
@@ -1011,6 +1024,61 @@ impl<'a> Parser<'a> {
             pattern,
             guard,
             body: Box::new(body),
+        })
+    }
+
+    /// Parse try/catch expression.
+    fn parse_try_catch(&mut self) -> Result<Expr> {
+        self.expect(&Token::Try)?;
+        self.expect(&Token::LBrace)?;
+
+        let mut body_exprs = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            body_exprs.push(self.parse_expr()?);
+            if self.check(&Token::Semi) {
+                self.advance();
+            }
+        }
+        self.expect(&Token::RBrace)?;
+
+        let body = if body_exprs.len() == 1 {
+            body_exprs.pop().unwrap()
+        } else {
+            Expr::Sequence(body_exprs)
+        };
+
+        self.expect(&Token::Catch)?;
+
+        let error_binding = match self.peek_token() {
+            Some(Token::Ident(name)) => {
+                let name = name.clone();
+                self.advance();
+                name
+            }
+            _ => return Err(self.error("expected identifier after 'catch'")),
+        };
+
+        self.expect(&Token::LBrace)?;
+
+        let mut catch_exprs = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            catch_exprs.push(self.parse_expr()?);
+            if self.check(&Token::Semi) {
+                self.advance();
+            }
+        }
+        self.expect(&Token::RBrace)?;
+
+        let catch_body = if catch_exprs.len() == 1 {
+            catch_exprs.pop().unwrap()
+        } else {
+            Expr::Sequence(catch_exprs)
+        };
+
+        Ok(Expr::TryCatch {
+            body: Box::new(body),
+            error_binding,
+            catch_body: Box::new(catch_body),
         })
     }
 
@@ -1262,5 +1330,48 @@ mod tests {
     fn test_stream_literal() {
         let expr = parse("stream { 1 + 2 }").unwrap();
         assert!(matches!(expr, Expr::StreamLiteral(_)));
+    }
+
+    #[test]
+    fn test_parse_try_catch() {
+        let expr = parse("try { 42 } catch e { 0 }").unwrap();
+        assert!(matches!(expr, Expr::TryCatch { .. }));
+    }
+
+    #[test]
+    fn test_parse_try_catch_with_expression() {
+        let expr = parse("try { 1 + 2 } catch err { err }").unwrap();
+        if let Expr::TryCatch { error_binding, .. } = expr {
+            assert_eq!(error_binding.as_str(), "err");
+        } else {
+            panic!("expected TryCatch");
+        }
+    }
+
+    #[test]
+    fn test_try_catch_is_expression() {
+        // try/catch can be used as a value
+        let expr = parse("let (x = try { 42 } catch e { 0 }) x").unwrap();
+        assert!(matches!(expr, Expr::Let(_, _)));
+    }
+
+    #[test]
+    fn test_parse_let_destructure_map() {
+        let expr = parse("let (%{x: a, y: b} = point) a + b").unwrap();
+        if let Expr::Let(bindings, _) = expr {
+            assert!(matches!(bindings[0], LetBinding::Destructure(_, _)));
+        } else {
+            panic!("expected Let");
+        }
+    }
+
+    #[test]
+    fn test_parse_let_destructure_list() {
+        let expr = parse("let ([first, second] = items) first").unwrap();
+        if let Expr::Let(bindings, _) = expr {
+            assert!(matches!(bindings[0], LetBinding::Destructure(_, _)));
+        } else {
+            panic!("expected Let");
+        }
     }
 }

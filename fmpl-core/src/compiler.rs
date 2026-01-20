@@ -101,7 +101,9 @@ pub enum Instruction {
     StreamParse(SmolStr),
 
     // Pattern matching
-    MatchPattern(usize), // jump target if no match
+    MatchPattern(usize),     // jump target if no match
+    ExtractMapKey(SmolStr),  // Extract key from map on stack, push value
+    ExtractListIndex(usize), // Extract element at index from list on stack
 
     // Object definition (creates object in DB)
     DefineObject(SmolStr),
@@ -115,6 +117,11 @@ pub enum Instruction {
     // Grammar values
     LoadGrammar(Arc<Grammar>),
     ExtendGrammar(Grammar), // rules to add (base is on stack)
+
+    // Exception handling
+    PushHandler(usize), // Push exception handler, jump to offset if exception
+    PopHandler,         // Pop exception handler
+    Throw,              // Throw top of stack as exception
 }
 
 /// Compiled bytecode.
@@ -472,11 +479,9 @@ impl Compiler {
                             }
                             self.code.emit(Instruction::Bind(name.clone()));
                         }
-                        LetBinding::Destructure(_pattern, _expr) => {
-                            // TODO: pattern destructuring
-                            return Err(Error::Compiler(
-                                "pattern destructuring not yet implemented".to_string(),
-                            ));
+                        LetBinding::Destructure(pattern, expr) => {
+                            self.compile_expr(expr)?;
+                            self.compile_pattern_binding(pattern)?;
                         }
                     }
                 }
@@ -612,6 +617,40 @@ impl Compiler {
                 self.compile_expr(expr)?;
                 self.code.emit(Instruction::MakeStream);
             }
+            Expr::TryCatch {
+                body,
+                error_binding,
+                catch_body,
+            } => {
+                // Emit: PushHandler(catch_offset)
+                // Emit: body code
+                // Emit: PopHandler
+                // Emit: Jump(end_offset)
+                // catch_offset: Bind error
+                // Emit: catch_body code
+                // end_offset:
+
+                let handler_idx = self.code.instructions.len();
+                self.code.emit(Instruction::PushHandler(0)); // placeholder
+
+                self.compile_expr(body)?;
+
+                self.code.emit(Instruction::PopHandler);
+                let jump_idx = self.code.instructions.len();
+                self.code.emit(Instruction::Jump(0)); // placeholder
+
+                // Patch handler offset
+                let catch_offset = self.code.instructions.len();
+                self.code.instructions[handler_idx] = Instruction::PushHandler(catch_offset);
+
+                // Bind error and compile catch body
+                self.code.emit(Instruction::Bind(error_binding.clone()));
+                self.compile_expr(catch_body)?;
+
+                // Patch jump offset
+                let end_offset = self.code.instructions.len();
+                self.code.instructions[jump_idx] = Instruction::Jump(end_offset);
+            }
         }
         Ok(())
     }
@@ -696,6 +735,47 @@ impl Compiler {
             }
             _ => {
                 self.compile_expr(grammar)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Compile a pattern binding (destructuring).
+    fn compile_pattern_binding(&mut self, pattern: &Pattern) -> Result<()> {
+        // Value to destructure is on top of stack
+        match pattern {
+            Pattern::Wildcard => {
+                // Just pop and discard
+                self.code.emit(Instruction::Pop);
+            }
+            Pattern::Var(name) => {
+                // Bind to variable
+                self.code.emit(Instruction::Bind(name.clone()));
+            }
+            Pattern::Map(entries) => {
+                // For each entry, dup the map, extract key, bind
+                for (key, value_pattern) in entries {
+                    self.code.emit(Instruction::Dup);
+                    self.code.emit(Instruction::ExtractMapKey(key.clone()));
+                    self.compile_pattern_binding(value_pattern)?;
+                }
+                // Pop the original map
+                self.code.emit(Instruction::Pop);
+            }
+            Pattern::List(patterns, None) => {
+                // Fixed-length list pattern
+                for (i, pat) in patterns.iter().enumerate() {
+                    self.code.emit(Instruction::Dup);
+                    self.code.emit(Instruction::ExtractListIndex(i));
+                    self.compile_pattern_binding(pat)?;
+                }
+                self.code.emit(Instruction::Pop);
+            }
+            _ => {
+                return Err(Error::Compiler(format!(
+                    "pattern type {:?} not supported in let binding",
+                    pattern
+                )));
             }
         }
         Ok(())

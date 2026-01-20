@@ -9,6 +9,7 @@
 //! - Grammar (OMeta-style extensible PEG grammars)
 
 pub mod ast;
+pub mod builtins;
 pub mod bytecode;
 pub mod compiler;
 pub mod error;
@@ -17,6 +18,7 @@ pub mod lexer;
 pub mod object;
 pub mod parser;
 pub mod repr;
+pub mod stream;
 pub mod value;
 pub mod vm;
 
@@ -28,6 +30,7 @@ pub use lexer::{Lexer, Token};
 pub use object::{Object, ObjectDb, ObjectId};
 pub use parser::Parser;
 pub use repr::{SourceRepr, object_source_repr};
+pub use stream::{SinkHandle, StreamEvent, StreamHandle};
 pub use value::Value;
 pub use vm::Vm;
 

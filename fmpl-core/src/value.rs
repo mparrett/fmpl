@@ -4,6 +4,7 @@ use crate::compiler::CompiledCode;
 use crate::error::{Error, Result};
 use crate::grammar::Grammar;
 use crate::object::ObjectId;
+use crate::stream::{SinkHandle, StreamHandle};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -29,6 +30,12 @@ pub enum Value {
     Grammar(Arc<Grammar>),
     /// Stream value with lazy operations.
     Stream(Arc<Stream>),
+    /// Async stream handle (source).
+    #[serde(skip)]
+    AsyncStream(Arc<std::sync::Mutex<StreamHandle>>),
+    /// Sink handle (destination).
+    #[serde(skip)]
+    Sink(Arc<SinkHandle>),
 }
 
 /// Stream operation pipeline.
@@ -99,6 +106,8 @@ impl Value {
             Value::Partial(_) => "partial",
             Value::Grammar(_) => "grammar",
             Value::Stream(_) => "stream",
+            Value::AsyncStream(_) => "async_stream",
+            Value::Sink(_) => "sink",
         }
     }
 
@@ -342,6 +351,8 @@ impl fmt::Display for Value {
             Value::Partial(_) => write!(f, "<partial>"),
             Value::Grammar(g) => write!(f, "<grammar {}>", g.name),
             Value::Stream(_) => write!(f, "<stream>"),
+            Value::AsyncStream(s) => write!(f, "<async_stream #{}>", s.lock().unwrap().id()),
+            Value::Sink(s) => write!(f, "<sink #{}>", s.id()),
         }
     }
 }
