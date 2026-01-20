@@ -39,6 +39,8 @@
 //! ast @ ast::optimizer.add
 //! ```
 
+pub mod incremental;
+pub mod input;
 pub mod parser;
 pub mod runtime;
 pub mod stream_input;
