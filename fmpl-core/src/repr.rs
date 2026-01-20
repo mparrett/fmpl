@@ -560,6 +560,8 @@ impl SourceRepr for Value {
             Value::Object(id) => format!("<object #{}>", id),
             Value::AsyncStream(s) => format!("<async_stream #{}>", s.lock().unwrap().id()),
             Value::Sink(s) => format!("<sink #{}>", s.id()),
+            Value::SuspendedStream(source) => format!("<suspended_stream {:?}>", source),
+            Value::SuspendedSink(source) => format!("<suspended_sink {:?}>", source),
         }
     }
 }

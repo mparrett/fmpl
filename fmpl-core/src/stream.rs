@@ -20,32 +20,65 @@ pub enum StreamEvent {
     Err(Value),
 }
 
+/// Reference to a persisted stream buffer in Fjall storage.
+///
+/// Allows backtracking and replay of historical stream data during
+/// incremental parsing or error recovery.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StreamBuffer {
+    /// Fjall partition name where buffer is stored.
+    pub partition: SmolStr,
+    /// Key prefix for buffer entries.
+    pub key_prefix: SmolStr,
+    /// Current read position in the buffer (for resumption).
+    pub position: usize,
+    /// Total bytes received and persisted so far.
+    pub bytes_received: usize,
+}
+
 /// Metadata describing how to recreate a stream for durable suspension.
 ///
 /// When a stream is serialized (e.g., for ParseState persistence), this
 /// captures enough information to reconnect or recreate the stream on resume.
+/// Each variant optionally includes a reference to a persisted buffer for
+/// backtracking support during incremental parsing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum StreamSource {
     /// HTTP GET request - can be retried/resumed.
     HttpGet {
         url: SmolStr,
         headers: HashMap<SmolStr, SmolStr>,
+        /// Reference to persisted stream buffer for backtracking.
+        buffer: Option<StreamBuffer>,
     },
     /// HTTP POST request - may not be safely retryable.
     HttpPost {
         url: SmolStr,
         body: SmolStr,
         headers: HashMap<SmolStr, SmolStr>,
+        /// Reference to persisted stream buffer for backtracking.
+        buffer: Option<StreamBuffer>,
     },
     /// WebSocket connection.
-    WebSocket { url: SmolStr },
+    WebSocket {
+        url: SmolStr,
+        /// Reference to persisted stream buffer for backtracking.
+        buffer: Option<StreamBuffer>,
+    },
     /// File stream - can be resumed from position.
-    File { path: SmolStr, position: u64 },
+    File {
+        path: SmolStr,
+        position: u64,
+        /// Reference to persisted stream buffer for backtracking.
+        buffer: Option<StreamBuffer>,
+    },
     /// LLM completion stream - needs conversation context to resume.
     LlmCompletion {
         model: SmolStr,
         /// Serialized conversation context for resumption.
         context: SmolStr,
+        /// Reference to persisted stream buffer for backtracking.
+        buffer: Option<StreamBuffer>,
     },
     /// In-memory mock stream (for testing) - cannot be resumed.
     Mock,
@@ -70,6 +103,55 @@ impl StreamSource {
             StreamSource::Mock => false,
             StreamSource::Ephemeral => false,
             StreamSource::Disconnected { .. } => false,
+        }
+    }
+
+    /// Get the stream buffer reference, if any.
+    pub fn buffer(&self) -> Option<&StreamBuffer> {
+        match self {
+            StreamSource::HttpGet { buffer, .. } => buffer.as_ref(),
+            StreamSource::HttpPost { buffer, .. } => buffer.as_ref(),
+            StreamSource::WebSocket { buffer, .. } => buffer.as_ref(),
+            StreamSource::File { buffer, .. } => buffer.as_ref(),
+            StreamSource::LlmCompletion { buffer, .. } => buffer.as_ref(),
+            StreamSource::Mock => None,
+            StreamSource::Ephemeral => None,
+            StreamSource::Disconnected { .. } => None,
+        }
+    }
+
+    /// Set or update the stream buffer reference.
+    pub fn with_buffer(self, buffer: StreamBuffer) -> Self {
+        match self {
+            StreamSource::HttpGet { url, headers, .. } => StreamSource::HttpGet {
+                url,
+                headers,
+                buffer: Some(buffer),
+            },
+            StreamSource::HttpPost {
+                url, body, headers, ..
+            } => StreamSource::HttpPost {
+                url,
+                body,
+                headers,
+                buffer: Some(buffer),
+            },
+            StreamSource::WebSocket { url, .. } => StreamSource::WebSocket {
+                url,
+                buffer: Some(buffer),
+            },
+            StreamSource::File { path, position, .. } => StreamSource::File {
+                path,
+                position,
+                buffer: Some(buffer),
+            },
+            StreamSource::LlmCompletion { model, context, .. } => StreamSource::LlmCompletion {
+                model,
+                context,
+                buffer: Some(buffer),
+            },
+            // These variants don't support buffers
+            other => other,
         }
     }
 }

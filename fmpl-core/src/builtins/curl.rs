@@ -41,6 +41,7 @@ impl CurlBuiltin {
         let source_meta = StreamSource::HttpGet {
             url: SmolStr::new(url),
             headers: HashMap::new(),
+            buffer: None,
         };
         let stream = StreamHandle::with_source(rx, next_id(), source_meta);
         let source = Value::AsyncStream(Arc::new(std::sync::Mutex::new(stream)));
@@ -87,6 +88,7 @@ impl CurlBuiltin {
             url: SmolStr::new(url),
             body: SmolStr::new(body),
             headers: HashMap::new(),
+            buffer: None,
         };
         let stream = StreamHandle::with_source(rx, next_id(), source_meta);
         let source = Value::AsyncStream(Arc::new(std::sync::Mutex::new(stream)));

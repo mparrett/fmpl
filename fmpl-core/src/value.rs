@@ -4,7 +4,7 @@ use crate::compiler::CompiledCode;
 use crate::error::{Error, Result};
 use crate::grammar::Grammar;
 use crate::object::ObjectId;
-use crate::stream::{SinkHandle, StreamHandle};
+use crate::stream::{SinkHandle, SinkSource, StreamHandle, StreamSource};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -30,12 +30,47 @@ pub enum Value {
     Grammar(Arc<Grammar>),
     /// Stream value with lazy operations.
     Stream(Arc<Stream>),
-    /// Async stream handle (source).
-    #[serde(skip)]
+    /// Async stream handle (source) - live connection.
+    /// Serializes to SuspendedStream with source metadata for reconnection.
+    #[serde(skip_deserializing)]
+    #[serde(serialize_with = "serialize_async_stream")]
     AsyncStream(Arc<std::sync::Mutex<StreamHandle>>),
-    /// Sink handle (destination).
-    #[serde(skip)]
+    /// Sink handle (destination) - live connection.
+    /// Serializes to SuspendedSink with source metadata for reconnection.
+    #[serde(skip_deserializing)]
+    #[serde(serialize_with = "serialize_sink")]
     Sink(Arc<SinkHandle>),
+    /// Suspended async stream awaiting reconnection.
+    /// Created when deserializing a serialized AsyncStream.
+    SuspendedStream(StreamSource),
+    /// Suspended sink awaiting reconnection.
+    /// Created when deserializing a serialized Sink.
+    SuspendedSink(SinkSource),
+}
+
+/// Serialize AsyncStream by extracting its source metadata.
+fn serialize_async_stream<S>(
+    stream: &Arc<std::sync::Mutex<StreamHandle>>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let guard = stream.lock().unwrap();
+    let source = guard.source().clone();
+    drop(guard);
+    // Serialize as SuspendedStream variant so it deserializes correctly
+    Value::SuspendedStream(source).serialize(serializer)
+}
+
+/// Serialize Sink by extracting its source metadata.
+fn serialize_sink<S>(sink: &Arc<SinkHandle>, serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let source = sink.source().clone();
+    // Serialize as SuspendedSink variant so it deserializes correctly
+    Value::SuspendedSink(source).serialize(serializer)
 }
 
 /// Stream operation pipeline.
@@ -116,6 +151,8 @@ impl Value {
             Value::Stream(_) => "stream",
             Value::AsyncStream(_) => "async_stream",
             Value::Sink(_) => "sink",
+            Value::SuspendedStream(_) => "suspended_stream",
+            Value::SuspendedSink(_) => "suspended_sink",
         }
     }
 
@@ -361,6 +398,8 @@ impl fmt::Display for Value {
             Value::Stream(_) => write!(f, "<stream>"),
             Value::AsyncStream(s) => write!(f, "<async_stream #{}>", s.lock().unwrap().id()),
             Value::Sink(s) => write!(f, "<sink #{}>", s.id()),
+            Value::SuspendedStream(source) => write!(f, "<suspended_stream {:?}>", source),
+            Value::SuspendedSink(source) => write!(f, "<suspended_sink {:?}>", source),
         }
     }
 }
