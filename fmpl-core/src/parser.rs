@@ -628,6 +628,7 @@ impl<'a> Parser<'a> {
             Token::Spawn => self.parse_spawn(),
             Token::Match => self.parse_match(),
             Token::Try => self.parse_try_catch(),
+            Token::Throw => self.parse_throw(),
             Token::Stream => self.parse_stream_literal(),
             Token::Grammar => self.parse_grammar_literal(),
             _ => Err(self.error(&format!("unexpected token: {:?}", token))),
@@ -1080,6 +1081,13 @@ impl<'a> Parser<'a> {
             error_binding,
             catch_body: Box::new(catch_body),
         })
+    }
+
+    /// Parse throw expression.
+    fn parse_throw(&mut self) -> Result<Expr> {
+        self.expect(&Token::Throw)?;
+        let expr = self.parse_expr()?;
+        Ok(Expr::Throw(Box::new(expr)))
     }
 
     /// Parse a pattern.

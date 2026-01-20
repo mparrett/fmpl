@@ -41,6 +41,8 @@ pub enum Token {
     Try,
     #[token("catch")]
     Catch,
+    #[token("throw")]
+    Throw,
     #[token("match")]
     Match,
     #[token("when")]

@@ -651,6 +651,10 @@ impl Compiler {
                 let end_offset = self.code.instructions.len();
                 self.code.instructions[jump_idx] = Instruction::Jump(end_offset);
             }
+            Expr::Throw(expr) => {
+                self.compile_expr(expr)?;
+                self.code.emit(Instruction::Throw);
+            }
         }
         Ok(())
     }

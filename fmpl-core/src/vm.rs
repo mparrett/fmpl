@@ -51,7 +51,7 @@ pub struct Vm {
     scopes: Vec<Scope>,
     /// The current user (for `user` builtin).
     pub current_user: Option<ObjectId>,
-    /// Exception handler stack: (catch_ip, stack_depth, scope_depth)
+    /// Exception handler stack: (catch_ip, stack_depth, frame_depth)
     exception_handlers: Vec<(usize, usize, usize)>,
     /// Tokio runtime handle for async operations
     runtime: Option<tokio::runtime::Handle>,
@@ -705,9 +705,9 @@ impl Vm {
                 // Exception handling
                 Instruction::PushHandler(catch_ip) => {
                     let stack_depth = self.stack.len();
-                    let scope_depth = self.frames.last().map(|f| f.locals.len()).unwrap_or(0);
+                    let frame_depth = self.frames.len();
                     self.exception_handlers
-                        .push((catch_ip, stack_depth, scope_depth));
+                        .push((catch_ip, stack_depth, frame_depth));
                 }
                 Instruction::PopHandler => {
                     self.exception_handlers.pop();
@@ -771,14 +771,18 @@ impl Vm {
     }
 
     fn throw_exception(&mut self, error: Value) -> Result<()> {
-        if let Some((catch_ip, stack_depth, _scope_depth)) = self.exception_handlers.pop() {
-            // Unwind stack to handler depth
+        if let Some((catch_ip, stack_depth, frame_depth)) = self.exception_handlers.pop() {
+            // Unwind frames to handler's frame
+            while self.frames.len() > frame_depth {
+                self.frames.pop();
+            }
+            // Unwind value stack to handler depth
             while self.stack.len() > stack_depth {
                 self.stack.pop();
             }
-            // Push error value for binding
+            // Push error value for catch binding
             self.stack.push(error);
-            // Jump to catch block
+            // Jump to catch block in handler's frame
             if let Some(frame) = self.frames.last_mut() {
                 frame.ip = catch_ip;
             }

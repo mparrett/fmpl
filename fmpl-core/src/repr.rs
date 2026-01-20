@@ -357,6 +357,8 @@ impl Display for Expr {
                 )
             }
 
+            Expr::Throw(expr) => write!(f, "throw {}", expr),
+
             Expr::FacetAccess(expr, facet) => write!(f, "{}.as(:{})", expr, facet),
 
             Expr::Placeholder => write!(f, "_"),

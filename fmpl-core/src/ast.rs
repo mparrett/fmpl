@@ -220,6 +220,9 @@ pub enum Expr {
         catch_body: Box<Expr>,
     },
 
+    /// Throw expression.
+    Throw(Box<Expr>),
+
     /// Facet access (expr.as(:facet)).
     FacetAccess(Box<Expr>, SmolStr),
 
