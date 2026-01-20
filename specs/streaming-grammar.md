@@ -240,8 +240,8 @@ pub enum StreamOp {
 | ParseDriver | Complete |
 | AsyncParse StreamOp | Complete |
 | Memo table persistence | Complete |
-| ParseState serialization | In Progress |
-| Integration tests | Planned |
+| ParseState serialization | Complete |
+| Integration tests | Complete |
 
 ---
 

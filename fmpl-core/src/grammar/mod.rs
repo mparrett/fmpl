@@ -38,6 +38,46 @@
 //! }
 //! ast @ ast::optimizer.add
 //! ```
+//!
+//! # Streaming Grammar Pipelines
+//!
+//! Grammars can operate on async streams with full backtracking support:
+//!
+//! ```fmpl
+//! llm_stream |> parser.tool_call |> execute_tool
+//! ```
+//!
+//! The pipeline works like Unix pipes:
+//! - Each value from `llm_stream` pushes into `parser.tool_call`
+//! - When `tool_call` fully matches, its result pushes to `execute_tool`
+//! - Backtracking is unlimited with buffered input (spills to Fjall)
+//! - Memoization prevents re-execution of external calls
+//!
+//! # Durable Suspension
+//!
+//! Parse state can be serialized for durable suspension across process
+//! restarts. This enables human-in-the-loop workflows where an agent
+//! pauses mid-parse waiting for approval:
+//!
+//! ```rust,ignore
+//! // Start parsing
+//! let mut runtime = PegRuntime::new(input, &registry, grammar);
+//! let state = runtime.start("rule_name");
+//!
+//! // Suspend: serialize state to Fjall
+//! let bytes = state.to_bytes()?;
+//! partition.insert(session_key, bytes)?;
+//!
+//! // ... process restarts, human approves ...
+//!
+//! // Resume: restore state from Fjall
+//! let bytes = partition.get(session_key)?.unwrap();
+//! let restored = ParseState::from_bytes(&bytes)?;
+//! runtime.resume(restored)?;
+//! ```
+//!
+//! See [`incremental::ParseState`] for serialization methods and
+//! [`driver::ParseDriver`] for async pipeline integration.
 
 pub mod driver;
 pub mod incremental;
