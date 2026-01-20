@@ -51,7 +51,15 @@ pub enum StreamOp {
     Filter(Value),
     FlatMap(Value),
     Reduce(Value),
-    Parse { grammar: Value, rule: SmolStr },
+    Parse {
+        grammar: Value,
+        rule: SmolStr,
+    },
+    /// Async streaming parse - emits matches incrementally as they occur.
+    AsyncParse {
+        grammar: Value,
+        rule: SmolStr,
+    },
 }
 
 /// A lambda closure.

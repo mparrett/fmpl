@@ -615,6 +615,14 @@ impl SourceRepr for Stream {
                 StreamOp::Parse { grammar, rule } => {
                     result = format!("{} |> parse({}.{})", result, grammar.source_repr(), rule);
                 }
+                StreamOp::AsyncParse { grammar, rule } => {
+                    result = format!(
+                        "{} |> asyncParse({}.{})",
+                        result,
+                        grammar.source_repr(),
+                        rule
+                    );
+                }
             }
         }
         result
