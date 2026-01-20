@@ -7,6 +7,10 @@
 //!
 //! Based on OMeta's OMInputStream design and maru's <parser-stream>.
 
+// Allow large enum variant - StreamSource::Async is intentionally larger than Static/Empty
+// because it carries channel and memoization state for live streaming.
+#![allow(clippy::large_enum_variant)]
+
 use crate::stream::{StreamEvent, StreamHandle};
 use crate::value::Value;
 #[cfg(feature = "fjall-persistence")]
@@ -499,17 +503,17 @@ impl StreamPosition {
                 }
 
                 // Check if it's in Fjall overflow
-                if let Some(fjall_overflow) = fjall {
-                    if let Some(pos) = Self::restore_from_fjall(
+                if let Some(fjall_overflow) = fjall
+                    && let Some(pos) = Self::restore_from_fjall(
                         fjall_overflow,
                         target_index,
                         self.source.clone(),
                         self.memo_fjall.clone(),
-                    ) {
-                        // Cache it in memory (it will be spilled again if needed)
-                        positions.lock().unwrap().push(pos.clone());
-                        return pos;
-                    }
+                    )
+                {
+                    // Cache it in memory (it will be spilled again if needed)
+                    positions.lock().unwrap().push(pos.clone());
+                    return pos;
                 }
 
                 // Not found anywhere - pull next value from async source
@@ -529,15 +533,14 @@ impl StreamPosition {
                     positions_guard.push(new_pos.clone());
 
                     // Check if we need to spill to Fjall
-                    if let Some(limit) = memory_limit {
-                        if positions_guard.len() > *limit {
-                            if let Some(fjall_overflow) = fjall {
-                                // Spill the oldest positions
-                                let spill_count = positions_guard.len() - *limit;
-                                for pos in positions_guard.drain(0..spill_count) {
-                                    Self::spill_to_fjall(fjall_overflow, &pos);
-                                }
-                            }
+                    if let Some(limit) = memory_limit
+                        && positions_guard.len() > *limit
+                        && let Some(fjall_overflow) = fjall
+                    {
+                        // Spill the oldest positions
+                        let spill_count = positions_guard.len() - *limit;
+                        for pos in positions_guard.drain(0..spill_count) {
+                            Self::spill_to_fjall(fjall_overflow, &pos);
                         }
                     }
                 }
@@ -645,12 +648,12 @@ impl StreamPosition {
             let memo_fjall_guard = memo_fjall.lock().unwrap();
             // Key is position_index:rule_name
             let key = format!("{}:{}", self.index, rule);
-            if let Ok(Some(value_bytes)) = memo_fjall_guard.0.get(key.as_bytes()) {
-                if let Ok(entry) = serde_json::from_slice::<MemoEntry>(&value_bytes) {
-                    // Cache in memory for subsequent lookups
-                    self.memo.borrow_mut().insert(rule.clone(), entry.clone());
-                    return Some(entry);
-                }
+            if let Ok(Some(value_bytes)) = memo_fjall_guard.0.get(key.as_bytes())
+                && let Ok(entry) = serde_json::from_slice::<MemoEntry>(&value_bytes)
+            {
+                // Cache in memory for subsequent lookups
+                self.memo.borrow_mut().insert(rule.clone(), entry.clone());
+                return Some(entry);
             }
         }
 

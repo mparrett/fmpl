@@ -446,11 +446,14 @@ name = "fmpl-core"
 version = "0.1.0"
 dependencies = [
  "curl",
+ "fjall",
  "logos",
  "pretty_assertions",
  "rkyv",
  "serde",
+ "serde_json",
  "smol_str",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "wiremock",
@@ -1359,6 +1362,7 @@ dependencies = [
  "rancor",
  "rend",
  "rkyv_derive",
+ "smol_str",
  "tinyvec",
  "uuid",
 ]

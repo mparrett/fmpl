@@ -33,4 +33,4 @@ fjall = "2"
 blake3 = "1.5"
 
 # Zero-copy serialization (bytecheck enabled by default)
-rkyv = "0.8"
+rkyv = { version = "0.8", features = ["smol_str-0_3"] }

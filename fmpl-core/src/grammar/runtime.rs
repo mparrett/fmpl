@@ -202,14 +202,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "text patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(InputItem::Char(c)) = self.input.head(&pos) {
-                    if c == *expected {
-                        let new_pos = self.input.tail(&pos);
-                        return Ok(ParseResult::Success(
-                            Value::String(SmolStr::new(c.to_string())),
-                            self.input.index(&new_pos),
-                        ));
-                    }
+                if let Some(InputItem::Char(c)) = self.input.head(&pos)
+                    && c == *expected
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::String(SmolStr::new(c.to_string())),
+                        self.input.index(&new_pos),
+                    ));
                 }
                 Ok(ParseResult::Failure)
             }
@@ -233,14 +233,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "text patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(InputItem::Char(c)) = self.input.head(&pos) {
-                    if ranges.iter().any(|r| r.matches(c)) {
-                        let new_pos = self.input.tail(&pos);
-                        return Ok(ParseResult::Success(
-                            Value::String(SmolStr::new(c.to_string())),
-                            self.input.index(&new_pos),
-                        ));
-                    }
+                if let Some(InputItem::Char(c)) = self.input.head(&pos)
+                    && ranges.iter().any(|r| r.matches(c))
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::String(SmolStr::new(c.to_string())),
+                        self.input.index(&new_pos),
+                    ));
                 }
                 Ok(ParseResult::Failure)
             }
@@ -251,14 +251,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "text patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(InputItem::Char(c)) = self.input.head(&pos) {
-                    if !ranges.iter().any(|r| r.matches(c)) {
-                        let new_pos = self.input.tail(&pos);
-                        return Ok(ParseResult::Success(
-                            Value::String(SmolStr::new(c.to_string())),
-                            self.input.index(&new_pos),
-                        ));
-                    }
+                if let Some(InputItem::Char(c)) = self.input.head(&pos)
+                    && !ranges.iter().any(|r| r.matches(c))
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::String(SmolStr::new(c.to_string())),
+                        self.input.index(&new_pos),
+                    ));
                 }
                 Ok(ParseResult::Failure)
             }
@@ -451,16 +451,15 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "binary patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(item) = self.input.head(&pos) {
-                    if let Some(b) = item.as_byte() {
-                        if b == *expected {
-                            let new_pos = self.input.tail(&pos);
-                            return Ok(ParseResult::Success(
-                                Value::Int(b as i64),
-                                self.input.index(&new_pos),
-                            ));
-                        }
-                    }
+                if let Some(item) = self.input.head(&pos)
+                    && let Some(b) = item.as_byte()
+                    && b == *expected
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Int(b as i64),
+                        self.input.index(&new_pos),
+                    ));
                 }
                 Ok(ParseResult::Failure)
             }
@@ -471,16 +470,16 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "binary patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(item) = self.input.head(&pos) {
-                    if let Some(b) = item.as_byte() {
-                        if b >= *lo && b <= *hi {
-                            let new_pos = self.input.tail(&pos);
-                            return Ok(ParseResult::Success(
-                                Value::Int(b as i64),
-                                self.input.index(&new_pos),
-                            ));
-                        }
-                    }
+                if let Some(item) = self.input.head(&pos)
+                    && let Some(b) = item.as_byte()
+                    && b >= *lo
+                    && b <= *hi
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Int(b as i64),
+                        self.input.index(&new_pos),
+                    ));
                 }
                 Ok(ParseResult::Failure)
             }
@@ -508,14 +507,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "binary patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(item) = self.input.head(&pos) {
-                    if let Some(b) = item.as_byte() {
-                        let new_pos = self.input.tail(&pos);
-                        return Ok(ParseResult::Success(
-                            Value::Int(b as i64),
-                            self.input.index(&new_pos),
-                        ));
-                    }
+                if let Some(item) = self.input.head(&pos)
+                    && let Some(b) = item.as_byte()
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Int(b as i64),
+                        self.input.index(&new_pos),
+                    ));
                 }
                 Ok(ParseResult::Failure)
             }
@@ -582,14 +581,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "binary patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(item) = self.input.head(&pos) {
-                    if let Some(b) = item.as_byte() {
-                        let new_pos = self.input.tail(&pos);
-                        return Ok(ParseResult::Success(
-                            Value::Int(b as i8 as i64),
-                            self.input.index(&new_pos),
-                        ));
-                    }
+                if let Some(item) = self.input.head(&pos)
+                    && let Some(b) = item.as_byte()
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Int(b as i8 as i64),
+                        self.input.index(&new_pos),
+                    ));
                 }
                 Ok(ParseResult::Failure)
             }
@@ -657,11 +656,11 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "value patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(InputItem::Value(v)) = self.input.head(&pos) {
-                    if &v == expected {
-                        let new_pos = self.input.tail(&pos);
-                        return Ok(ParseResult::Success(v, self.input.index(&new_pos)));
-                    }
+                if let Some(InputItem::Value(v)) = self.input.head(&pos)
+                    && &v == expected
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(v, self.input.index(&new_pos)));
                 }
                 Ok(ParseResult::Failure)
             }
@@ -699,14 +698,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "value patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(InputItem::Value(Value::Symbol(sym))) = self.input.head(&pos) {
-                    if sym.as_str() == name.as_str() {
-                        let new_pos = self.input.tail(&pos);
-                        return Ok(ParseResult::Success(
-                            Value::Symbol(sym),
-                            self.input.index(&new_pos),
-                        ));
-                    }
+                if let Some(InputItem::Value(Value::Symbol(sym))) = self.input.head(&pos)
+                    && sym.as_str() == name.as_str()
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Symbol(sym),
+                        self.input.index(&new_pos),
+                    ));
                 }
                 Ok(ParseResult::Failure)
             }

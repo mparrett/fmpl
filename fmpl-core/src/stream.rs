@@ -3,7 +3,12 @@
 //! Streams support serialization via [`StreamSource`] metadata, enabling
 //! durable suspension and resumption of async operations across process restarts.
 
+// Allow large error type - Value is intentionally large to support all FMPL types.
+// Boxing would add allocation overhead for a rarely-used error path.
+#![allow(clippy::result_large_err)]
+
 use crate::value::Value;
+use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -24,7 +29,9 @@ pub enum StreamEvent {
 ///
 /// Allows backtracking and replay of historical stream data during
 /// incremental parsing or error recovery.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
 pub struct StreamBuffer {
     /// Fjall partition name where buffer is stored.
     pub partition: SmolStr,
@@ -42,7 +49,12 @@ pub struct StreamBuffer {
 /// captures enough information to reconnect or recreate the stream on resume.
 /// Each variant optionally includes a reference to a persisted buffer for
 /// backtracking support during incremental parsing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(<__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext)))]
 pub enum StreamSource {
     /// HTTP GET request - can be retried/resumed.
     HttpGet {
@@ -86,6 +98,7 @@ pub enum StreamSource {
     Ephemeral,
     /// Disconnected placeholder after failed resume attempt.
     Disconnected {
+        #[rkyv(omit_bounds)]
         original: Box<StreamSource>,
         reason: SmolStr,
     },
@@ -205,7 +218,12 @@ impl StreamHandle {
 }
 
 /// Metadata describing how to recreate a sink for durable suspension.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
+)]
+#[rkyv(serialize_bounds(__S: rkyv::ser::Writer + rkyv::ser::Allocator, <__S as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(deserialize_bounds(<__D as rkyv::rancor::Fallible>::Error: rkyv::rancor::Source))]
+#[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext)))]
 pub enum SinkSource {
     /// HTTP response body sink.
     HttpResponse { request_id: SmolStr },
@@ -219,6 +237,7 @@ pub enum SinkSource {
     Ephemeral,
     /// Disconnected placeholder after failed resume attempt.
     Disconnected {
+        #[rkyv(omit_bounds)]
         original: Box<SinkSource>,
         reason: SmolStr,
     },

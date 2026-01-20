@@ -33,6 +33,7 @@ pub enum ParseNext {
 }
 
 /// Errors for ParseState serialization/persistence.
+#[cfg(feature = "fjall-persistence")]
 #[derive(Debug)]
 pub enum ParseStateError {
     /// Serialization failed.
@@ -40,21 +41,21 @@ pub enum ParseStateError {
     /// Deserialization failed.
     Deserialize(serde_json::Error),
     /// Fjall operation failed.
-    #[cfg(feature = "fjall-persistence")]
     Fjall(fjall::Error),
 }
 
+#[cfg(feature = "fjall-persistence")]
 impl std::fmt::Display for ParseStateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Serialize(e) => write!(f, "serialize error: {}", e),
             Self::Deserialize(e) => write!(f, "deserialize error: {}", e),
-            #[cfg(feature = "fjall-persistence")]
             Self::Fjall(e) => write!(f, "fjall error: {}", e),
         }
     }
 }
 
+#[cfg(feature = "fjall-persistence")]
 impl std::error::Error for ParseStateError {}
 
 /// Serialization support for ParseState (requires fjall-persistence feature).
