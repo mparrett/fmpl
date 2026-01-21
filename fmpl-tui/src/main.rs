@@ -193,6 +193,8 @@ struct App {
     // Phase 7 Task 7.1: Tool management
     tools: Vec<Tool>,           // Available tools
     selected_tool_index: usize, // Currently selected tool in tools panel
+    // Phase 8 Task 8.4: LLM generation status
+    llm_generation_status: Option<String>, // Current LLM operation ("Generating research summary...", etc.)
 }
 
 impl App {
@@ -244,6 +246,8 @@ impl App {
             // Phase 7 Task 7.1: Initialize tools (load from file or use defaults)
             tools: Self::load_tools(),
             selected_tool_index: 0,
+            // Phase 8 Task 8.4: Initialize LLM generation status
+            llm_generation_status: None,
         }
     }
 
@@ -1129,6 +1133,64 @@ impl App {
                     self.output = String::from(
                         "Planning tasks saved to .agent/tasks.md\n\nUse Ctrl+P to focus planning panel.",
                     );
+                }
+            }
+            // Phase 8 Task 8.2 & 8.3: Ctrl+G to generate AI assistance
+            KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.focused_panel == PanelType::Research {
+                    // Generate research summary from conversation
+                    match self.generate_research_summary() {
+                        Ok(summary) => {
+                            // Append summary to research lines
+                            self.research_lines.push(String::new()); // blank line before
+                            self.research_lines
+                                .push(String::from("# AI-Generated Summary"));
+                            self.research_lines.push(String::new());
+                            for line in summary.lines() {
+                                self.research_lines.push(line.to_string());
+                            }
+                            self.save_research_notes();
+                            self.output = String::from(
+                                "Research summary generated and appended to research panel.\n\nUse Ctrl+R to view.",
+                            );
+                        }
+                        Err(e) => {
+                            self.output = format!(
+                                "Failed to generate research summary: {}\n\nMake sure you have a conversation history first (use Ctrl+L to chat with LLM).",
+                                e
+                            );
+                        }
+                    }
+                } else if self.focused_panel == PanelType::Planning {
+                    // Generate planning tasks from conversation
+                    match self.generate_planning_tasks() {
+                        Ok(tasks) => {
+                            let task_count = tasks.len();
+                            // Add tasks to planning panel
+                            for task_description in tasks {
+                                self.task_counter += 1;
+                                self.planning_tasks.push(PlanningTask {
+                                    id: self.task_counter,
+                                    description: task_description,
+                                    status: TaskStatus::Pending,
+                                    priority: Priority::Medium,
+                                });
+                            }
+                            self.save_planning_tasks();
+                            self.selected_task_index =
+                                self.planning_tasks.len().saturating_sub(task_count);
+                            self.output = format!(
+                                "Generated {} tasks from conversation.\n\nUse Ctrl+P to view planning panel.",
+                                task_count
+                            );
+                        }
+                        Err(e) => {
+                            self.output = format!(
+                                "Failed to generate tasks: {}\n\nMake sure you have a conversation history first (use Ctrl+L to chat with LLM).",
+                                e
+                            );
+                        }
+                    }
                 }
             }
             // Phase 6 Task 6.3: Task management keybindings (when planning panel focused)
@@ -2066,6 +2128,135 @@ impl App {
     fn get_code(&self) -> String {
         self.code_lines.join("\n")
     }
+
+    // Phase 8 Task 8.1: LLM Integration Helper Functions
+
+    /// Format current conversation context as a readable string for LLM prompting
+    fn format_conversation_for_llm(&self) -> String {
+        let history = self.get_history();
+        if history.is_empty() {
+            return "No conversation history yet.".to_string();
+        }
+
+        let mut text = String::new();
+        for msg in &history {
+            let role = if msg.role == "user" {
+                "User"
+            } else {
+                "Assistant"
+            };
+            text.push_str(&format!("{}: {}\n", role, msg.content));
+        }
+        text
+    }
+
+    /// Generate research summary from conversation context
+    fn generate_research_summary(&mut self) -> Result<String, String> {
+        let conversation_context = self.format_conversation_for_llm();
+
+        if conversation_context == "No conversation history yet." {
+            return Err("No conversation to analyze".to_string());
+        }
+
+        let prompt = format!(
+            "Analyze this conversation and extract the key points, insights, and important information for research notes. Format as clear, organized bullet points:\n\n{}",
+            conversation_context
+        );
+
+        // Set generation status
+        self.llm_generation_status = Some("Generating research summary...".to_string());
+
+        // Call LLM using existing infrastructure
+        let provider_name = match self.llm_provider {
+            LlmProvider::Ollama => "ollama",
+            LlmProvider::Anthropic => "anthropic",
+        };
+
+        // Create a single-turn request (not adding to conversation DAG)
+        let fmpl_code = format!("{}.chat({:?})", provider_name, &prompt);
+
+        match eval(&mut self.vm, &fmpl_code) {
+            Ok(result) => match wait_for_async(result) {
+                Ok(Value::String(summary)) => {
+                    self.llm_generation_status = None;
+                    Ok(summary.to_string())
+                }
+                Ok(other) => {
+                    self.llm_generation_status = None;
+                    Err(format!("Unexpected response type: {:?}", other))
+                }
+                Err(e) => {
+                    self.llm_generation_status = None;
+                    Err(format!("LLM error: {}", e))
+                }
+            },
+            Err(e) => {
+                self.llm_generation_status = None;
+                Err(format!("Evaluation error: {}", e))
+            }
+        }
+    }
+
+    /// Generate planning tasks from conversation context
+    fn generate_planning_tasks(&mut self) -> Result<Vec<String>, String> {
+        let conversation_context = self.format_conversation_for_llm();
+
+        if conversation_context == "No conversation history yet." {
+            return Err("No conversation to analyze".to_string());
+        }
+
+        let prompt = format!(
+            "Based on this conversation, generate a list of actionable tasks. Return one task per line, starting with '- '. Be specific and concise:\n\n{}",
+            conversation_context
+        );
+
+        // Set generation status
+        self.llm_generation_status = Some("Generating planning tasks...".to_string());
+
+        // Call LLM using existing infrastructure
+        let provider_name = match self.llm_provider {
+            LlmProvider::Ollama => "ollama",
+            LlmProvider::Anthropic => "anthropic",
+        };
+
+        // Create a single-turn request
+        let fmpl_code = format!("{}.chat({:?})", provider_name, &prompt);
+
+        match eval(&mut self.vm, &fmpl_code) {
+            Ok(result) => {
+                match wait_for_async(result) {
+                    Ok(Value::String(response)) => {
+                        self.llm_generation_status = None;
+                        // Parse response into task descriptions (lines starting with '-')
+                        let tasks: Vec<String> = response
+                            .lines()
+                            .filter(|line| line.trim().starts_with('-'))
+                            .map(|line| line.trim().trim_start_matches('-').trim().to_string())
+                            .filter(|line| !line.is_empty())
+                            .collect();
+
+                        if tasks.is_empty() {
+                            Err("No tasks generated".to_string())
+                        } else {
+                            Ok(tasks)
+                        }
+                    }
+                    Ok(other) => {
+                        self.llm_generation_status = None;
+                        Err(format!("Unexpected response type: {:?}", other))
+                    }
+                    Err(e) => {
+                        self.llm_generation_status = None;
+                        Err(format!("LLM error: {}", e))
+                    }
+                }
+            }
+            Err(e) => {
+                self.llm_generation_status = None;
+                Err(format!("Evaluation error: {}", e))
+            }
+        }
+    }
 }
 
 // Phase 6: Helper function to get panel title with focus indicator
@@ -2089,12 +2280,13 @@ fn get_panel_help(panel: PanelType, app: &App) -> String {
                         .to_string()
                 }
             } else {
-                "Type to edit | Ctrl+S: save | Arrows: navigate".to_string()
+                "Type to edit | Ctrl+S: save | Ctrl+G: generate summary | Arrows: navigate"
+                    .to_string()
             }
         }
         PanelType::Planning => {
-            // Planning panel already has inline help (a:add e:edit etc.)
-            String::new()
+            // Phase 8: Add Ctrl+G help for generating tasks
+            "a:add d:del e:edit Enter:toggle +/−:priority Ctrl+S:save Ctrl+G:generate".to_string()
         }
         PanelType::CodeEditor => {
             if app.llm_mode {
