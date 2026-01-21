@@ -121,8 +121,10 @@ struct App {
     vm: Vm,
     // Layer 2: Conversation DAG for backtracking and branching
     conversation_nodes: HashMap<NodeId, ConversationNode>,
-    current_head: NodeId, // Current branch tip
-    node_counter: NodeId, // For generating IDs
+    current_head: NodeId,            // Current branch tip
+    node_counter: NodeId,            // For generating IDs
+    edit_mode: bool,                 // When true, editing last message in history
+    editing_node_id: Option<NodeId>, // Node being edited (None = new message)
 }
 
 impl App {
@@ -155,6 +157,8 @@ impl App {
             conversation_nodes: HashMap::new(),
             current_head: 0,
             node_counter: 0,
+            edit_mode: false,
+            editing_node_id: None,
         }
     }
 
@@ -212,6 +216,32 @@ impl App {
         history
     }
 
+    /// Get conversation history with metadata (for display)
+    fn get_history_with_metadata(&self) -> Vec<(ChatMessage, bool)> {
+        let mut history = Vec::new();
+        let mut current_id = self.current_head;
+
+        // Traverse backwards from current head to root
+        let mut path = Vec::new();
+        while let Some(node) = self.conversation_nodes.get(&current_id) {
+            path.push((current_id, node.clone()));
+            match node.parent_id {
+                Some(parent) => current_id = parent,
+                None => break,
+            }
+        }
+
+        // Reverse to get root → current_head order
+        path.reverse();
+
+        // Extract messages with edited flag in order
+        for (_, node) in path {
+            history.push((node.message, node.metadata.edited));
+        }
+
+        history
+    }
+
     /// Add a new message to the conversation DAG
     fn add_message(&mut self, message: ChatMessage) {
         let new_id = self.node_counter;
@@ -264,6 +294,79 @@ impl App {
         }
     }
 
+    /// Edit the last message in the conversation history
+    fn enter_edit_mode(&mut self) -> Result<(), String> {
+        if self.conversation_nodes.is_empty() {
+            return Err("No messages to edit".to_string());
+        }
+
+        // Get the current node (last message)
+        let current_node = self
+            .conversation_nodes
+            .get(&self.current_head)
+            .ok_or("No current node")?;
+
+        // Store the node being edited and load its content into the editor
+        self.editing_node_id = Some(self.current_head);
+        self.code_lines = vec![current_node.message.content.clone()];
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+        self.edit_mode = true;
+
+        Ok(())
+    }
+
+    /// Save edited message as a new node in the DAG
+    fn save_edited_message(&mut self) -> Result<(), String> {
+        let edited_content = self.code_lines.join("\n");
+
+        // Get the original node
+        let original_node_id = self.editing_node_id.ok_or("Not editing any node")?;
+
+        let original_node = self
+            .conversation_nodes
+            .get(&original_node_id)
+            .ok_or("Original node not found")?;
+
+        // Create a new node with the edited message
+        let new_id = self.node_counter;
+        self.node_counter += 1;
+
+        let parent_id = original_node.parent_id;
+
+        let edited_message = ChatMessage {
+            role: original_node.message.role.clone(),
+            content: edited_content,
+        };
+
+        let metadata = NodeMetadata {
+            branch_name: None,
+            edited: true, // Mark as edited
+            compacted: false,
+        };
+
+        let node = ConversationNode {
+            id: new_id,
+            parent_id,
+            message: edited_message,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            metadata,
+        };
+
+        // Add the new node and make it the current head
+        self.conversation_nodes.insert(new_id, node);
+        self.current_head = new_id;
+
+        // Exit edit mode
+        self.edit_mode = false;
+        self.editing_node_id = None;
+        self.code_lines = vec![String::new()];
+        self.cursor_row = 0;
+        self.cursor_col = 0;
+
+        Ok(())
+    }
+
     fn handle_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('q') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -304,8 +407,29 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Enter edit mode to edit last message
+                match self.enter_edit_mode() {
+                    Ok(()) => {
+                        self.update_mode_indicator();
+                    }
+                    Err(e) => {
+                        self.output = format!("Edit mode failed: {}", e);
+                    }
+                }
+            }
             KeyCode::Esc => {
-                self.execute_mode = !self.execute_mode;
+                // If in edit mode, cancel and return to normal mode
+                if self.edit_mode {
+                    self.edit_mode = false;
+                    self.editing_node_id = None;
+                    self.code_lines = vec![String::new()];
+                    self.cursor_row = 0;
+                    self.cursor_col = 0;
+                    self.output = String::from("Edit mode cancelled");
+                } else {
+                    self.execute_mode = !self.execute_mode;
+                }
             }
             KeyCode::Char(c) => {
                 self.insert_char(c);
@@ -317,7 +441,19 @@ impl App {
                 self.delete();
             }
             KeyCode::Enter => {
-                if self.execute_mode {
+                // Check for Ctrl+Enter to save edited message
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    if self.edit_mode {
+                        match self.save_edited_message() {
+                            Ok(()) => {
+                                self.update_mode_indicator();
+                            }
+                            Err(e) => {
+                                self.output = format!("Save failed: {}", e);
+                            }
+                        }
+                    }
+                } else if self.execute_mode {
                     self.execute_code();
                     self.execute_mode = false;
                 } else {
@@ -434,13 +570,21 @@ impl App {
             LlmProvider::Anthropic => "Anthropic",
         };
 
-        let mode = if self.llm_mode {
+        let mode = if self.edit_mode {
+            "EDIT (last message)".to_string()
+        } else if self.llm_mode {
             format!("LLM ({})", provider_name)
         } else {
             "Execute".to_string()
         };
 
-        self.output = format!("Mode: {} (Press Enter to {})", mode, mode.to_lowercase());
+        let action = if self.edit_mode {
+            "Ctrl+Enter to save, Esc to cancel"
+        } else {
+            "Press Enter to run"
+        };
+
+        self.output = format!("Mode: {} - {}", mode, action);
     }
 
     fn execute_code(&mut self) {
@@ -543,7 +687,7 @@ impl App {
 
     /// Format conversation history for display
     fn format_history(&self) -> String {
-        let history = self.get_history();
+        let history = self.get_history_with_metadata();
         if history.is_empty() {
             return "No conversation history yet.\n\nUse Ctrl+L to enter LLM chat mode and start a conversation.".to_string();
         }
@@ -552,13 +696,14 @@ impl App {
         text.push_str(&"=".repeat(40));
         text.push('\n');
 
-        for (i, msg) in history.iter().enumerate() {
+        for (i, (msg, edited)) in history.iter().enumerate() {
             let role_label = if msg.role == "user" {
                 "👤 User"
             } else {
                 "🤖 Assistant"
             };
-            text.push_str(&format!("\n[{}] {}\n", i + 1, role_label));
+            let edited_marker = if *edited { " ✏️ (edited)" } else { "" };
+            text.push_str(&format!("\n[{}] {}{}\n", i + 1, role_label, edited_marker));
             text.push_str(&format!("{}\n", msg.content));
             text.push_str(&"-".repeat(40));
             text.push('\n');

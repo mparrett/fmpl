@@ -4,7 +4,10 @@
 
 **Event**: `task.resume` → Previous iteration completed planning. Now implementing Phase 1.
 
-**Status**: 🔄 IN PROGRESS - Implementation phase
+**Status**: 🔄 IN PROGRESS - Phase 1 foundation complete (Tasks 1.1-1.3), moving to Tasks 1.4-1.5
+
+**Phase 1 Complete**: Conversation DAG foundation with undo/redo
+**Commit**: 0728b818 - feat(tui): implement Layer 2 conversation DAG foundation
 
 ### Current Foundation (✅ Complete)
 - ✅ Conversation history tracking (`Vec<ChatMessage>`)
@@ -80,7 +83,12 @@
    - **Implementation**: Match patterns like `%{tool: "curl.get", ...}` to identify elidable calls
    - **Future**: Add LLM-based classification for smarter compaction
 
-### Phase 1 Implementation Plan (Foundation)
+### Phase 1 Implementation Status
+
+**Completed**: Tasks 1.1, 1.2, 1.3 ✅
+**Remaining**: Tasks 1.4, 1.5
+
+**Commit**: `0728b818` - feat(tui): implement Layer 2 conversation DAG foundation
 
 **Goal**: Create basic conversation threading with undo/redo support
 
