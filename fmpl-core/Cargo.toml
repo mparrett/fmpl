@@ -15,7 +15,7 @@ rkyv = { workspace = true }
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time"] }
 curl = "0.4"
 fjall = { version = "2", optional = true }
-serde_json = { version = "1.0", optional = true }
+serde_json = "1.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
@@ -26,4 +26,4 @@ tempfile = "3"
 
 [features]
 default = []
-fjall-persistence = ["fjall", "serde_json"]
+fjall-persistence = ["fjall"]

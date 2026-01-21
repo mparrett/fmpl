@@ -196,8 +196,10 @@ pub enum Expr {
     Lambda(Vec<SmolStr>, Box<Expr>),
     /// Short lambda (\x expr).
     ShortLambda(SmolStr, Box<Expr>),
-    /// Let expression.
+    /// Let expression: let (bindings) in body - creates a new scope
     Let(Vec<LetBinding>, Box<Expr>),
+    /// Let statement: let name = expr - binds to current scope, returns the value
+    LetStmt(SmolStr, Box<Expr>),
 
     /// Sequence (block).
     Sequence(Vec<Expr>),

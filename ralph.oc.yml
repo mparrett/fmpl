@@ -1,0 +1,41 @@
+# Ralph Orchestrator Configuration - OpenCode
+# v2 nested format
+
+# Event loop settings
+event_loop:
+  prompt_file: "PROMPT.md"
+  completion_promise: "LOOP_COMPLETE"
+  max_iterations: 100
+  max_runtime_seconds: 14400           # 4 hours
+  idle_timeout_secs: 1800
+
+# CLI backend settings
+cli:
+  backend: "opencode"
+  prompt_mode: "stdin"
+  args: [
+    "--model", "zai-coding-plan/glm-4.7",
+  ]
+
+# Core behaviors (always injected into prompts)
+core:
+  scratchpad: ".agent/scratchpad.md"
+  specs_dir: "./specs/"
+  guardrails:
+    - "Fresh context each iteration - scratchpad is memory"
+    - "Don't assume 'not implemented' - search first"
+    - "Backpressure is law - tests/typecheck/lint must pass"
+
+# Custom hats for multi-agent workflows:
+# hats:
+#   builder:
+#     name: "Builder"
+#     triggers: ["build.task"]
+#     publishes: ["build.done", "build.blocked"]
+#
+#   reviewer:
+#     name: "Reviewer"
+#     triggers: ["review.request"]
+#     publishes: ["review.approved", "review.changes_requested"]
+
+# Create PROMPT.md with your task, then run: ralph run

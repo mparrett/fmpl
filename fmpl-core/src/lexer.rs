@@ -103,7 +103,41 @@ pub enum Token {
 
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
-        SmolStr::new(&s[1..s.len()-1])
+        let inner = &s[1..s.len()-1];
+        // Process escape sequences
+        let mut result = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        let mut last_was_backslash = false;
+
+        while let Some(c) = chars.next() {
+            if last_was_backslash {
+                match c {
+                    'n' => result.push('\n'),
+                    't' => result.push('\t'),
+                    'r' => result.push('\r'),
+                    '\\' => result.push('\\'),
+                    '"' => result.push('"'),
+                    '\'' => result.push('\''),
+                    '0' => result.push('\0'),
+                    _ => {
+                        // Unknown escape, keep as-is
+                        result.push('\\');
+                        result.push(c);
+                    }
+                }
+                last_was_backslash = false;
+            } else if c == '\\' {
+                last_was_backslash = true;
+            } else {
+                result.push(c);
+            }
+        }
+
+        if last_was_backslash {
+            result.push('\\');
+        }
+
+        SmolStr::new(result)
     })]
     String(SmolStr),
 

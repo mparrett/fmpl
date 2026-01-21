@@ -1,8 +1,10 @@
 # VM
 
-Stack-based bytecode virtual machine with async support.
+**Indexed RPN bytecode virtual machine** with async support.
 
-**Location**: [fmpl-core/src/vm.rs](../fmpl-core/src/vm.rs:46)
+**Location**: [fmpl-core/src/vm.rs](../fmpl-core/src/vm.rs:89)
+
+**Implementation**: See [Indexed RPN Conversion Spec](./indexed-rpn-conversion.md)
 
 ---
 
@@ -10,8 +12,9 @@ Stack-based bytecode virtual machine with async support.
 
 The VM executes compiled bytecode using:
 
-- **Stack-based execution** — Operands pushed/popped from stack
-- **Indexed RPN** — Flat bytecode format (from burakemir.ch)
+- **Indexed RPN execution** — Each instruction stores result in `values[ip]`, operands referenced by index
+- **No operand stack** — Direct index access instead of push/pop
+- **Compile-time name resolution** — `resolve_names` pass wires variable references to bindings
 - **Async runtime** — Tokio-based for `<-` and streams
 - **Object integration** — Method dispatch via ObjectDb
 - **Grammar integration** — PEG grammar application with semantic actions
@@ -24,12 +27,13 @@ The VM executes compiled bytecode using:
 ┌─────────────────────────────────────────────────────────┐
 │                        VM                               │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │ Operand Stack                                    │   │
+│  │ Values Array (per Frame)                         │   │
 │  │ [Value, Value, Value, ...]                       │   │
+│  │ Indexed by instruction position (ip)             │   │
 │  └─────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │ Call Stack (Frames)                              │   │
-│  │ [Frame { ip, code, locals, this, caller }, ...]  │   │
+│  │ [Frame { ip, code, values, locals, this, caller }]  │
 │  └─────────────────────────────────────────────────┘   │
 │  ┌─────────────────────────────────────────────────┐   │
 │  │ Scopes (let bindings)                            │   │
@@ -46,11 +50,11 @@ The VM executes compiled bytecode using:
 
 ## Bytecode Format
 
-Instructions are defined in [compiler.rs:12](../fmpl-core/src/compiler.rs:12):
+Instructions are defined in [compiler.rs:37](../fmpl-core/src/compiler.rs:37):
 
 ```rust
 pub enum Instruction {
-    // Literals
+    // Literals (produce values, no operand references)
     LoadNull,
     LoadBool(bool),
     LoadInt(i64),
@@ -59,93 +63,112 @@ pub enum Instruction {
     LoadSymbol(SmolStr),
 
     // Variable access
-    LoadVar(SmolStr),
-    StoreVar(SmolStr),
+    LoadVar(SmolStr),                              // Legacy: for runtime lookups
+    StoreVar { name: SmolStr, value: InstrIndex },
 
-    // Special references
+    // Special references (produce values)
     LoadSelf,
     LoadParent,
     LoadCaller,
     LoadUser,
     LoadArgs,
 
-    // Arithmetic
-    Add, Sub, Mul, Div, Mod, Neg,
+    // Binary arithmetic (explicit operand indices)
+    Add { lhs: InstrIndex, rhs: InstrIndex },
+    Sub { lhs: InstrIndex, rhs: InstrIndex },
+    Mul { lhs: InstrIndex, rhs: InstrIndex },
+    Div { lhs: InstrIndex, rhs: InstrIndex },
+    Mod { lhs: InstrIndex, rhs: InstrIndex },
 
-    // Comparison
-    Eq, NotEq, Lt, Gt, LtEq, GtEq,
+    // Unary (explicit operand index)
+    Neg { operand: InstrIndex },
+    Not { operand: InstrIndex },
 
-    // Logical
-    Not, And, Or,
+    // Comparison (explicit operand indices)
+    Eq { lhs: InstrIndex, rhs: InstrIndex },
+    NotEq { lhs: InstrIndex, rhs: InstrIndex },
+    Lt { lhs: InstrIndex, rhs: InstrIndex },
+    Gt { lhs: InstrIndex, rhs: InstrIndex },
+    LtEq { lhs: InstrIndex, rhs: InstrIndex },
+    GtEq { lhs: InstrIndex, rhs: InstrIndex },
 
-    // Control flow
-    Jump(usize),
-    JumpIfFalse(usize),
-    JumpIfTrue(usize),
+    // Control flow (explicit condition indices)
+    Jump { target: InstrIndex },
+    JumpIfFalse { cond: InstrIndex, target: InstrIndex },
+    JumpIfTrue { cond: InstrIndex, target: InstrIndex },
 
-    // Functions and calls
-    Call(usize),               // arg count
-    TailCall(usize),
-    MethodCall(SmolStr, usize),
-    Return,
+    // Functions and calls (explicit operand indices)
+    Call { func: InstrIndex, args: Vec<InstrIndex> },
+    TailCall { func: InstrIndex, args: Vec<InstrIndex> },
+    MethodCall { receiver: InstrIndex, method: SmolStr, args: Vec<InstrIndex> },
+    Return { value: InstrIndex },
 
-    // Objects
-    GetProp(SmolStr),
-    SetProp(SmolStr),
-    Spawn(usize),
-    GetFacet(SmolStr),
+    // Objects (explicit operand indices)
+    GetProp { object: InstrIndex, name: SmolStr },
+    SetProp { object: InstrIndex, name: SmolStr, value: InstrIndex },
+    Spawn { object: InstrIndex, args: Vec<InstrIndex> },
+    GetFacet { object: InstrIndex, name: SmolStr },
 
-    // Sync/Async
-    SyncCall,
-    AsyncCall,
+    // Sync/Async (explicit operand indices)
+    SyncCall { target: InstrIndex },
+    AsyncCall { target: InstrIndex },
 
-    // Data structures
-    MakeList(usize),
-    MakeMap(usize),
-    Index,
-    Slice,
+    // Data structures (explicit operand indices)
+    MakeList { elements: Vec<InstrIndex> },
+    MakeMap { pairs: Vec<(InstrIndex, InstrIndex)> },
+    Index { collection: InstrIndex, key: InstrIndex },
+    Slice { collection: InstrIndex, start: Option<InstrIndex>, end: Option<InstrIndex> },
 
-    // Binding
+    // Binding & Scope (BlockStart/BlockEnd replace PushScope/PopScope)
+    BlockStart,                                  // Scope boundary: begin
+    BlockEnd,                                    // Scope boundary: end
+    Bind { name: SmolStr, value: InstrIndex },   // Introducer: name → value index
+    NameRef { bind: InstrIndex },                // Reference to Bind instruction (resolved at compile time)
+
+    // Legacy scope instructions (deprecated)
     PushScope,
     PopScope,
-    Bind(SmolStr),
 
-    // Lambda
-    MakeLambda(Vec<SmolStr>, usize),
+    // Lambda (explicit capture indices)
+    MakeLambda { params: Vec<SmolStr>, body: usize, captures: Vec<InstrIndex> },
 
-    // Stack
-    Pop,
-    Dup,
-    Pipe,
+    // Pipe (explicit operand indices)
+    Pipe { arg: InstrIndex, func: InstrIndex },
 
-    // Streams
-    MakeStream,
-    StreamMap,
-    StreamFilter,
-    StreamFlatMap,
-    StreamReduce,
-    StreamParse(SmolStr),
+    // Streams (explicit operand indices)
+    MakeStream { source: InstrIndex },
+    StreamMap { source: InstrIndex, func: InstrIndex },
+    StreamFilter { source: InstrIndex, pred: InstrIndex },
+    StreamFlatMap { source: InstrIndex, func: InstrIndex },
+    StreamReduce { source: InstrIndex, init: InstrIndex, func: InstrIndex },
+    StreamParse { source: InstrIndex, grammar: InstrIndex, rule: SmolStr },
 
-    // Pattern matching
-    MatchPattern(usize),
-    ExtractMapKey(SmolStr),
-    ExtractListIndex(usize),
+    // Pattern matching (explicit operand indices)
+    MatchPattern { value: InstrIndex, fail_target: InstrIndex },
+    ExtractMapKey { source: InstrIndex, key: SmolStr },
+    ExtractListIndex { source: InstrIndex, index: usize },
 
-    // Object definition
+    // Object definition (creates object in DB)
     DefineObject(SmolStr),
-    DefineMethod(SmolStr, usize),
-    DefineProp(SmolStr),
-    DefineFacet(SmolStr, usize, bool),
+    DefineMethod { object: InstrIndex, name: SmolStr, body: usize },
+    DefineProp { object: InstrIndex, name: SmolStr, value: InstrIndex },
+    DefineFacet { object: InstrIndex, name: SmolStr, members: Vec<InstrIndex>, terminal: bool },
 
-    // Grammar
-    GrammarApply(SmolStr),
+    // Grammar application (explicit operand indices)
+    GrammarApply { input: InstrIndex, grammar: InstrIndex, rule: SmolStr },
     LoadGrammar(Arc<Grammar>),
-    ExtendGrammar(Grammar),
+    ExtendGrammar { base: InstrIndex, extension: Grammar },
 
     // Exception handling
-    PushHandler(usize),
+    PushHandler { catch_target: InstrIndex },
     PopHandler,
-    Throw,
+    Throw { value: InstrIndex },
+
+    // Copy (for control flow convergence)
+    Copy { source: InstrIndex },
+
+    // No-op (placeholder)
+    Nop,
 }
 ```
 
@@ -153,21 +176,45 @@ pub enum Instruction {
 
 ## Execution Model
 
-### Stack Operations
+### Indexed RPN Operations
 
+```rust
+// (3 + 4) * 5 in Indexed RPN
+// Index 0: LoadInt(3)           → values[0] = 3
+// Index 1: LoadInt(4)           → values[1] = 4
+// Index 2: Add(lhs: 0, rhs: 1)  → values[2] = values[0] + values[1] = 7
+// Index 3: LoadInt(5)           → values[3] = 5
+// Index 4: Mul(lhs: 2, rhs: 3)  → values[4] = values[2] * values[3] = 35
 ```
-LoadInt(42)  : [] → [42]
-LoadInt(3)   : [42] → [42, 3]
-Add          : [42, 3] → [45]
+
+### Name Resolution
+
+Variables are resolved at **compile time** by the `resolve_names` pass:
+
+```rust
+// Before resolve_names:
+// Index 0: LoadInt(10)
+// Index 1: Bind("x", 0)
+// Index 2: LoadVar("x")          ← runtime lookup
+// Index 3: LoadInt(5)
+// Index 4: Add(lhs: 2, rhs: 3)
+
+// After resolve_names:
+// Index 0: LoadInt(10)
+// Index 1: Bind("x", 0)
+// Index 2: NameRef(bind: 1)      ← direct reference to Bind instruction
+// Index 3: LoadInt(5)
+// Index 4: Add(lhs: 2, rhs: 3)
 ```
 
 ### Function Calls
 
 ```
-LoadInt(args...)
-LoadVar(function)
-Call(arity)  : creates new frame, jumps to function body
-Return       : pops frame, pushes result
+// add(3, 4) where add = lambda(a, b) a + b
+// Index 0: LoadVar("add")         → values[0] = Lambda
+// Index 1: LoadInt(3)             → values[1] = 3
+// Index 2: LoadInt(4)             → values[2] = 4
+// Index 3: Call { func: 0, args: [1, 2] } → creates new frame, executes lambda body
 ```
 
 ### Async Operations
@@ -184,40 +231,40 @@ Pipe         : applies function to argument (x |> f → f(x))
 
 ### Vm
 
-[vm.rs:46](../fmpl-core/src/vm.rs:46):
+[vm.rs:89](../fmpl-core/src/vm.rs:89):
 
 ```rust
 pub struct Vm {
     pub objects: ObjectDb,
     pub grammars: GrammarRegistry,
-    stack: Vec<Value>,
     frames: Vec<Frame>,
     scopes: Vec<Scope>,
     pub current_user: Option<ObjectId>,
-    exception_handlers: Vec<(usize, usize, usize)>,
+    exception_handlers: Vec<(InstrIndex, usize)>,
     runtime: Option<tokio::runtime::Handle>,
 }
 ```
 
 ### Frame
 
-[vm.rs:13](../fmpl-core/src/vm.rs:13):
+[vm.rs:22](../fmpl-core/src/vm.rs:22):
 
 ```rust
 struct Frame {
     code: Arc<CompiledCode>,
-    ip: usize,
-    base: usize,
+    ip: usize,                    // Instruction pointer
+    values: Vec<Value>,           // Indexed by instruction position
     locals: HashMap<SmolStr, Value>,
     this: Option<ObjectId>,
     caller: Option<ObjectId>,
-    next_nested: usize,
 }
 ```
 
+**Key change**: `values: Vec<Value>` replaces operand stack — each instruction stores its result at `values[ip]`.
+
 ### CompiledCode
 
-[compiler.rs:128](../fmpl-core/src/compiler.rs:128):
+[compiler.rs:159](../fmpl-core/src/compiler.rs:159):
 
 ```rust
 pub struct CompiledCode {
@@ -227,11 +274,50 @@ pub struct CompiledCode {
 }
 ```
 
+### InstrIndex
+
+[compiler.rs:18](../fmpl-core/src/compiler.rs:18):
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct InstrIndex(pub usize);
+```
+
+Index into the instructions/values array for operand references.
+
+---
+
+## Compiler API
+
+### Name Resolution Pass
+
+[compiler.rs:235](../fmpl-core/src/compiler.rs:235):
+
+```rust
+pub fn resolve_names(code: &mut CompiledCode) {
+    // Converts LoadVar("x") → NameRef { bind: InstrIndex }
+    // Single pass O(n) traversal
+    // Eliminates runtime scope lookup
+}
+```
+
+### Backpatching
+
+[compiler.rs:186](../fmpl-core/src/compiler.rs:186):
+
+```rust
+impl CompiledCode {
+    fn emit(&mut self, instr: Instruction) -> InstrIndex;
+    fn next_index(&self) -> InstrIndex;
+    fn patch_jump_target(&mut self, idx: InstrIndex, target: InstrIndex);
+}
+```
+
 ---
 
 ## Public API
 
-[vm.rs:60](../fmpl-core/src/vm.rs:60):
+[vm.rs:102](../fmpl-core/src/vm.rs:102):
 
 ```rust
 impl Vm {

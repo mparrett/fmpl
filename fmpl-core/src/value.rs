@@ -276,6 +276,11 @@ impl Value {
             (Value::List(a), Value::List(b)) => {
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
             }
+            (Value::Map(a), Value::Map(b)) => {
+                a.len() == b.len()
+                    && a.iter()
+                        .all(|(k, v)| b.get(k).map_or(false, |bv| v.equals(bv)))
+            }
             _ => false,
         }
     }

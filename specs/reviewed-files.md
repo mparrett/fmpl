@@ -8,17 +8,17 @@ Prefer reviewing specs first, then proceed to docs/. Once all files have been re
 
 | File | Status | Last Reviewed |
 |------|--------|---------------|
-| specs/README.md | not started | — |
+| specs/README.md | reviewed | 2026-01-20 |
 | specs/fmpl-core.md | reviewed | 2026-01-20 |
 | specs/fmpl-cli.md | reviewed | 2026-01-20 |
 | specs/fmpl-web.md | reviewed | 2026-01-20 |
 | specs/grammar-system.md | reviewed | 2026-01-20 |
 | specs/streaming-grammar.md | reviewed | 2026-01-20 |
 | specs/object-system.md | reviewed | 2026-01-20 |
-| specs/vm.md | not started | — |
-| specs/persistence.md | not started | — |
-| specs/async-streams.md | not started | — |
-| specs/pattern-matching.md | not started | — |
+| specs/vm.md | reviewed | 2026-01-20 |
+| specs/persistence.md | reviewed | 2026-01-20 |
+| specs/async-streams.md | reviewed | 2026-01-20 |
+| specs/pattern-matching.md | reviewed | 2026-01-20 |
 
 ## Docs - Design
 

@@ -904,39 +904,53 @@ impl<'a> Parser<'a> {
     /// Parse let expression.
     fn parse_let(&mut self) -> Result<Expr> {
         self.expect(&Token::Let)?;
-        self.expect(&Token::LParen)?;
 
-        let mut bindings = Vec::new();
-        while !self.check(&Token::RParen) && !self.is_at_end() {
-            // Check if this is a pattern or simple binding
-            let binding = if self.check(&Token::Percent) || self.check(&Token::LBracket) {
-                // Pattern destructuring: %{...} = expr or [...] = expr
-                let pattern = self.parse_pattern()?;
-                self.expect(&Token::Eq)?;
-                let init = self.parse_expr()?;
-                LetBinding::Destructure(pattern, Box::new(init))
-            } else {
-                // Simple binding: name = expr or just name
-                let name = self.expect_ident()?;
-                let init = if self.check(&Token::Eq) {
-                    self.advance();
-                    Some(Box::new(self.parse_expr()?))
+        // Check if this is expression-style: let (bindings) in body
+        // or statement-style: let name = expr
+        if self.check(&Token::LParen) {
+            // Expression-style: let (bindings) in body
+            self.advance();
+
+            let mut bindings = Vec::new();
+            while !self.check(&Token::RParen) && !self.is_at_end() {
+                // Check if this is a pattern or simple binding
+                let binding = if self.check(&Token::Percent) || self.check(&Token::LBracket) {
+                    // Pattern destructuring: %{...} = expr or [...] = expr
+                    let pattern = self.parse_pattern()?;
+                    self.expect(&Token::Eq)?;
+                    let init = self.parse_expr()?;
+                    LetBinding::Destructure(pattern, Box::new(init))
                 } else {
-                    None
+                    // Simple binding: name = expr or just name
+                    let name = self.expect_ident()?;
+                    let init = if self.check(&Token::Eq) {
+                        self.advance();
+                        Some(Box::new(self.parse_expr()?))
+                    } else {
+                        None
+                    };
+                    LetBinding::Simple(name, init)
                 };
-                LetBinding::Simple(name, init)
-            };
 
-            bindings.push(binding);
+                bindings.push(binding);
 
-            if !self.check(&Token::RParen) && self.check(&Token::Comma) {
-                self.advance();
+                if !self.check(&Token::RParen) && self.check(&Token::Comma) {
+                    self.advance();
+                }
             }
-        }
-        self.expect(&Token::RParen)?;
+            self.expect(&Token::RParen)?;
 
-        let body = self.parse_expr()?;
-        Ok(Expr::Let(bindings, Box::new(body)))
+            let body = self.parse_expr()?;
+            Ok(Expr::Let(bindings, Box::new(body)))
+        } else {
+            // Statement-style: let name = expr
+            // Binds to current scope and returns the value
+            let name = self.expect_ident()?;
+            self.expect(&Token::Eq)?;
+            let init = Box::new(self.parse_expr()?);
+
+            Ok(Expr::LetStmt(name, init))
+        }
     }
 
     /// Parse lambda expression.

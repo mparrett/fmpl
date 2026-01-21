@@ -196,18 +196,40 @@ Without `_`, unmatched values cause runtime errors.
 
 | Pattern | Matches | Example | Status |
 |---------|---------|---------|--------|
-| `_` | Anything | `_ => default()` | Implemented |
+| `_` | Anything | `_ => default()` | Implemented ✅ |
 | Literal | Exact value | `42 => ...` | Parsed, not compiled |
 | `:symbol` | Symbol | `:ok => ...` | Parsed, not compiled |
-| `name` | Bind to name | `x => use(x)` | Implemented |
-| `%{k: v}` | Map with key | `%{id: i} => ...` | Let-binding only |
-| `[...]` | List | `[a, b] => ...` | Let-binding only |
+| `name` | Bind to name | `x => use(x)` | Implemented ✅ |
+| `%{k: v}` | Map with key | `%{id: i} => ...` | **Let-binding only** ⚠️ |
+| `[...]` | List | `[a, b] => ...` | **Let-binding only** ⚠️ |
 | `[h \| t]` | Head/tail | `[first \| rest] => ...` | Parsed only |
-| `p when g` | Pattern with guard | `n when n > 0 => ...` | Implemented |
+| `p when g` | Pattern with guard | `n when n > 0 => ...` | Implemented ✅ |
 | `p as name` | Bind match to name | `%{...} as whole => ...` | Parsed, not compiled |
 
-Note: Match expressions (`compiler.rs:526`) only support `Var` and `Wildcard` patterns.
+**⚠️ Current Limitation**: Map `%{}` and list `[]` patterns are **not supported in `@` match expressions**.
+
+They work in:
+- ✅ `let` destructuring: `let %{tool: t, args: a} = expr`
+- ❌ `@` pattern matching: `expr @ {%{tool: t} => ...}`
+
+**Workaround**: Use `let` destructuring before match expressions:
+
+```fmpl
+-- Instead of:
+response @ {
+  %{tool: t, args: a} => execute(t, a)  -- ❌ Not supported
+  _ => default()
+}
+
+-- Use:
+let %{tool: t, args: a} = response
+-- ... then use t and a directly
+```
+
+**Implementation Note**: Match expressions (`compiler.rs:526`) only support `Var` and `Wildcard` patterns.
 Let destructuring (`compiler.rs:729`) supports `Map` and fixed-length `List` patterns.
+
+Full map/list pattern matching in `@` expressions is planned but not yet implemented (requires extending pattern compilation to handle value-level patterns).
 
 ---
 
