@@ -145,8 +145,6 @@ struct PlanningTask {
 }
 
 struct App {
-    research_content: String,
-    planning_content: String,
     code_lines: Vec<String>,
     cursor_row: usize,
     cursor_col: usize,
@@ -188,8 +186,6 @@ impl App {
         let bootstrap_result = Self::bootstrap_llm(&mut vm);
 
         App {
-            research_content: String::from("Research view - Problem space analysis"),
-            planning_content: String::from("Planning view - Collaborative scope definition"),
             code_lines: vec![String::new()],
             cursor_row: 0,
             cursor_col: 0,
@@ -1930,6 +1926,38 @@ fn get_panel_title(base_title: &str, is_focused: bool) -> String {
     }
 }
 
+// Phase 6 Task 6.4: Get panel-specific help text
+fn get_panel_help(panel: PanelType, app: &App) -> String {
+    match panel {
+        PanelType::Research => {
+            if app.llm_mode {
+                if app.diff_view_mode {
+                    "Ctrl+D: exit diff | Ctrl+H: history | Esc: exit selection".to_string()
+                } else {
+                    "Ctrl+H: select history | Ctrl+E: edit msg | Ctrl+D: diff view | Ctrl+Z: undo"
+                        .to_string()
+                }
+            } else {
+                "Type to edit | Ctrl+S: save | Arrows: navigate".to_string()
+            }
+        }
+        PanelType::Planning => {
+            // Planning panel already has inline help (a:add e:edit etc.)
+            String::new()
+        }
+        PanelType::CodeEditor => {
+            if app.llm_mode {
+                "Type: input | Enter: send to LLM | Ctrl+L: exit chat".to_string()
+            } else if app.execute_mode {
+                "Enter: run code | Esc: cancel".to_string()
+            } else {
+                "Type: edit code | Esc+Enter: run | Ctrl+L: LLM chat".to_string()
+            }
+        }
+        PanelType::Output => "Scroll: ↑↓ | Ctrl+C: copy (planned)".to_string(),
+    }
+}
+
 fn draw_ui(f: &mut Frame, app: &App) {
     // Main layout: split into horizontal sections
     let chunks = Layout::default()
@@ -1946,15 +1974,30 @@ fn draw_ui(f: &mut Frame, app: &App) {
         .split(f.area());
 
     // Research panel - show conversation history in LLM mode, editable notes otherwise
+    let research_focused = app.focused_panel == PanelType::Research;
+    let research_help = get_panel_help(PanelType::Research, app);
+
     let research_content = if app.llm_mode {
-        if app.diff_view_mode {
+        let base_content = if app.diff_view_mode {
             app.format_diff_view()
         } else {
             app.format_history()
+        };
+        // Phase 6 Task 6.4: Append help text when focused
+        if research_focused && !research_help.is_empty() {
+            format!("{}\n\n─\n{}\n─", base_content, research_help)
+        } else {
+            base_content
         }
     } else {
         // Phase 6 Task 6.2: Show editable research lines with cursor indicator
-        app.research_lines.join("\n")
+        let base_content = app.research_lines.join("\n");
+        // Phase 6 Task 6.4: Append help text when focused
+        if research_focused && !research_help.is_empty() && !app.research_lines.is_empty() {
+            format!("{}\n\n─\n{}\n─", base_content, research_help)
+        } else {
+            base_content
+        }
     };
 
     let base_panel_title = if app.llm_mode {
@@ -1967,7 +2010,6 @@ fn draw_ui(f: &mut Frame, app: &App) {
         "Research View"
     };
 
-    let research_focused = app.focused_panel == PanelType::Research;
     let research_title = get_panel_title(base_panel_title, research_focused);
 
     let research_panel = if app.llm_mode {
@@ -2194,9 +2236,21 @@ fn draw_ui(f: &mut Frame, app: &App) {
         }
     }
 
-    let code_text = Text::from(code_spans);
-
+    // Phase 6 Task 6.4: Add help text when focused
     let code_focused = app.focused_panel == PanelType::CodeEditor;
+    if code_focused {
+        let code_help = get_panel_help(PanelType::CodeEditor, app);
+        if !code_help.is_empty() {
+            code_spans.push(Line::from(""));
+            code_spans.push(Line::from(vec![
+                Span::styled("─ ", Style::default().fg(Color::DarkGray)),
+                Span::styled(code_help, Style::default().fg(Color::Cyan)),
+                Span::styled(" ─", Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
+
+    let code_text = Text::from(code_spans);
     let code_title = get_panel_title("Code Editor", code_focused);
 
     let code_panel = Paragraph::new(code_text)
@@ -2209,9 +2263,14 @@ fn draw_ui(f: &mut Frame, app: &App) {
         .wrap(Wrap { trim: false }); // Don't wrap - show horizontal scroll
 
     // Output panel
-    let output_content = format!("{}{}", app.output, warning_text);
-
     let output_focused = app.focused_panel == PanelType::Output;
+    let output_help = get_panel_help(PanelType::Output, app);
+    let output_content = if output_focused && !output_help.is_empty() {
+        format!("{}\n\n─\n{}\n─", app.output, output_help)
+    } else {
+        format!("{}{}", app.output, warning_text)
+    };
+
     let output_title = get_panel_title("Execution Output", output_focused);
 
     let output_panel = Paragraph::new(output_content.as_str())
