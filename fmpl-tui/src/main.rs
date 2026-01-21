@@ -14,8 +14,10 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
+use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Unique identifier for a conversation node
@@ -123,10 +125,11 @@ struct App {
     vm: Vm,
     // Layer 2: Conversation DAG for backtracking and branching
     conversation_nodes: HashMap<NodeId, ConversationNode>,
-    current_head: NodeId,            // Current branch tip
-    node_counter: NodeId,            // For generating IDs
-    edit_mode: bool,                 // When true, editing last message in history
-    editing_node_id: Option<NodeId>, // Node being edited (None = new message)
+    current_head: NodeId,               // Current branch tip
+    node_counter: NodeId,               // For generating IDs
+    edit_mode: bool,                    // When true, editing last message in history
+    editing_node_id: Option<NodeId>,    // Node being edited (None = new message)
+    compaction_warning: Option<String>, // Warning message when off-track/circular detected
 }
 
 impl App {
@@ -161,6 +164,7 @@ impl App {
             node_counter: 0,
             edit_mode: false,
             editing_node_id: None,
+            compaction_warning: None,
         }
     }
 
@@ -170,6 +174,7 @@ impl App {
             "lib/llm-common.fmpl",
             "lib/ollama.fmpl",
             "lib/anthropic.fmpl",
+            "lib/compaction.fmpl", // Phase 5: Auto-detection
         ];
 
         let mut results = Vec::new();
@@ -486,6 +491,21 @@ impl App {
                 // List all branches
                 self.output = self.list_branches();
             }
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Phase 5: Compact conversation if warning is present
+                if self.compaction_warning.is_some() {
+                    // Clear warning and optionally compact conversation
+                    // For now, just clear the warning (user can manually undo/branch)
+                    self.compaction_warning = None;
+                    self.output = String::from(
+                        "Compaction warning cleared.\n\nTip: Use Ctrl+Z to undo, Ctrl+N to create a new branch, or Ctrl+E to edit the last message.",
+                    );
+                } else {
+                    self.output = String::from(
+                        "No compaction warning active.\n\nCompaction suggestions appear when the agent goes off-track or enters a circular conversation.",
+                    );
+                }
+            }
             KeyCode::Esc => {
                 // If in edit mode, cancel and return to normal mode
                 if self.edit_mode {
@@ -683,6 +703,86 @@ impl App {
         self.scroll_offset = 0;
     }
 
+    /// Phase 5: Auto-detection - Check if conversation needs compaction
+    /// Detects off-track patterns (groveling/apologizing) and circular conversations
+    fn check_compaction_needed(&mut self, last_response: &str) {
+        // Need at least 2 assistant messages to detect circular patterns
+        let history = self.get_history();
+        let assistant_msgs: Vec<_> = history.iter().filter(|m| m.role == "assistant").collect();
+
+        if assistant_msgs.len() < 2 {
+            return; // Not enough data for detection
+        }
+
+        // Build FMPL code to call compaction detection
+        let messages_array = self.format_history_as_fmpl();
+        let escaped_response = last_response.replace('\\', "\\\\").replace('"', "\\\"");
+
+        let detection_code = format!(
+            "let compaction = io.load(\"lib/compaction.fmpl\"); \
+             compaction.should_compact({}, \"{}\")",
+            messages_array, escaped_response
+        );
+
+        // Run detection
+        match eval(&mut self.vm, &detection_code) {
+            Ok(Value::Map(result)) => {
+                // Extract should_compact, reason, confidence from result map
+                let should_compact = match self.get_map_bool(&result, "should_compact") {
+                    Some(v) => v,
+                    None => false,
+                };
+
+                if should_compact {
+                    let reason = match self.get_map_string(&result, "reason") {
+                        Some(v) => v,
+                        None => "Unknown reason".to_string(),
+                    };
+
+                    let confidence = match self.get_map_float(&result, "confidence") {
+                        Some(v) => v,
+                        None => 0.0,
+                    };
+
+                    // Set warning message for display in UI
+                    self.compaction_warning = Some(format!(
+                        "⚠️ Agent Issue Detected (confidence: {:.0}%)\nReason: {}\n\nPress Ctrl+C to compact conversation",
+                        confidence * 100.0,
+                        reason
+                    ));
+                }
+            }
+            _ => {
+                // Detection failed silently - don't interrupt user experience
+            }
+        }
+    }
+
+    /// Helper: Extract string value from FMPL Map
+    fn get_map_string(&self, map: &Arc<HashMap<SmolStr, Value>>, key: &str) -> Option<String> {
+        map.get(&SmolStr::new(key)).and_then(|v| match v {
+            Value::String(s) => Some(s.to_string()),
+            _ => None,
+        })
+    }
+
+    /// Helper: Extract bool value from FMPL Map
+    fn get_map_bool(&self, map: &Arc<HashMap<SmolStr, Value>>, key: &str) -> Option<bool> {
+        map.get(&SmolStr::new(key)).and_then(|v| match v {
+            Value::Bool(b) => Some(*b),
+            _ => None,
+        })
+    }
+
+    /// Helper: Extract float value from FMPL Map
+    fn get_map_float(&self, map: &Arc<HashMap<SmolStr, Value>>, key: &str) -> Option<f64> {
+        map.get(&SmolStr::new(key)).and_then(|v| match v {
+            Value::Float(f) => Some(*f),
+            Value::Int(i) => Some(*i as f64),
+            _ => None,
+        })
+    }
+
     fn send_to_llm(&mut self, prompt: &str) {
         let provider_name = match self.llm_provider {
             LlmProvider::Ollama => "ollama",
@@ -717,6 +817,9 @@ impl App {
                             ">>> LLM ({})\n{}\n\nResponse:\n{}",
                             provider_name, prompt, response
                         );
+
+                        // Phase 5: Auto-detection - Check for off-track/circular patterns
+                        self.check_compaction_needed(&response);
                     }
                     Ok(other) => {
                         self.output = format!(
@@ -879,6 +982,13 @@ fn draw_ui(f: &mut Frame, app: &App) {
         )
     };
 
+    // Phase 5: Display compaction warning if detected
+    let warning_text = if let Some(ref warning) = app.compaction_warning {
+        format!("\n\n{}", warning)
+    } else {
+        String::new()
+    };
+
     let visible_lines: Vec<String> = app
         .code_lines
         .iter()
@@ -934,7 +1044,8 @@ fn draw_ui(f: &mut Frame, app: &App) {
         .wrap(Wrap { trim: false }); // Don't wrap - show horizontal scroll
 
     // Output panel
-    let output_panel = Paragraph::new(app.output.as_str())
+    let output_content = format!("{}{}", app.output, warning_text);
+    let output_panel = Paragraph::new(output_content.as_str())
         .block(
             Block::default()
                 .borders(Borders::ALL)

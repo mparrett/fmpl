@@ -601,6 +601,7 @@ dependencies = [
  "crossterm",
  "fmpl-core",
  "ratatui",
+ "smol_str",
 ]
 
 [[package]]

@@ -1,0 +1,155 @@
+# Compaction detection library for Layer 2 auto-detection
+# Implements off-track and circular conversation detection
+
+## Detection Helpers
+
+### Off-Track Pattern Detection
+# Detects when agent is groveling/apologizing (lost original goal)
+# Returns: %{detected: bool, pattern: string, confidence: float}
+let detect_off_track = \msg
+  msg @ {
+    # Pattern 1: "You're absolutely right" - agent lost original goal
+    [/you'reabsolutelyright|youareabsolutelyright|absolutelyright] => %{
+      detected: true,
+      pattern: "groveling",
+      confidence: 0.9,
+      message: "Agent appears to be groveling/agreeing excessively (lost original goal)"
+    }
+
+    # Pattern 2: "I apologize" - defensive language
+    [/iapologize|isorry|apologiesfor|sorryfor] => %{
+      detected: true,
+      pattern: "apologizing",
+      confidence: 0.8,
+      message: "Agent is using defensive/apologetic language"
+    }
+
+    # Pattern 3: "Let me be clear" - condescending
+    [/letmebeclear|tobeclear|clearly] => %{
+      detected: true,
+      pattern: "condescending",
+      confidence: 0.7,
+      message: "Agent is using condescending language"
+    }
+
+    # No off-track patterns detected
+    _ => %{
+      detected: false,
+      pattern: null,
+      confidence: 0.0,
+      message: null
+    }
+  }
+
+### Circular Conversation Detection
+# Detects repeated similar responses in conversation history
+# history: Array of %{role: string, content: string} messages
+# Returns: %{detected: bool, cycle_count: int, message: string}
+let detect_circular = \history
+  # Need at least 4 messages to detect a cycle (user/assistant/user/assistant)
+  if (history.length < 4)
+    %{detected: false, cycle_count: 0, message: null}
+  else
+    # Get last 2 assistant responses
+    let last_assistant_msgs = history.filter(\m m.role == "assistant").slice(-2)
+
+    # If we have 2+ assistant messages, compare them
+    if (last_assistant_msgs.length < 2)
+      %{detected: false, cycle_count: 0, message: null}
+    else
+      let prev = last_assistant_msgs.get(-2).content
+      let curr = last_assistant_msgs.get(-1).content
+
+      # Simple similarity check: if responses are very short (1-3 words)
+      # and similar, likely circular
+      let prev_words = prev.split(" ").length
+      let curr_words = curr.split(" ").length
+
+      # Both short (< 20 chars) and similar length = likely circular
+      if ((prev.length < 20) && (curr.length < 20) && ((prev_words - curr_words).abs() < 2))
+        %{detected: true, cycle_count: 2, message: "Circular conversation detected (repeated short responses)"}
+      else
+        %{detected: false, cycle_count: 0, message: null}
+
+### Combined Detection
+# Runs all detection checks and returns recommendation
+# history: Array of %{role: string, content: string} messages
+# last_response: Last assistant response string
+# Returns: %{should_compact: bool, reason: string, confidence: float}
+let should_compact = \history, last_response
+  let off_track_check = detect_off_track(last_response)
+  let circular_check = detect_circular(history)
+
+  # Prioritize off-track detection (higher confidence)
+  if (off_track_check.detected)
+    %{
+      should_compact: true,
+      reason: off_track_check.message,
+      confidence: off_track_check.confidence,
+      detection_type: "off-track"
+    }
+  # Then check for circular conversation
+  else if (circular_check.detected)
+    %{
+      should_compact: true,
+      reason: circular_check.message,
+      confidence: 0.7,
+      detection_type: "circular"
+    }
+  # No issues detected
+  else
+    %{
+      should_compact: false,
+      reason: null,
+      confidence: 0.0,
+      detection_type: null
+    }
+
+### Message Similarity Helper
+# Checks if two messages are similar (for future enhancement)
+# Uses simple word overlap for now
+let message_similarity = \msg1, msg2
+  let words1 = msg1.split(" ").map(\w w.lower())
+  let words2 = msg2.split(" ").map(\w w.lower())
+
+  # Count overlapping words
+  let overlap = words1.filter(\w words2.contains(w)).length
+  let total = words1.length + words2.length
+
+  # Jaccard-like similarity: 2*overlap / total
+  if (total == 0)
+    0.0
+  else
+    (2.0 * overlap) / total
+
+## Utility Functions
+
+### Count Messages by Role
+# Returns: %{user: int, assistant: int}
+let count_messages = \history
+  let counts = history.reduce(\acc, msg
+    if (msg.role == "user")
+      acc.set("user", (acc.get("user") + 1))
+    else
+      acc.set("assistant", (acc.get("assistant") + 1))
+  , %{user: 0, assistant: 0})
+
+  counts
+
+### Get Last N Messages
+# Returns last N messages from history
+let get_last_n = \history, n
+  history.slice(-n)
+
+### Export API
+%{
+  # Main detection functions
+  detect_off_track: detect_off_track,
+  detect_circular: detect_circular,
+  should_compact: should_compact,
+
+  # Utility functions
+  message_similarity: message_similarity,
+  count_messages: count_messages,
+  get_last_n: get_last_n
+}

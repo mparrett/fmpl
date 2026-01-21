@@ -1,0 +1,78 @@
+# Test script for Phase 5 Auto-Detection
+# Demonstrates off-track and circular conversation detection
+
+# Load compaction library
+let compaction = io.load("lib/compaction.fmpl")
+
+# Test 1: Off-track detection - "You're absolutely right" pattern
+let test1_response = "You're absolutely right, I apologize for the confusion."
+let test1_result = compaction.detect_off_track(test1_response)
+
+print("=== Test 1: Off-Track Detection (Groveling) ===")
+print("Response: " + test1_response)
+print("Detected: " + test1_result.detected)
+print("Pattern: " + test1_result.pattern)
+print("Confidence: " + test1_result.confidence)
+print("Message: " + test1_result.message)
+print("")
+
+# Test 2: Off-track detection - "I apologize" pattern
+let test2_response = "I apologize for the confusion. Let me be clear about this."
+let test2_result = compaction.detect_off_track(test2_response)
+
+print("=== Test 2: Off-Track Detection (Apologizing) ===")
+print("Response: " + test2_response)
+print("Detected: " + test2_result.detected)
+print("Pattern: " + test2_result.pattern)
+print("Confidence: " + test2_result.confidence)
+print("Message: " + test2_result.message)
+print("")
+
+# Test 3: Normal response (should NOT trigger detection)
+let test3_response = "The sum of 2 and 2 is 4. This is basic arithmetic."
+let test3_result = compaction.detect_off_track(test3_response)
+
+print("=== Test 3: Normal Response (No Detection) ===")
+print("Response: " + test3_response)
+print("Detected: " + test3_result.detected)
+print("Pattern: " + test3_result.pattern)
+print("Confidence: " + test3_result.confidence)
+print("")
+
+# Test 4: Circular conversation detection
+let test4_history = [
+  %{role: "user", content: "What is 2+2?"},
+  %{role: "assistant", content: "2+2 is 4"},
+  %{role: "user", content: "Are you sure?"},
+  %{role: "assistant", content: "Yes, it's 4"},
+  %{role: "user", content: "Really?"},
+  %{role: "assistant", content: "Yes"}
+]
+let test4_result = compaction.detect_circular(test4_history)
+
+print("=== Test 4: Circular Conversation Detection ===")
+print("History length: " + test4_history.length)
+print("Detected: " + test4_result.detected)
+print("Cycle count: " + test4_result.cycle_count)
+print("Message: " + test4_result.message)
+print("")
+
+# Test 5: Full should_compact check
+let test5_last_response = "I apologize, you're absolutely right about everything."
+let test5_history = [
+  %{role: "user", content: "Explain this"},
+  %{role: "assistant", content: "I apologize for the confusion"},
+  %{role: "user", content: "Try again"},
+  %{role: "assistant", content: "You're absolutely right"}
+]
+let test5_result = compaction.should_compact(test5_history, test5_last_response)
+
+print("=== Test 5: Full Compaction Check ===")
+print("Last response: " + test5_last_response)
+print("Should compact: " + test5_result.should_compact)
+print("Reason: " + test5_result.reason)
+print("Confidence: " + test5_result.confidence)
+print("Detection type: " + test5_result.detection_type)
+print("")
+
+print("=== All Tests Complete ===")
