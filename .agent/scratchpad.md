@@ -2,7 +2,7 @@
 
 ## TASK: Recovery - System Healthy, Awaiting Task Start (2026-01-21T22:50:01)
 
-**Event**: `task.resume` → System verified healthy, all tasks complete, awaiting task.start
+**Event**: `task.resume` → Previous iteration did not publish an event. Review the scratchpad and either dispatch the next task or complete the loop.
 
 **Status**: ✅ All 213 tests passing (verified at 2026-01-21T22:50:01)
 
