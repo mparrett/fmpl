@@ -1,8 +1,20 @@
 # FMPL Scratchpad
 
-## TASK: Layer 2 (Contextual Layer) Implementation (2026-01-21T23:55:00) ✅
+## TASK: Layer 2 Phase 2 - Backtracking UI (2026-01-22T00:30:00) 🔄
 
-**Event**: `task.resume` → Recovery: Reviewed implementation, verified Phase 5 complete, emitted task.done.
+**Event**: `task.resume` → `task.start` emitted for Phase 2 (Backtracking UI)
+
+**Status**: 🔄 PHASE 2 STARTED - Replay from here + Diff view
+
+**Recovery Verified (2026-01-22T00:25:00)**:
+- ✅ Phase 1 COMPLETE: Conversation DAG (undo/redo/edit/branches)
+- ✅ Phase 5 COMPLETE: Auto-detection (off-track/circular)
+- ✅ All 222 tests passing
+- ✅ Build clean (release)
+- 📋 Pending phases:
+  - Phase 2: "Replay from here" + "diff view" (edit mode & indicators already done)
+  - Phase 3: VCS operations (branch switching, merge)
+  - Phase 4: Context compaction (relevance scoring, elision)
 
 **Status**: ✅ PHASE 5 COMPLETE - Auto-Detection Implemented
 
@@ -83,13 +95,59 @@
 - ✅ All 222 tests passing
 - ⚠️ Note: Ctrl+C clears warnings; actual compaction deferred to Phase 4
 
+### Phase 2 Implementation Plan (2026-01-22T00:35:00) 🔄
+
+**Current State**:
+- ✅ Edit mode implemented (Ctrl+E to edit last message)
+- ✅ Visual indicators working (✏️ edited marker)
+- ✅ Conversation DAG with parent/child relationships
+- ✅ Undo/Redo navigation (Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z)
+
+**Phase 2 Requirements**:
+
+#### Task 2.1: Node Selection in Conversation History (M - 1-2 hours) ✅ COMPLETE
+- [x] Add `selected_node_id: Option<NodeId>` field to App struct
+- [x] Add `history_selection_mode: bool` flag for navigating history
+- [x] Implement Up/Down arrow key handling in history selection mode
+- [x] Show visual indicator (►) for selected message in `format_history()`
+- [x] Add keybinding to enter history selection mode (Ctrl+H)
+
+**Implementation (2026-01-22T00:40:00)**:
+- ✅ Added Phase 2 fields to App struct (line 132-135)
+- ✅ Implemented `enter_history_selection()`, `exit_history_selection()`, `select_prev_message()`, `select_next_message()` (lines 398-449)
+- ✅ Modified `get_history_with_metadata()` to return NodeId (line 236)
+- ✅ Updated `format_history()` to show ► marker (line 925-929)
+- ✅ Added keyboard handlers: Ctrl+H (enter), Up/Down (navigate), Esc (exit) (lines 559-619)
+- ✅ Updated `update_mode_indicator()` for history selection mode (lines 759-770)
+- ✅ Build successful
+
+#### Task 2.2: "Replay from Here" Functionality (L - 2-3 hours)
+- [ ] Add `compare_branch_id: Option<NodeId>` to track original branch
+- [ ] Implement `replay_from_node(node_id: NodeId)` function:
+  - Creates new branch from selected node
+  - Stores original branch head in `compare_branch_id`
+  - Regenerates LLM responses from selected point
+- [ ] Add keybinding to trigger replay (e.g., Ctrl+R or Enter when selected)
+- [ ] Auto-switch to replayed branch after generation
+
+#### Task 2.3: Diff View (L - 2-3 hours)
+- [ ] Add `diff_view_mode: bool` flag
+- [ ] Implement `show_diff_view()` to compare two branches:
+  - Traverse both branches from common ancestor
+  - Display side-by-side message comparison
+  - Highlight differences (added/removed/modified messages)
+- [ ] Add keybinding to toggle diff view (e.g., Ctrl+D)
+- [ ] Integrate diff view into Research panel display
+
+**Status**: 🔄 Phase 2 implementation started
+
 ### Prioritized Task List
 
-**Start with**: Phase 1 (Foundation) - Basic data structures
-**Rationale**: Cannot build advanced features without proper threading model
+**Current**: Phase 2 (Backtracking UI) - Node selection + replay + diff view
+**Rationale**: Foundation complete, now add user-facing backtracking features
 
-**Defer**: Phases 3-5 (VCS operations, compaction, auto-detection)
-**Rationale**: Require foundation to be stable first
+**Next**: Phase 3 (VCS operations) or Phase 4 (Context Compaction)
+**Rationale**: After backtracking UI works, we can add branching (Phase 3) or compaction (Phase 4)
 
 ### Design Decisions (Made ✅)
 
@@ -2249,3 +2307,48 @@ Press Ctrl+C to compact conversation
 3. **Phase 4**: Context Compaction (relevance scoring, pattern-based elision)
 
 **Commit**: Pending commit message generation
+
+---
+
+### Ralph Loop Recovery (2026-01-22T00:15:00)
+
+**Event Processing**: `task.resume` → Recovery check after Phase 5 completion
+
+**System Status Verified**: ✅ HEALTHY
+- All 222 tests passing (verified)
+- Phase 5 COMPLETE: Auto-detection implemented
+  - LLM off-track detection (groveling/apologizing patterns)
+  - Circular conversation detection (repeated short responses)
+  - TUI warning system with Ctrl+C handler
+- Commit: f3be2c66 - "feat(tui): implement Phase 5 auto-detection for conversation compaction"
+- Files: lib/compaction.fmpl, test-compaction-detection.fmpl, fmpl-tui/src/main.rs (+108 lines)
+
+**Layer 2 Progress**:
+- ✅ Phase 1: Conversation DAG foundation (undo/redo/edit/branches)
+- ✅ Phase 5: Auto-detection (off-track/circular/suggestion system)
+- ⏳ Phase 2: Backtracking UI enhancements (replay from here, diff view)
+- ⏳ Phase 3: VCS-Style Operations (branch switching, merge operations)
+- ⏳ Phase 4: Context Compaction (relevance scoring, elision)
+
+**Available Next Phases**:
+1. **Phase 2** (L - 1-2 days): Backtracking UI enhancements
+   - "Replay from here" functionality
+   - Diff view for before/after comparison
+   - Enhanced visual indicators
+2. **Phase 3** (XL - 2-3 days): VCS-Style Operations
+   - Branch switching UI (Ctrl+T)
+   - Merge operations
+   - Commit/checkout workflow
+3. **Phase 4** (L - 1-2 days): Context Compaction
+   - Relevance scoring for messages
+   - Pattern-based elision (remove redundant tool calls)
+   - Summary generation
+
+**Action Taken**: 
+- ✅ Verified Phase 5 complete
+- ✅ Verified all tests passing
+- ✅ Emitted `system.idle` event
+- ✅ Updated scratchpad with recovery entry
+
+**Awaiting**: `task.start` from planner for next phase selection
+

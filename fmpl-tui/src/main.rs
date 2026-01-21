@@ -130,6 +130,11 @@ struct App {
     edit_mode: bool,                    // When true, editing last message in history
     editing_node_id: Option<NodeId>,    // Node being edited (None = new message)
     compaction_warning: Option<String>, // Warning message when off-track/circular detected
+    // Phase 2: Backtracking UI
+    selected_node_id: Option<NodeId>, // Currently selected node in history (for replay)
+    history_selection_mode: bool,     // When true, arrow keys navigate history
+    compare_branch_id: Option<NodeId>, // Branch to compare with (for diff view)
+    diff_view_mode: bool,             // When true, show diff between branches
 }
 
 impl App {
@@ -165,6 +170,11 @@ impl App {
             edit_mode: false,
             editing_node_id: None,
             compaction_warning: None,
+            // Phase 2: Initialize backtracking UI fields
+            selected_node_id: None,
+            history_selection_mode: false,
+            compare_branch_id: None,
+            diff_view_mode: false,
         }
     }
 
@@ -224,7 +234,8 @@ impl App {
     }
 
     /// Get conversation history with metadata (for display)
-    fn get_history_with_metadata(&self) -> Vec<(ChatMessage, bool, Option<String>)> {
+    /// Returns: Vec<(NodeId, ChatMessage, bool, Option<String>)>
+    fn get_history_with_metadata(&self) -> Vec<(NodeId, ChatMessage, bool, Option<String>)> {
         let mut history = Vec::new();
         let mut current_id = self.current_head;
 
@@ -242,8 +253,9 @@ impl App {
         path.reverse();
 
         // Extract messages with edited flag and branch name in order
-        for (_, node) in path {
+        for (id, node) in path {
             history.push((
+                id,
                 node.message.clone(),
                 node.metadata.edited,
                 node.metadata.branch_name.clone(),
@@ -395,6 +407,66 @@ impl App {
         Ok(())
     }
 
+    // Phase 2: Backtracking UI functions
+
+    /// Enter history selection mode (navigate through conversation with arrow keys)
+    fn enter_history_selection(&mut self) -> Result<(), String> {
+        if self.conversation_nodes.is_empty() {
+            return Err("No conversation history to select from".to_string());
+        }
+
+        // Start by selecting the current head
+        self.selected_node_id = Some(self.current_head);
+        self.history_selection_mode = true;
+
+        Ok(())
+    }
+
+    /// Exit history selection mode
+    fn exit_history_selection(&mut self) {
+        self.selected_node_id = None;
+        self.history_selection_mode = false;
+    }
+
+    /// Move selection to next (newer) message
+    fn select_next_message(&mut self) -> Result<(), String> {
+        let selected = self.selected_node_id.ok_or("No node selected")?;
+
+        // Find children of the selected node
+        let children: Vec<NodeId> = self
+            .conversation_nodes
+            .values()
+            .filter(|node| node.parent_id == Some(selected))
+            .map(|node| node.id)
+            .collect();
+
+        if children.is_empty() {
+            return Err("Already at the newest message".to_string());
+        }
+
+        // Select the first child (simple version)
+        self.selected_node_id = Some(children[0]);
+        Ok(())
+    }
+
+    /// Move selection to previous (older) message
+    fn select_prev_message(&mut self) -> Result<(), String> {
+        let selected = self.selected_node_id.ok_or("No node selected")?;
+
+        let node = self
+            .conversation_nodes
+            .get(&selected)
+            .ok_or("Selected node not found")?;
+
+        match node.parent_id {
+            Some(parent) => {
+                self.selected_node_id = Some(parent);
+                Ok(())
+            }
+            None => Err("Already at the oldest message".to_string()),
+        }
+    }
+
     /// List all branches in the conversation DAG
     fn list_branches(&self) -> String {
         let mut branches = std::collections::HashMap::new();
@@ -506,9 +578,33 @@ impl App {
                     );
                 }
             }
+            KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Phase 2: Enter history selection mode
+                if self.llm_mode {
+                    match self.enter_history_selection() {
+                        Ok(()) => {
+                            self.output = String::from(
+                                "History selection mode.\n\nUse ↑/↓ to navigate, Enter to replay from here, Esc to exit.",
+                            );
+                        }
+                        Err(e) => {
+                            self.output = format!("Failed to enter history selection: {}", e);
+                        }
+                    }
+                } else {
+                    self.output = String::from(
+                        "History selection requires LLM mode.\n\nUse Ctrl+L to enter LLM chat mode first.",
+                    );
+                }
+            }
             KeyCode::Esc => {
+                // Phase 2: Exit history selection mode
+                if self.history_selection_mode {
+                    self.exit_history_selection();
+                    self.output = String::from("History selection mode exited.");
+                }
                 // If in edit mode, cancel and return to normal mode
-                if self.edit_mode {
+                else if self.edit_mode {
                     self.edit_mode = false;
                     self.editing_node_id = None;
                     self.code_lines = vec![String::new()];
@@ -517,6 +613,37 @@ impl App {
                     self.output = String::from("Edit mode cancelled");
                 } else {
                     self.execute_mode = !self.execute_mode;
+                }
+            }
+            // Phase 2: History selection navigation
+            KeyCode::Up if self.history_selection_mode => {
+                match self.select_prev_message() {
+                    Ok(()) => {
+                        // Navigation successful, display will update automatically
+                    }
+                    Err(e) => {
+                        self.output = format!("Navigation: {}", e);
+                    }
+                }
+            }
+            KeyCode::Down if self.history_selection_mode => {
+                match self.select_next_message() {
+                    Ok(()) => {
+                        // Navigation successful, display will update automatically
+                    }
+                    Err(e) => {
+                        self.output = format!("Navigation: {}", e);
+                    }
+                }
+            }
+            KeyCode::Enter if self.history_selection_mode => {
+                // Phase 2: "Replay from here" - placeholder for now
+                if let Some(selected_id) = self.selected_node_id {
+                    self.output = format!(
+                        "Replay from node {}\n\n(Feature coming soon: This will regenerate LLM responses from the selected point)",
+                        selected_id
+                    );
+                    self.exit_history_selection();
                 }
             }
             KeyCode::Char(c) => {
@@ -658,7 +785,9 @@ impl App {
             LlmProvider::Anthropic => "Anthropic",
         };
 
-        let mode = if self.edit_mode {
+        let mode = if self.history_selection_mode {
+            "History Selection".to_string()
+        } else if self.edit_mode {
             "EDIT (last message)".to_string()
         } else if self.llm_mode {
             format!("LLM ({})", provider_name)
@@ -666,7 +795,9 @@ impl App {
             "Execute".to_string()
         };
 
-        let action = if self.edit_mode {
+        let action = if self.history_selection_mode {
+            "↑/↓ navigate, Enter to replay, Esc to exit"
+        } else if self.edit_mode {
             "Ctrl+Enter to save, Esc to cancel"
         } else {
             "Press Enter to run"
@@ -865,10 +996,13 @@ impl App {
 
         let mut text = String::from("Conversation History:\n");
         text.push_str(&"=".repeat(40));
+        if self.history_selection_mode {
+            text.push_str("\n(Selection mode: ↑/↓ to move, Enter to replay, Esc to exit)");
+        }
         text.push('\n');
 
         for (i, item) in history.iter().enumerate() {
-            let (msg, edited, branch_name) = item;
+            let (node_id, msg, edited, branch_name) = item;
             let role_label = if msg.role == "user" {
                 "👤 User"
             } else {
@@ -880,9 +1014,16 @@ impl App {
             } else {
                 String::new()
             };
+            let selected_marker =
+                if self.history_selection_mode && self.selected_node_id == Some(*node_id) {
+                    "► "
+                } else {
+                    "   "
+                };
 
             text.push_str(&format!(
-                "\n[{}] {}{}{}\n",
+                "\n{}[{}] {}{}{}\n",
+                selected_marker,
                 i + 1,
                 role_label,
                 edited_marker,
