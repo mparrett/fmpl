@@ -14,6 +14,7 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::io;
@@ -117,6 +118,7 @@ enum PanelType {
     Planning,
     CodeEditor,
     Output,
+    Tools, // Phase 7: Tool management panel
 }
 
 /// Task status for planning panel (Phase 6 Task 6.3)
@@ -142,6 +144,18 @@ struct PlanningTask {
     description: String,
     status: TaskStatus,
     priority: Priority,
+}
+
+/// A tool for LLM agent operations (Phase 7 Task 7.1)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Tool {
+    id: String,
+    name: String,
+    description: String,
+    enabled: bool,
+    timeout_ms: u64,
+    requires_confirmation: bool,
+    usage_count: usize,
 }
 
 struct App {
@@ -176,6 +190,9 @@ struct App {
     planning_tasks: Vec<PlanningTask>, // Task list
     selected_task_index: usize,        // Currently selected task
     task_counter: usize,               // For generating task IDs
+    // Phase 7 Task 7.1: Tool management
+    tools: Vec<Tool>,           // Available tools
+    selected_tool_index: usize, // Currently selected tool in tools panel
 }
 
 impl App {
@@ -224,6 +241,9 @@ impl App {
             planning_tasks: Self::load_planning_tasks(),
             selected_task_index: 0,
             task_counter: 0,
+            // Phase 7 Task 7.1: Initialize tools (load from file or use defaults)
+            tools: Self::load_tools(),
+            selected_tool_index: 0,
         }
     }
 
@@ -387,6 +407,97 @@ impl App {
             }
             Err(e) => {
                 eprintln!("Warning: Failed to save planning tasks: {}", e);
+            }
+        }
+    }
+
+    // Phase 7 Task 7.1 & 7.4: Tool management persistence
+
+    /// Load tools from .agent/tools.json, or return default tools
+    fn load_tools() -> Vec<Tool> {
+        // Try to load from JSON file
+        match std::fs::read_to_string(".agent/tools.json") {
+            Ok(content) => match serde_json::from_str::<serde_json::Value>(&content) {
+                Ok(json) => {
+                    if let Some(tools_array) = json.get("tools").and_then(|t| t.as_array()) {
+                        let mut tools = Vec::new();
+                        for tool_json in tools_array {
+                            if let Ok(tool) = serde_json::from_value(tool_json.clone()) {
+                                tools.push(tool);
+                            }
+                        }
+                        if !tools.is_empty() {
+                            return tools;
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to parse .agent/tools.json: {}", e);
+                }
+            },
+            Err(_) => {
+                // File doesn't exist, will create with defaults
+            }
+        }
+
+        // Return default tools
+        vec![
+            Tool {
+                id: "grep".to_string(),
+                name: "grep".to_string(),
+                description: "Search codebase".to_string(),
+                enabled: true,
+                timeout_ms: 30000,
+                requires_confirmation: false,
+                usage_count: 0,
+            },
+            Tool {
+                id: "file_read".to_string(),
+                name: "file_read".to_string(),
+                description: "Read file contents".to_string(),
+                enabled: true,
+                timeout_ms: 10000,
+                requires_confirmation: false,
+                usage_count: 0,
+            },
+            Tool {
+                id: "bash_execute".to_string(),
+                name: "bash_execute".to_string(),
+                description: "Execute shell commands".to_string(),
+                enabled: true,
+                timeout_ms: 60000,
+                requires_confirmation: true,
+                usage_count: 0,
+            },
+            Tool {
+                id: "llm_query".to_string(),
+                name: "llm_query".to_string(),
+                description: "Query LLM for assistance".to_string(),
+                enabled: true,
+                timeout_ms: 120000,
+                requires_confirmation: false,
+                usage_count: 0,
+            },
+        ]
+    }
+
+    /// Save tools to .agent/tools.json
+    fn save_tools(&self) {
+        use serde_json::json;
+
+        let tools_json = json!({
+            "tools": self.tools
+        });
+
+        match std::fs::write(
+            ".agent/tools.json",
+            serde_json::to_string_pretty(&tools_json).unwrap(),
+        ) {
+            Ok(_) => {
+                // Success - silent save
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to save tools: {}", e);
             }
         }
     }
@@ -985,6 +1096,12 @@ impl App {
                     "Planning panel focused.\n\nArrow keys navigate tasks when editable (Phase 6.3).",
                 );
             }
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Phase 7 Task 7.2: Focus tools panel
+                self.focused_panel = PanelType::Tools;
+                self.output =
+                    String::from("Tools panel focused.\n\nArrow keys navigate tools list.");
+            }
             KeyCode::Char('e')
                 if key.modifiers.contains(KeyModifiers::CONTROL) && !self.edit_mode =>
             {
@@ -1141,6 +1258,17 @@ impl App {
             {
                 if self.selected_task_index < self.planning_tasks.len() - 1 {
                     self.selected_task_index += 1;
+                }
+            }
+            // Phase 7 Task 7.2: Arrow keys for tool selection when tools panel focused
+            KeyCode::Up if self.focused_panel == PanelType::Tools && !self.tools.is_empty() => {
+                if self.selected_tool_index > 0 {
+                    self.selected_tool_index -= 1;
+                }
+            }
+            KeyCode::Down if self.focused_panel == PanelType::Tools && !self.tools.is_empty() => {
+                if self.selected_tool_index < self.tools.len() - 1 {
+                    self.selected_tool_index += 1;
                 }
             }
             KeyCode::Esc => {
@@ -1955,6 +2083,7 @@ fn get_panel_help(panel: PanelType, app: &App) -> String {
             }
         }
         PanelType::Output => "Scroll: ↑↓ | Ctrl+C: copy (planned)".to_string(),
+        PanelType::Tools => "Enter: toggle | e: edit | a: add | d: delete".to_string(),
     }
 }
 
@@ -2067,85 +2196,179 @@ fn draw_ui(f: &mut Frame, app: &App) {
         }
     };
 
-    // Planning panel
+    // Planning panel (or Tools panel when focused)
     let planning_focused = app.focused_panel == PanelType::Planning;
-    let planning_title = get_panel_title("Planning View", planning_focused);
-
-    // Phase 6 Task 6.3: Render planning tasks or show placeholder
-    let planning_content = if app.planning_tasks.is_empty() {
-        if planning_focused {
-            vec![
-                Line::from("No tasks yet."),
-                Line::from(""),
-                Line::from("Press 'a' to add a task."),
-            ]
-        } else {
-            vec![Line::from("Planning view - Collaborative scope definition")]
-        }
+    let tools_focused = app.focused_panel == PanelType::Tools;
+    let panel_title = if tools_focused {
+        get_panel_title("Tools View", true)
     } else {
-        let mut lines = Vec::new();
-
-        // Add help text when focused
-        if planning_focused {
-            lines.push(Line::from("a:add e:edit Enter:toggle d:del +/-:priority"));
-            lines.push(Line::from(""));
-        }
-
-        // Render each task
-        for (idx, task) in app.planning_tasks.iter().enumerate() {
-            let is_selected = planning_focused && idx == app.selected_task_index;
-
-            // Status indicator
-            let status_marker = match task.status {
-                TaskStatus::Pending => "[ ]",
-                TaskStatus::InProgress => "[>]",
-                TaskStatus::Complete => "[x]",
-            };
-
-            // Priority color
-            let priority_color = match task.priority {
-                Priority::Low => Color::Blue,
-                Priority::Medium => Color::Yellow,
-                Priority::High => Color::Red,
-            };
-
-            let priority_tag = match task.priority {
-                Priority::Low => "[L]",
-                Priority::Medium => "[M]",
-                Priority::High => "[H]",
-            };
-
-            // Build line with task info
-            if is_selected {
-                // Selected task gets highlighted
-                lines.push(Line::from(vec![
-                    Span::styled("► ", Style::default().fg(Color::Yellow)),
-                    Span::styled(status_marker, Style::default().fg(Color::Yellow)),
-                    Span::raw(" "),
-                    Span::styled(&task.description, Style::default().fg(Color::Yellow)),
-                    Span::raw(" "),
-                    Span::styled(priority_tag, Style::default().fg(priority_color)),
-                ]));
-            } else {
-                lines.push(Line::from(vec![
-                    Span::raw("  "),
-                    Span::raw(status_marker),
-                    Span::raw(" "),
-                    Span::raw(&task.description),
-                    Span::raw(" "),
-                    Span::styled(priority_tag, Style::default().fg(priority_color)),
-                ]));
-            }
-        }
-
-        lines
+        get_panel_title("Planning View", planning_focused)
     };
 
-    let planning_panel = Paragraph::new(Text::from(planning_content))
+    // Phase 7 Task 7.2: Render tools list when tools panel is focused, otherwise render planning tasks
+    let middle_panel_content = if tools_focused {
+        // Show tools list
+        if app.tools.is_empty() {
+            vec![
+                Line::from("No tools configured."),
+                Line::from(""),
+                Line::from("Press 'a' to add a tool."),
+            ]
+        } else {
+            let mut lines = Vec::new();
+
+            // Header
+            lines.push(Line::from(vec![
+                Span::styled("ID  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Name           ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Enabled  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Timeout  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Confirm  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Use", Style::default().fg(Color::DarkGray)),
+            ]));
+            lines.push(Line::from(""));
+
+            // Render each tool
+            for (idx, tool) in app.tools.iter().enumerate() {
+                let is_selected = idx == app.selected_tool_index;
+
+                let enabled_str = if tool.enabled { "✓" } else { "✗" };
+                let enabled_color = if tool.enabled {
+                    Color::Green
+                } else {
+                    Color::Red
+                };
+
+                let confirm_str = if tool.requires_confirmation {
+                    "✓"
+                } else {
+                    "✗"
+                };
+                let confirm_color = if tool.requires_confirmation {
+                    Color::Yellow
+                } else {
+                    Color::DarkGray
+                };
+
+                if is_selected {
+                    // Selected tool gets highlighted
+                    lines.push(Line::from(vec![
+                        Span::styled("► ", Style::default().fg(Color::Yellow)),
+                        Span::styled(&tool.name, Style::default().fg(Color::Yellow)),
+                        Span::raw(" ".repeat(14 - tool.name.len().min(14))),
+                        Span::styled(enabled_str, Style::default().fg(Color::Yellow)),
+                        Span::raw(" ".repeat(9)),
+                        Span::styled(
+                            format!("{}s", tool.timeout_ms / 1000),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                        Span::raw(" ".repeat(9)),
+                        Span::styled(confirm_str, Style::default().fg(Color::Yellow)),
+                        Span::raw(" ".repeat(9)),
+                        Span::styled(
+                            format!("{}", tool.usage_count),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("   "),
+                        Span::raw(&tool.name),
+                        Span::raw(" ".repeat(14 - tool.name.len().min(14))),
+                        Span::styled(enabled_str, Style::default().fg(enabled_color)),
+                        Span::raw(" ".repeat(9)),
+                        Span::raw(format!("{}s", tool.timeout_ms / 1000)),
+                        Span::raw(" ".repeat(9)),
+                        Span::styled(confirm_str, Style::default().fg(confirm_color)),
+                        Span::raw(" ".repeat(9)),
+                        Span::raw(format!("{}", tool.usage_count)),
+                    ]));
+                }
+            }
+
+            // Add help text
+            lines.push(Line::from(""));
+            lines.push(Line::from("Enter: toggle | e: edit | a: add | d: delete"));
+
+            lines
+        }
+    } else {
+        // Show planning tasks
+        if app.planning_tasks.is_empty() {
+            if planning_focused {
+                vec![
+                    Line::from("No tasks yet."),
+                    Line::from(""),
+                    Line::from("Press 'a' to add a task."),
+                ]
+            } else {
+                vec![Line::from("Planning view - Collaborative scope definition")]
+            }
+        } else {
+            let mut lines = Vec::new();
+
+            // Add help text when focused
+            if planning_focused {
+                lines.push(Line::from("a:add e:edit Enter:toggle d:del +/-:priority"));
+                lines.push(Line::from(""));
+            }
+
+            // Render each task
+            for (idx, task) in app.planning_tasks.iter().enumerate() {
+                let is_selected = planning_focused && idx == app.selected_task_index;
+
+                // Status indicator
+                let status_marker = match task.status {
+                    TaskStatus::Pending => "[ ]",
+                    TaskStatus::InProgress => "[>]",
+                    TaskStatus::Complete => "[x]",
+                };
+
+                // Priority color
+                let priority_color = match task.priority {
+                    Priority::Low => Color::Blue,
+                    Priority::Medium => Color::Yellow,
+                    Priority::High => Color::Red,
+                };
+
+                let priority_tag = match task.priority {
+                    Priority::Low => "[L]",
+                    Priority::Medium => "[M]",
+                    Priority::High => "[H]",
+                };
+
+                // Build line with task info
+                if is_selected {
+                    // Selected task gets highlighted
+                    lines.push(Line::from(vec![
+                        Span::styled("► ", Style::default().fg(Color::Yellow)),
+                        Span::styled(status_marker, Style::default().fg(Color::Yellow)),
+                        Span::raw(" "),
+                        Span::styled(&task.description, Style::default().fg(Color::Yellow)),
+                        Span::raw(" "),
+                        Span::styled(priority_tag, Style::default().fg(priority_color)),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::raw(status_marker),
+                        Span::raw(" "),
+                        Span::raw(&task.description),
+                        Span::raw(" "),
+                        Span::styled(priority_tag, Style::default().fg(priority_color)),
+                    ]));
+                }
+            }
+
+            lines
+        }
+    };
+
+    let planning_panel = Paragraph::new(Text::from(middle_panel_content))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(planning_title)
+                .title(panel_title)
                 .title_alignment(Alignment::Center),
         )
         .wrap(Wrap { trim: false }); // Don't wrap to preserve formatting

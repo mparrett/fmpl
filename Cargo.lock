@@ -601,6 +601,8 @@ dependencies = [
  "crossterm",
  "fmpl-core",
  "ratatui",
+ "serde",
+ "serde_json",
  "smol_str",
 ]
 
