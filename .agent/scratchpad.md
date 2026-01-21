@@ -1,5 +1,59 @@
 # FMPL Scratchpad
 
+## TASK: Enhanced TUI for 12-Layer Architecture (2026-01-21T08:00:00)
+
+**Event**: `task.resume` → Continue work on needle-moving task toward 12-layer agentic architecture
+
+### Current State (from Previous Loop)
+
+**Completed**:
+- ✅ Basic fmpl-tui crate created (commit 1b6ffa8)
+- ✅ Three-panel layout (Research, Planning, Execution)
+- ✅ FMPL code execution with real-time output
+- ✅ All 191 tests passing
+- ✅ TUTORIAL.md written and verified
+
+**Next Steps** (from 12-layer architecture doc):
+
+**Priority 1 - Layer 1 Enhancements**:
+- [ ] Add multi-line code editor (currently single-line)
+- [ ] Implement context buffers for Research/Planning panels
+- [ ] Add history/backtracking for executed code
+
+**Priority 2 - Layer 2: Contextual Layer**:
+- [ ] Implement revision history with VCS-style branching
+- [ ] Add automated backtrack detection ("You're absolutely right" pattern)
+- [ ] Context compaction and elision for tool/MCP calls
+
+**Priority 3 - Tooling Layer**:
+- [ ] Tool management interface
+- [ ] External tool integration (MCP/ACP)
+- [ ] Tool composition UI
+
+**Priority 4 - LLM Integration**:
+- [ ] Provider switching (Ollama, Anthropic)
+- [ ] Multi-turn conversation support
+- [ ] Tracing through agent→tool loops
+
+### Decision Point
+
+Which enhancement to tackle first?
+
+**Option A**: Multi-line code editor (foundational, enables complex FMPL programs)
+**Option B**: Context buffers + history (enables Layer 2 backtracking)
+**Option C**: LLM integration (enables agentic loops)
+**Option D**: Tool management interface (enables Layer 4)
+
+### Recommendation
+
+**Option A**: Multi-line code editor
+- **Complexity**: Medium (M t-shirt)
+- **Benefit**: Enables complex FMPL programs in TUI
+- **Dependencies**: None
+- **Blocks**: Future agentic features need complex code editing
+
+---
+
 ## TASK: Fix `let` Syntax and Tool Calling Tests (2026-01-21T00:23:00)
 
 **Event**: `task.resume` → Work on needle-moving task towards ratatui agentic app
@@ -83,6 +137,151 @@ Map patterns work in:
 - ✅ `task.complete` event published
 
 **Next Phase**: Ratatui agentic UI (awaiting task.start from planner)
+
+---
+
+## TASK: Test Tutorial with REPL (2026-01-21T07:15:00)
+
+**Event**: `task.start` → Test the tutorial examples in the REPL and fix issues
+
+### Issues Found During Testing
+
+**Operator Issues**:
+1. ❌ `**` (exponentiation) - NOT IMPLEMENTED
+   - Tutorial shows: `2 ** 3` → 8
+   - Actual: Parser error
+   - Fix: Remove from tutorial
+
+2. ❌ `!` (logical NOT) - NOT WORKING
+   - Tutorial shows: `!true` → false
+   - Actual: Parser error
+   - Fix: Remove from tutorial
+
+3. ⚠️ `!=` (inequality) - NOT WORKING
+   - Tutorial shows: `1 != 2` → true
+   - Actual: Parser error
+   - Fix: Remove from tutorial
+
+4. ⚠️ `&&` and `||` - RETURN NULL INSTEAD OF BOOLEAN
+   - Tutorial shows: `true && false` → false, `true || false` → true
+   - Actual: Both return `null`
+   - Fix: Document limitation or remove from tutorial
+
+**Pattern Matching Issues**:
+5. ❌ Integer literal patterns in `@` - NOT SUPPORTED
+   - Tutorial shows: `42 @ { 0 => "zero", 1 => "one", _ => "other" }`
+   - Actual: "unexpected character in pattern: '0'"
+   - Fix: Remove or use regex patterns only
+
+**Object Issues**:
+6. ❌ Anonymous object literals - NOT SUPPORTED
+   - Tutorial shows: `object { count: 0 }` (anonymous)
+   - Actual: "expected identifier" (objects must be named)
+   - Fix: Change to `object counter { count: 0 }`
+
+**Function Issues**:
+7. ❌ Undefined function references - NOT DEFINED
+   - Tutorial shows: `add(1, 2)` → 3
+   - Actual: "Undefined variable: add"
+   - Fix: Remove or show how to define `add` first
+
+**Working Features** (verified ✅):
+- ✅ Arithmetic: `+`, `-`, `*`, `/`
+- ✅ Comparisons: `==`, `<`, `>`, `<=`, `>=`
+- ✅ String literals
+- ✅ Lists: `[1, 2, 3]`, `[]`
+- ✅ Let statements: `let x = 42`
+- ✅ Variable access
+- ✅ Pattern matching with regex: `"hello" @ { [a-z]+ => "word" }`
+- ✅ If-then-else
+- ✅ Lambdas: `\x x * 2`, `(\x x * 2)(5)`
+- ✅ Named objects: `object counter { count: 0 }`
+
+### Fix Plan
+
+1. Remove `**` operator from tutorial
+2. Remove `!` operator from tutorial
+3. Remove `!=` operator from tutorial
+4. Document `&&`/`||` limitation or remove
+5. Fix pattern matching examples (use regex only)
+6. Fix object examples (use named objects)
+7. Remove or fix function call examples
+
+---
+
+## TASK: FMPL Tutorial for Experienced Programmers (2026-01-21T06:45:00)
+
+**Event**: `task.resume` → Recovery + write tutorial for experienced programmers
+
+### ✅ COMPLETED: Tutorial Testing and Fixes (2026-01-21T07:25:00)
+
+**Changes Made to TUTORIAL.md**:
+
+1. **Removed non-working operators**:
+   - Removed `**` (exponentiation)
+   - Removed `!` (logical NOT)
+   - Removed `!=` (inequality)
+   - Removed `&&`, `||` (logical operators - documented as partially implemented)
+
+2. **Fixed pattern matching examples**:
+   - Simplified to single regex pattern matches
+   - Removed wildcard patterns (not yet supported)
+   - Removed integer literal patterns (not yet supported)
+   - Documented map/list pattern matching as planned feature
+
+3. **Fixed object examples**:
+   - Changed anonymous objects to named objects
+   - Removed constructor syntax (`^name`)
+   - Simplified method call examples
+
+4. **Fixed function examples**:
+   - Added note that functions must be defined before use
+   - Clarified function definition syntax
+
+5. **Updated Status section**:
+   - Accurate list of implemented features
+   - Clear distinction between implemented, partial, and not implemented
+   - Specific limitations documented
+
+**Test Results**:
+- ✅ All 143 core tests pass
+- ✅ All 8 tool_calling tests pass
+- ✅ Tutorial examples verified to work in REPL
+
+**Files Modified**:
+- `TUTORIAL.md` - Fixed 7 sections, removed non-working examples
+- `.agent/scratchpad.md` - Documented testing process and results
+
+**File Created**: `TUTORIAL.md` - Comprehensive guide for experienced programmers
+
+**Contents**:
+1. **Quick Start** - Installation, Hello World
+2. **Language Basics** - Primitives, operators, comments
+3. **Data Structures** - Lists, maps, objects
+4. **Pattern Matching with `@`** - The core swiss-army knife operator
+5. **Grammars and Parsing** - OMeta-style PEG system
+6. **Control Flow** - Conditionals, loops, let-bindings
+7. **Functions and Lambdas** - Definitions, higher-order functions
+8. **Objects and Methods** - Object literals, special variables
+9. **Practical Examples** - JSON parsing, HTTP requests, agent loops
+10. **Tool Calling and Agent Workflows** - Multi-turn conversations
+11. **Advanced Topics** - Grammar-based agents, persistence
+12. **Status and Limitations** - What works now vs. planned
+
+**Key Features**:
+- ✅ Focus on **what actually works** (not aspirational features)
+- ✅ Real examples from test files (`apply_operator.fmpl`)
+- ✅ Tool calling workflows (json::parse, curl builtins)
+- ✅ Agent loop patterns (multi-turn tool calling)
+- ✅ Links to specs and design docs
+- ✅ Installation and running instructions
+- ✅ Current implementation status (implemented/partial/not yet)
+
+**Length**: ~500 lines of practical, code-heavy tutorial content
+
+**Next**: Awaiting `task.start` from planner for next needle-moving task
+
+### Ralph Loop Complete ✅ (2026-01-21T05:51:37)
 
 **Event History**:
 - Line 153: `test.done` → tool_calling tests passing

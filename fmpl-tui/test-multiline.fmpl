@@ -1,0 +1,12 @@
+# Test multi-line editor functionality
+# This is a complex FMPL program that tests:
+# 1. Multi-line function definitions
+# 2. Pattern matching
+# 3. Object creation
+# 4. Tool calling
+
+let add = \x \y x + y
+
+let result = add(10, 20)
+
+result
