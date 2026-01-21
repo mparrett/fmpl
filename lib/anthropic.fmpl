@@ -102,8 +102,60 @@ anthropic.chat_history = \messages
       %{error: e} => "Error: " + json::stringify(e)
     }
 
-# Stream completion (Claude supports SSE streaming)
+# Stream completion with SSE parsing
+# Returns concatenated response text from all SSE chunks
 anthropic.chat_stream = \prompt
-  # TODO: Implement with SSE stream parsing
-  "Error: Streaming not implemented yet"
+  let api_key = anthropic.get_api_key()
+
+  if api_key == null then
+    "Error: ANTHROPIC_API_KEY environment variable not set"
+  else
+    let body = json::stringify(%{
+      model: anthropic.model,
+      max_tokens: 1024,
+      stream: true,
+      messages: [%{
+        role: "user",
+        content: prompt
+      }]
+    })
+
+    let response = ::__builtin_curl.post(
+      anthropic.endpoint,
+      body,
+      %{headers: %{
+        "x-api-key": api_key,
+        "anthropic-version": anthropic.version,
+        "content-type": "application/json"
+      }}
+    )
+
+    # Get the SSE response text
+    let response_text = response.source |> stream::collect
+
+    # Parse SSE format and extract tokens
+    @ response_text {
+      %{error: e} => "Error: " + json::stringify(e)
+      text => {
+        let events = sse.parse(text)
+
+        # Extract tokens from Anthropic events
+        # Anthropic format: {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "token"}}
+        anthropic.extract_deltas(events)
+      }
+    }
+
+# Extract and concatenate all delta.text fields from Anthropic SSE events
+anthropic.extract_deltas = \events
+  @ events {
+    [] => ""
+    [head, ...tail] => {
+      let token = @ head {
+        %{type: "content_block_delta", delta: %{type: "text_delta", text: text}} => text
+        %{type: "content_block_delta", delta: %{text: text}} => text
+        _ => ""
+      }
+      token + anthropic.extract_deltas(tail)
+    }
+  }
 

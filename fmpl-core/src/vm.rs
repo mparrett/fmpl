@@ -1072,6 +1072,9 @@ impl Vm {
         if name == "env" {
             return Ok(Value::Symbol(SmolStr::new("__builtin_env")));
         }
+        if name == "sse" {
+            return Ok(Value::Symbol(SmolStr::new("__builtin_sse")));
+        }
 
         // Check scopes (innermost first)
         for scope in self.scopes.iter().rev() {
@@ -1256,6 +1259,17 @@ impl Vm {
                         .collect(),
                     ))),
                 }
+            }
+            ("__builtin_sse", "parse") => {
+                let text = match args.first() {
+                    Some(Value::String(s)) => s.as_str(),
+                    _ => {
+                        return Err(Error::Runtime(
+                            "sse.parse requires string argument".to_string(),
+                        ));
+                    }
+                };
+                crate::builtins::SseBuiltin::parse(text)
             }
             _ => Err(Error::Runtime(format!(
                 "unknown builtin: {}.{}",

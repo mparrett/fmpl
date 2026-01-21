@@ -44,8 +44,8 @@ ollama.parse_response = \json_text
     _ => "Unexpected response: " + json_text
   }
 
-# Stream completion (returns a stream for real-time responses)
-# Note: This requires stream parsing of SSE events
+# Stream completion with SSE parsing
+# Returns concatenated response text from all SSE chunks
 ollama.chat_stream = \prompt
   let body = json::stringify(%{
     model: ollama.model,
@@ -53,7 +53,37 @@ ollama.chat_stream = \prompt
     stream: true
   })
 
-  ::__builtin_curl.post(ollama.endpoint + "/api/generate", body)
+  let response = ::__builtin_curl.post(ollama.endpoint + "/api/generate", body)
+
+  # Get the SSE response text
+  let response_text = response.source |> stream::collect
+
+  # Parse SSE format and extract tokens
+  @ response_text {
+    %{error: msg} => "Error: " + msg
+    text => {
+      let events = sse.parse(text)
+
+      # Extract tokens from Ollama events
+      # Ollama format: {"response": "token", "done": false}
+      # We concatenate all response fields
+      ollama.extract_responses(events)
+    }
+  }
+
+# Extract and concatenate all response fields from a list of SSE events
+ollama.extract_responses = \events
+  @ events {
+    [] => ""
+    [head, ...tail] => {
+      let token = @ head {
+        %{response: text, done: _} => text
+        %{response: text} => text
+        _ => ""
+      }
+      token + ollama.extract_responses(tail)
+    }
+  }
 
 # List available models
 ollama.list_models = \

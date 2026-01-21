@@ -1,10 +1,63 @@
 # FMPL Scratchpad
 
-## TASK: Recovery - System Healthy, Awaiting Task Start (2026-01-21T22:50:01)
+## TASK: SSE Streaming Response Parsing (2026-01-21T23:10:00)
 
-**Event**: `task.resume` → Previous iteration did not publish an event. Review the scratchpad and either dispatch the next task or complete the loop.
+**Event**: `task.start` → Parse Server-Sent Events from Ollama/Anthropic for real-time LLM response display
 
-**Status**: ✅ All 213 tests passing (verified at 2026-01-21T22:51:00)
+**Status**: ✅ All 222 tests passing (9 new tests added)
+
+### ✅ COMPLETED: SSE Parsing Implementation (2026-01-21T23:30:00)
+
+**Implementation Summary**:
+- ✅ SSE parsing builtin (`sse::parse()`) - extracts JSON from `data:` lines
+- ✅ Ollama chat_stream() - parses SSE, extracts `response` field
+- ✅ Anthropic chat_stream() - parses SSE, extracts `delta.text` field
+- ✅ 6 integration tests covering Ollama, Anthropic, edge cases
+- ✅ Compiler support for `sse::parse()` syntax
+- ✅ VM dispatcher registration
+
+**Files Created**:
+- `fmpl-core/src/builtins/sse.rs` - SSE parsing module (156 lines)
+- `fmpl-core/tests/sse_parsing.rs` - Integration tests (165 lines)
+
+**Files Modified**:
+- `fmpl-core/src/builtins/mod.rs` - Export SseBuiltin
+- `fmpl-core/src/vm.rs` - Register `sse` symbol, add parse dispatcher
+- `fmpl-core/src/compiler.rs` - Support `sse::parse()` qualified calls
+- `lib/ollama.fmpl` - Implement `chat_stream()` with SSE parsing
+- `lib/anthropic.fmpl` - Implement `chat_stream()` with SSE parsing
+
+**Test Results**:
+- ✅ 146 core tests passing
+- ✅ 6 SSE parsing tests passing
+- ✅ 70 other tests passing
+- ✅ **Total: 222 tests passing (up from 213!)**
+
+**Key Features**:
+1. **SSE Format Support**: Handles `data:` prefix, double-newline termination, comment lines
+2. **Ollama Integration**: `ollama.chat_stream()` extracts and concatenates `response` field
+3. **Anthropic Integration**: `anthropic.chat_stream()` extracts `delta.text` field
+4. **Recursive List Processing**: Uses `[head, ...tail]` pattern matching for token concatenation
+
+**Usage Examples**:
+
+```fmpl
+# Ollama streaming
+let result = ollama.chat_stream("What is 2+2?")
+# => "4" (concatenated from SSE tokens)
+
+# Anthropic streaming
+let result = anthropic.chat_stream("What is 2+2?")
+# => "4" (concatenated from SSE tokens)
+
+# Direct SSE parsing
+let events = sse.parse("data: {\"text\": \"hi\"}\n\ndata: {\"text\": \" there\"}\n\n")
+# => [%{text: "hi"}, %{text: " there"}]
+```
+
+**Note**: This implementation parses SSE synchronously (collects full response, then parses). For true real-time streaming in TUI, the next step would be to modify TUI's `wait_for_async()` to handle StreamEvent::Data incrementally and display each token chunk as it arrives.
+
+**Current Status**: SSE parsing foundation complete. LLM libraries support `chat_stream()`. TUI real-time display pending.
 
 ### Ralph Loop Recovery Analysis
 
@@ -53,6 +106,22 @@
 3. Enhanced TUI features (context visualization, tool management UI)
 4. 12-layer architecture implementation (Layers 2, 4+)
 5. Additional builtins and language features
+
+### Ralph Loop Analysis (2026-01-21T23:05:00)
+
+**Recovery Complete**: System verified healthy
+- All 213 tests passing
+- LLM TUI integration complete (commit ddb2c34)
+- Tool calling working (13/13 tests)
+- All prioritized tasks complete
+
+**Next Priority Work** (from specs/scratchpad):
+1. **SSE streaming response parsing** - Better UX for LLM responses (parse Server-Sent Events from Ollama/Anthropic)
+2. **Conversation history management** - Multi-turn context in TUI
+3. **Enhanced TUI features** - Context visualization, tool management UI
+4. **12-layer architecture implementation** - Layers 2 (Contextual), 4+ (UI components)
+
+**Awaiting**: `task.start` from planner to begin next needle-moving work
 
 ### LOOP_COMPLETE
 

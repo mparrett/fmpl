@@ -809,7 +809,7 @@ impl Compiler {
             ));
         }
 
-        // Special handling for builtin qualified calls like json::parse() and json::stringify()
+        // Special handling for builtin qualified calls like json::parse(), json::stringify(), and sse::parse()
         if let Expr::Qualified(qn) = func {
             if qn.parts.len() == 2 {
                 let module = &qn.parts[0];
@@ -821,6 +821,25 @@ impl Compiler {
                     let builtin_idx = self
                         .code
                         .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_json")));
+                    let mut arg_indices = Vec::with_capacity(args.len());
+                    for arg in args {
+                        match arg {
+                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                            Arg::Placeholder => unreachable!(),
+                        }
+                    }
+                    return Ok(self.code.emit(Instruction::MethodCall {
+                        receiver: builtin_idx,
+                        method: method.clone(),
+                        args: arg_indices,
+                    }));
+                }
+
+                // Convert sse::parse(args) to __builtin_sse.parse(args)
+                if module == "sse" && method == "parse" {
+                    let builtin_idx = self
+                        .code
+                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_sse")));
                     let mut arg_indices = Vec::with_capacity(args.len());
                     for arg in args {
                         match arg {
