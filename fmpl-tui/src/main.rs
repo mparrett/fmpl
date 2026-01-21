@@ -217,7 +217,7 @@ impl App {
     }
 
     /// Get conversation history with metadata (for display)
-    fn get_history_with_metadata(&self) -> Vec<(ChatMessage, bool)> {
+    fn get_history_with_metadata(&self) -> Vec<(ChatMessage, bool, Option<String>)> {
         let mut history = Vec::new();
         let mut current_id = self.current_head;
 
@@ -234,9 +234,13 @@ impl App {
         // Reverse to get root → current_head order
         path.reverse();
 
-        // Extract messages with edited flag in order
+        // Extract messages with edited flag and branch name in order
         for (_, node) in path {
-            history.push((node.message, node.metadata.edited));
+            history.push((
+                node.message.clone(),
+                node.metadata.edited,
+                node.metadata.branch_name.clone(),
+            ));
         }
 
         history
@@ -340,7 +344,7 @@ impl App {
         };
 
         let metadata = NodeMetadata {
-            branch_name: None,
+            branch_name: original_node.metadata.branch_name.clone(),
             edited: true, // Mark as edited
             compacted: false,
         };
@@ -365,6 +369,52 @@ impl App {
         self.cursor_col = 0;
 
         Ok(())
+    }
+
+    /// Create a branch at the current head with the given name
+    fn create_branch(&mut self, name: String) -> Result<(), String> {
+        if self.conversation_nodes.is_empty() {
+            return Err("No conversation to branch".to_string());
+        }
+
+        // Get current node and update its branch name
+        let current_node = self
+            .conversation_nodes
+            .get_mut(&self.current_head)
+            .ok_or("No current node")?;
+
+        current_node.metadata.branch_name = Some(name);
+
+        Ok(())
+    }
+
+    /// List all branches in the conversation DAG
+    fn list_branches(&self) -> String {
+        let mut branches = std::collections::HashMap::new();
+
+        // Collect unique branch names and their node counts
+        for node in self.conversation_nodes.values() {
+            if let Some(ref name) = node.metadata.branch_name {
+                *branches.entry(name.clone()).or_insert(0) += 1;
+            }
+        }
+
+        if branches.is_empty() {
+            return "No branches created yet.\n\nUse Ctrl+N to create a branch at the current point.".to_string();
+        }
+
+        let mut result = String::from("Branches:\n");
+        result.push_str(&"=".repeat(40));
+        result.push('\n');
+
+        for (name, count) in branches.iter() {
+            result.push_str(&format!("\n🌿 {} ({} nodes)\n", name, count));
+        }
+
+        result.push_str(&"\n=".repeat(40));
+        result.push('\n');
+
+        result
     }
 
     fn handle_input(&mut self, key: KeyEvent) {
@@ -417,6 +467,22 @@ impl App {
                         self.output = format!("Edit mode failed: {}", e);
                     }
                 }
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Create a new branch at current point
+                let branch_name = format!("branch-{}", self.node_counter);
+                match self.create_branch(branch_name.clone()) {
+                    Ok(()) => {
+                        self.output = format!("Created branch: {}", branch_name);
+                    }
+                    Err(e) => {
+                        self.output = format!("Create branch failed: {}", e);
+                    }
+                }
+            }
+            KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // List all branches
+                self.output = self.list_branches();
             }
             KeyCode::Esc => {
                 // If in edit mode, cancel and return to normal mode
@@ -696,14 +762,27 @@ impl App {
         text.push_str(&"=".repeat(40));
         text.push('\n');
 
-        for (i, (msg, edited)) in history.iter().enumerate() {
+        for (i, item) in history.iter().enumerate() {
+            let (msg, edited, branch_name) = item;
             let role_label = if msg.role == "user" {
                 "👤 User"
             } else {
                 "🤖 Assistant"
             };
             let edited_marker = if *edited { " ✏️ (edited)" } else { "" };
-            text.push_str(&format!("\n[{}] {}{}\n", i + 1, role_label, edited_marker));
+            let branch_marker = if let Some(name) = branch_name {
+                format!(" 🌿 [{}]", name)
+            } else {
+                String::new()
+            };
+
+            text.push_str(&format!(
+                "\n[{}] {}{}{}\n",
+                i + 1,
+                role_label,
+                edited_marker,
+                branch_marker
+            ));
             text.push_str(&format!("{}\n", msg.content));
             text.push_str(&"-".repeat(40));
             text.push('\n');

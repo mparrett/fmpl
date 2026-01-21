@@ -4,10 +4,11 @@
 
 **Event**: `task.resume` → Previous iteration completed planning. Now implementing Phase 1.
 
-**Status**: 🔄 IN PROGRESS - Phase 1 foundation complete (Tasks 1.1-1.3), moving to Tasks 1.4-1.5
+**Status**: 🔄 IN PROGRESS - Phase 1 Tasks 1.1-1.4 complete, moving to Task 1.5
 
-**Phase 1 Complete**: Conversation DAG foundation with undo/redo
+**Phase 1 Complete**: Conversation DAG foundation with undo/redo/edit
 **Commit**: 0728b818 - feat(tui): implement Layer 2 conversation DAG foundation
+**Commit**: 2487a3d8 - feat(tui): implement message editing for conversation DAG
 
 ### Current Foundation (✅ Complete)
 - ✅ Conversation history tracking (`Vec<ChatMessage>`)
@@ -133,10 +134,12 @@
 **Status**: ✅ COMPLETE - Undo/redo keybindings working, node ID displayed in mode indicator
 
 #### Task 1.4: Add message editing capability (M - 2 hours)
-- [ ] Add edit mode for conversation history (Ctrl+E to edit last message)
-- [ ] Implement "edit message" UI state
-- [ ] Create new node when message is edited (preserve history)
-- [ ] Mark edited nodes with `metadata.edited = true`
+- [x] Add edit mode for conversation history (Ctrl+E to edit last message)
+- [x] Implement "edit message" UI state
+- [x] Create new node when message is edited (preserve history)
+- [x] Mark edited nodes with `metadata.edited = true`
+**Status**: ✅ COMPLETE - Ctrl+E edit mode, Ctrl+Enter save, Esc cancel, ✏️ marker in UI
+**Commit**: `2487a3d8`
 
 #### Task 1.5: Create branch point markers (S - 1 hour)
 - [ ] Add `create_branch(&mut self, name: String)` at current head
