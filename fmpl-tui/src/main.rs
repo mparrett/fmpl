@@ -133,8 +133,10 @@ struct App {
     // Phase 2: Backtracking UI
     selected_node_id: Option<NodeId>, // Currently selected node in history (for replay)
     history_selection_mode: bool,     // When true, arrow keys navigate history
+    #[allow(dead_code)] // Phase 2 Task 2.3 (diff view)
     compare_branch_id: Option<NodeId>, // Branch to compare with (for diff view)
-    diff_view_mode: bool,             // When true, show diff between branches
+    #[allow(dead_code)] // Phase 2 Task 2.3 (diff view)
+    diff_view_mode: bool, // When true, show diff between branches
 }
 
 impl App {

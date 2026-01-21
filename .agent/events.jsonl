@@ -276,3 +276,6 @@
 {"payload":"phase_5_complete, tests: 222, awaiting_next_phase_assignment","topic":"task.resume","ts":"2026-01-21T19:28:13.462137+00:00"}
 {"payload":{"description":"Implement replay from here + diff view","name":"Backtracking UI","phase":2,"tasks":["replay_from_here","diff_view"]},"topic":"task.start","ts":"2026-01-21T19:31:01.596819+00:00"}
 {"payload":"recovery_complete: dispatched phase_2 task.start, awaiting next iteration","topic":"task.resume","ts":"2026-01-21T19:31:07.880240+00:00"}
+{"payload":"phase_2_task_2_1_complete, feature: history_selection_mode, status: node_selection_working, commit: e1c816e7, next: task_2_2_replay_or_task_2_3_diff_view","topic":"task.done","ts":"2026-01-21T19:35:49.893367+00:00"}
+{"payload":"phase_2_task_2_1_complete, tests: 222_passing, build: clean, features: node_selection_implemented, pending: replay_and_diff_view","topic":"loop.complete","ts":"2026-01-21T19:35:54.714943+00:00"}
+{"payload":"phase_2_task_2_2: implement replay_from_here functionality","topic":"task.start","ts":"2026-01-21T19:36:47.211767+00:00"}
