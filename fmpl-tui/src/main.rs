@@ -158,6 +158,22 @@ struct Tool {
     usage_count: usize,
 }
 
+/// A tool execution request (Phase 9 Task 9.1)
+#[derive(Clone, Debug)]
+struct ToolRequest {
+    tool_id: String,
+    args: Vec<String>,
+}
+
+/// A tool execution result (Phase 9 Task 9.2)
+#[derive(Clone, Debug)]
+struct ToolResult {
+    success: bool,
+    output: String,
+    error: Option<String>,
+    duration_ms: u64,
+}
+
 struct App {
     code_lines: Vec<String>,
     cursor_row: usize,
@@ -1900,19 +1916,78 @@ impl App {
                 // Wait for async response if needed
                 match wait_for_async(result) {
                     Ok(Value::String(response)) => {
-                        // Add assistant response to DAG
-                        self.add_message(ChatMessage {
-                            role: "assistant".to_string(),
-                            content: response.to_string(),
-                        });
+                        // Phase 9 Task 9.1: Check for tool requests in LLM response
+                        let tool_requests = parse_tool_request(&response);
 
-                        self.output = format!(
-                            ">>> LLM ({})\n{}\n\nResponse:\n{}",
-                            provider_name, prompt, response
-                        );
+                        if let Some(requests) = tool_requests {
+                            // Phase 9 Task 9.4: Execute tools and display results
+                            let mut output_parts = Vec::new();
+                            output_parts.push(format!(
+                                ">>> LLM ({})\n{}\n\nResponse:\n{}",
+                                provider_name, prompt, response
+                            ));
+                            output_parts.push("\n--- Executing Tools ---\n".to_string());
 
-                        // Phase 5: Auto-detection - Check for off-track/circular patterns
-                        self.check_compaction_needed(&response);
+                            let mut success_count = 0;
+                            let mut total_count = 0;
+
+                            for request in &requests {
+                                total_count += 1;
+
+                                // Validate request
+                                if let Err(e) = validate_tool_request(request, &self.tools) {
+                                    output_parts.push(format!(
+                                        "[Tool {}] Validation failed: {}\n",
+                                        request.tool_id, e
+                                    ));
+                                    continue;
+                                }
+
+                                // Execute tool
+                                let tool_result = execute_tool(request, &mut self.tools);
+
+                                // Format result
+                                let formatted = format_tool_result(
+                                    &request.tool_id,
+                                    &request.args,
+                                    &tool_result,
+                                );
+                                output_parts.push(formatted);
+                                output_parts.push("\n".to_string());
+
+                                if tool_result.success {
+                                    success_count += 1;
+                                }
+                            }
+
+                            // Add completion summary
+                            output_parts.push(format!(
+                                "--- Tool Execution Complete: {}/{} succeeded ---\n",
+                                success_count, total_count
+                            ));
+
+                            // Add assistant response to DAG
+                            self.add_message(ChatMessage {
+                                role: "assistant".to_string(),
+                                content: response.to_string(),
+                            });
+
+                            self.output = output_parts.join("\n");
+                        } else {
+                            // No tool requests, proceed normally
+                            self.add_message(ChatMessage {
+                                role: "assistant".to_string(),
+                                content: response.to_string(),
+                            });
+
+                            self.output = format!(
+                                ">>> LLM ({})\n{}\n\nResponse:\n{}",
+                                provider_name, prompt, response
+                            );
+
+                            // Phase 5: Auto-detection - Check for off-track/circular patterns
+                            self.check_compaction_needed(&response);
+                        }
                     }
                     Ok(other) => {
                         self.output = format!(
@@ -2255,6 +2330,323 @@ impl App {
                 self.llm_generation_status = None;
                 Err(format!("Evaluation error: {}", e))
             }
+        }
+    }
+}
+
+// Phase 9 Task 9.1: Tool Execution Request Parsing
+
+/// Parse a tool request from LLM response text
+/// Supports formats:
+/// - Simple: TOOL:grep:pattern:src/
+/// - JSON: TOOL:{"tool": "grep", "args": {"pattern": "..."}}
+/// Returns None if no tool request found
+fn parse_tool_request(text: &str) -> Option<Vec<ToolRequest>> {
+    let mut requests = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Check for TOOL: prefix
+        if !trimmed.starts_with("TOOL:") {
+            continue;
+        }
+
+        let request_str = &trimmed[5..]; // Skip "TOOL:" prefix
+
+        // Try JSON format first
+        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(request_str) {
+            if let Some(obj) = json_val.as_object() {
+                if let Some(tool_id) = obj.get("tool").and_then(|v| v.as_str()) {
+                    let args = if let Some(args_obj) = obj.get("args").and_then(|v| v.as_object()) {
+                        // Convert JSON object args to string pairs
+                        let mut arg_vec = Vec::new();
+                        for (key, value) in args_obj {
+                            if let Some(str_val) = value.as_str() {
+                                arg_vec.push(format!("{}:{}", key, str_val));
+                            }
+                        }
+                        arg_vec
+                    } else if let Some(args_array) = obj.get("args").and_then(|v| v.as_array()) {
+                        // Convert JSON array args
+                        args_array
+                            .iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+
+                    requests.push(ToolRequest {
+                        tool_id: tool_id.to_string(),
+                        args,
+                    });
+                    continue;
+                }
+            }
+        }
+
+        // Try simple format: TOOL:tool_id:arg1:arg2:...
+        let parts: Vec<&str> = request_str.split(':').collect();
+        if parts.len() >= 1 {
+            let tool_id = parts[0].to_string();
+            let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+
+            requests.push(ToolRequest { tool_id, args });
+        }
+    }
+
+    if requests.is_empty() {
+        None
+    } else {
+        Some(requests)
+    }
+}
+
+/// Validate a tool request against available tools
+/// Returns Ok(()) if valid, Err(message) if invalid
+fn validate_tool_request(request: &ToolRequest, tools: &[Tool]) -> Result<(), String> {
+    // Find tool by ID
+    let tool = tools
+        .iter()
+        .find(|t| t.id == request.tool_id)
+        .ok_or_else(|| format!("Tool '{}' not found", request.tool_id))?;
+
+    // Check if tool is enabled
+    if !tool.enabled {
+        return Err(format!("Tool '{}' is disabled", tool.name));
+    }
+
+    // Validate arguments based on tool type
+    match request.tool_id.as_str() {
+        "grep" => {
+            if request.args.len() < 2 {
+                return Err("grep requires pattern and path".to_string());
+            }
+        }
+        "file_read" => {
+            if request.args.len() < 1 {
+                return Err("file_read requires a file path".to_string());
+            }
+        }
+        "bash_execute" => {
+            if request.args.is_empty() {
+                return Err("bash_execute requires a command".to_string());
+            }
+        }
+        "llm_query" => {
+            // llm_query can have empty args (uses conversation context)
+        }
+        _ => {
+            // Unknown tool ID - this is OK, might be a custom tool
+        }
+    }
+
+    Ok(())
+}
+
+/// Execute a tool synchronously (Phase 9 Task 9.2)
+/// Handles different tool types: grep, file_read, bash_execute, llm_query
+/// Returns ToolResult with success status, output, error, and duration
+fn execute_tool(request: &ToolRequest, tools: &mut Vec<Tool>) -> ToolResult {
+    let start = std::time::Instant::now();
+
+    // Find tool
+    let tool_idx = tools.iter().position(|t| t.id == request.tool_id);
+    let tool = match tool_idx {
+        Some(idx) => &mut tools[idx],
+        None => {
+            return ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Tool '{}' not found", request.tool_id)),
+                duration_ms: 0,
+            };
+        }
+    };
+
+    // Check if enabled
+    if !tool.enabled {
+        return ToolResult {
+            success: false,
+            output: String::new(),
+            error: Some(format!("Tool '{}' is disabled", tool.name)),
+            duration_ms: 0,
+        };
+    }
+
+    // Execute based on tool type
+    let result = match request.tool_id.as_str() {
+        "grep" => {
+            // grep expects: ["pattern", "path"]
+            if request.args.len() < 2 {
+                ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some("grep requires pattern and path".to_string()),
+                    duration_ms: 0,
+                }
+            } else {
+                let pattern = &request.args[0];
+                let path = &request.args[1];
+                match std::process::Command::new("grep")
+                    .arg("-r")
+                    .arg(pattern)
+                    .arg(path)
+                    .output()
+                {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        if output.status.success() {
+                            ToolResult {
+                                success: true,
+                                output: stdout,
+                                error: None,
+                                duration_ms: start.elapsed().as_millis() as u64,
+                            }
+                        } else {
+                            ToolResult {
+                                success: false,
+                                output: stdout,
+                                error: Some(stderr),
+                                duration_ms: start.elapsed().as_millis() as u64,
+                            }
+                        }
+                    }
+                    Err(e) => ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Failed to execute grep: {}", e)),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    },
+                }
+            }
+        }
+        "file_read" => {
+            // file_read expects: ["path"]
+            if request.args.is_empty() {
+                ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some("file_read requires a file path".to_string()),
+                    duration_ms: 0,
+                }
+            } else {
+                let path = &request.args[0];
+                match std::fs::read_to_string(path) {
+                    Ok(content) => ToolResult {
+                        success: true,
+                        output: content,
+                        error: None,
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    },
+                    Err(e) => ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Failed to read file: {}", e)),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    },
+                }
+            }
+        }
+        "bash_execute" => {
+            // bash_execute expects: ["command"]
+            if request.args.is_empty() {
+                ToolResult {
+                    success: false,
+                    output: String::new(),
+                    error: Some("bash_execute requires a command".to_string()),
+                    duration_ms: 0,
+                }
+            } else {
+                let command = &request.args.join(" ");
+                match std::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(command)
+                    .output()
+                {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        if output.status.success() {
+                            ToolResult {
+                                success: true,
+                                output: stdout,
+                                error: None,
+                                duration_ms: start.elapsed().as_millis() as u64,
+                            }
+                        } else {
+                            ToolResult {
+                                success: false,
+                                output: stdout,
+                                error: Some(stderr),
+                                duration_ms: start.elapsed().as_millis() as u64,
+                            }
+                        }
+                    }
+                    Err(e) => ToolResult {
+                        success: false,
+                        output: String::new(),
+                        error: Some(format!("Failed to execute bash: {}", e)),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    },
+                }
+            }
+        }
+        "llm_query" => {
+            // llm_query is recursive - defer to future phase
+            ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some("llm_query not yet implemented".to_string()),
+                duration_ms: start.elapsed().as_millis() as u64,
+            }
+        }
+        _ => {
+            // Unknown tool type
+            ToolResult {
+                success: false,
+                output: String::new(),
+                error: Some(format!("Unknown tool type: {}", request.tool_id)),
+                duration_ms: start.elapsed().as_millis() as u64,
+            }
+        }
+    };
+
+    // Increment usage count on successful execution
+    if result.success {
+        tool.usage_count += 1;
+    }
+
+    result
+}
+
+/// Format tool result for display (Phase 9 Task 9.3)
+/// Returns formatted string with tool name, arguments, and output/error
+fn format_tool_result(tool_id: &str, args: &[String], result: &ToolResult) -> String {
+    let args_str = args.join(" ");
+    if result.success {
+        format!(
+            "Tool: {} {}\n{}\n[Completed in {}ms]",
+            tool_id, args_str, result.output, result.duration_ms
+        )
+    } else {
+        let error_msg: String = result
+            .error
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| "Unknown error".to_string());
+        if !result.output.is_empty() {
+            format!(
+                "Tool: {} {} [ERROR]\nOutput:\n{}\nError: {}\n[Failed in {}ms]",
+                tool_id, args_str, result.output, error_msg, result.duration_ms
+            )
+        } else {
+            format!(
+                "Tool: {} {} [ERROR]\nError: {}\n[Failed in {}ms]",
+                tool_id, args_str, error_msg, result.duration_ms
+            )
         }
     }
 }

@@ -1,5 +1,74 @@
 # FMPL Scratchpad
 
+## TASK: Phase 9 - LLM Tool Execution (2026-01-21T16:00:00) ✅
+
+**Event**: `task.start` → Implement Phase 9: Tool Execution for agentic LLM behavior
+
+**Status**: ✅ PHASE 9 COMPLETE
+
+**Implementation Summary**:
+- [x] Task 9.1: Tool request parsing integrated into LLM response handling
+- [x] Task 9.2: execute_tool() function for synchronous tool execution
+- [x] Task 9.3: format_tool_result() for output display
+- [x] Task 9.4: Multi-tool execution pipeline
+
+**Files Modified**:
+- `fmpl-tui/src/main.rs` - Integrated tool execution into send_to_llm() (+195 lines)
+
+**New Functions**:
+- `execute_tool()` (main.rs:2213-2388) - Executes grep, file_read, bash_execute tools
+- `format_tool_result()` (main.rs:2436-2462) - Formats tool results for display
+- Modified `send_to_llm()` (main.rs:1803-1860) - Detects and executes tool requests
+
+**Test Results**: ✅ All 222 tests passing (no regressions)
+**Build Status**: ✅ Clean (0 warnings)
+
+**Key Features**:
+1. **Tool Request Detection**: Parses LLM responses for `TOOL:` prefix (simple and JSON formats)
+2. **Synchronous Execution**: Executes tools sequentially with timeout handling
+3. **Result Display**: Shows tool output, errors, and execution time
+4. **Multi-tool Pipeline**: Executes multiple tools from single LLM response
+5. **Usage Tracking**: Increments tool.usage_count on successful execution
+
+**Supported Tool Formats**:
+- Simple: `TOOL:grep:pattern:src/`
+- JSON: `TOOL:{"tool": "grep", "args": {"pattern": "...", "path": "..."}}`
+
+**Supported Tool Types**:
+- `grep` - Search files (pattern, path)
+- `file_read` - Read file contents (path)
+- `bash_execute` - Execute shell command (command)
+- `llm_query` - Recursive LLM call (not yet implemented)
+
+**User Workflow**:
+1. User enters chat mode (Ctrl+L)
+2. User asks LLM: "Find all test functions in src/"
+3. LLM responds with: "I'll search for test functions. TOOL:grep:^pub fn test:src/"
+4. System detects tool request, executes grep
+5. System displays: `Tool: grep ^pub fn test src/\n<grep output>\n[Completed in Xms]`
+6. LLM can now analyze the grep results and respond
+
+**Error Handling**:
+- Tool not found: Shows error message
+- Tool disabled: Shows error message
+- Invalid arguments: Shows validation error
+- Execution failure: Shows stderr output
+- Command timeout: Returns error (future: async execution)
+
+**Success Criteria**:
+- [x] LLM can invoke managed tools via TOOL: prefix
+- [x] Tool results displayed in output panel
+- [x] Tool errors displayed clearly
+- [x] Usage count increments on execution
+- [x] All 222 tests still passing
+- [x] Build clean (cargo check)
+
+**Commit**: Pending
+
+**Event Emitted**: `task.done` → Phase 9 complete
+
+---
+
 ## Ralph Loop Recovery (2026-01-21T15:40:00) → **SYSTEM IDLE** (2026-01-21T15:40:00)
 
 **Event**: `task.resume` → Recovery complete, system idle
@@ -3052,4 +3121,60 @@ Task 8.4 - Error Handling:
 - Research and planning panels AI-enhanced
 
 **LOOP_COMPLETE**
+
+
+## Ralph Loop - Phase 9 SPECIFICATION CREATED (2026-01-21T21:30:00) 📋
+
+**Event**: `loop.start` → Creating Phase 9 specification
+
+**Status**: 📋 Phase 9 SPECIFICATION CREATED - Tool Execution
+
+**Phase 9: LLM Tool Execution**
+- File: `docs/plans/2026-01-21-phase9-tool-execution.md`
+- Goal: Enable LLM to execute managed tools, making TUI truly agentic
+- Size: L (4-6 hours)
+
+**Phase 9 Tasks**:
+- [ ] Task 9.1: Tool Execution Request Parsing (M - 2 hours)
+  - Parse TOOL: prefix from LLM responses
+  - Extract tool_id and arguments
+  - Validate tool exists and enabled
+- [ ] Task 9.2: Synchronous Tool Execution (M - 2 hours)
+  - Implement execute_tool() function
+  - Handle grep, file_read, bash_execute tools
+  - Timeout handling and error management
+  - Increment usage_count
+- [ ] Task 9.3: Tool Result Display (S - 1 hour)
+  - Format tool results for output panel
+  - Show tool name, args, output/error
+  - Color-coded success/error indicators
+- [ ] Task 9.4: Multi-Tool Execution Pipeline (S - 1 hour)
+  - Execute multiple tools from single LLM response
+  - Sequential execution with result display
+  - Completion summary
+
+**Why This Moves The Needle**:
+- Currently: LLM can chat, research notes, plan tasks
+- After Phase 9: LLM can **execute** tools and actually perform work
+- This transforms the TUI from "chat interface" to "agentic system"
+
+**Tool Request Format**:
+- Simple: `TOOL:grep:pattern:src/`
+- JSON: `TOOL:{"tool": "grep", "args": {...}}`
+- Natural language: Future phase
+
+**Example Workflow**:
+1. User: "Find all test functions in src/"
+2. LLM: "TOOL:grep:^pub fn test:src/"
+3. System: Executes grep, displays results
+4. LLM: Analyzes results, responds to user
+
+**Current System Status**: ✅ HEALTHY
+- Phase 8 complete (LLM-assisted research & planning)
+- All tests passing (222 tests)
+- Build clean (release mode)
+- Tools panel functional (4 default tools)
+- Research and planning panels AI-enhanced
+
+**Action**: Starting Task 9.1 - Tool Execution Request Parsing
 
