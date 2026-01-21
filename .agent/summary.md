@@ -71,4 +71,4 @@
 
 ## Final Commit
 
-1b6ffa8: feat(ratatui): add fmpl-tui crate with three-panel agentic UI
+90dc10e2: feat(tui): add multi-line code editor with cursor management

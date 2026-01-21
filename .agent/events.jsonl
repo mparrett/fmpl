@@ -170,3 +170,7 @@
 {"payload":"tutorial: tested with REPL, issues: fixed, tests: all pass","topic":"task.complete","ts":"2026-01-21T06:52:01.207236+00:00"}
 {"payload":"All tasks complete. Tutorial written, tested, and fixed. All tests passing. Awaiting next task.start from planner.","topic":"loop.complete","ts":"2026-01-21T06:52:43.588366+00:00"}
 {"payload":{"duration":"30s","exit_code":0,"iterations":1,"reason":"completed","status":"All tasks completed successfully. Tutorial written and tested."},"topic":"loop.terminate","ts":"2026-01-21T06:52:47.395078+00:00"}
+{"payload":"multi-line: implemented, tests: pass, commit: 90dc10e2","topic":"task.complete","ts":"2026-01-21T06:57:51.457787+00:00"}
+{"payload":"All tasks complete. Multi-line code editor implemented with cursor management, scrolling, and mode switching. All 191 tests passing. Commit 90dc10e2. Awaiting next task.start from planner.","topic":"loop.complete","ts":"2026-01-21T06:57:56.197668+00:00"}
+{"payload":{"duration":"45s","exit_code":0,"iterations":1,"reason":"completed","status":"Multi-line code editor implemented. All tasks complete."},"topic":"loop.terminate","ts":"2026-01-21T06:58:04.410310+00:00"}
+{"payload":"LLM integration for fmpl-tui: provider abstraction (Ollama, Anthropic), multi-turn conversations via FMPL grammars, close agentic loop (Research→Plan→Execute→Review)","topic":"task.start","ts":"2026-01-21T06:59:23.486889+00:00"}

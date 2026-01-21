@@ -1,56 +1,127 @@
 # FMPL Scratchpad
 
-## TASK: Enhanced TUI for 12-Layer Architecture (2026-01-21T08:00:00)
+## TASK: LLM Integration for Agentic TUI (2026-01-21T09:00:00)
+
+**Event**: `task.resume` → Recovery: Multi-line editor complete, next needle-moving task identified
+
+### Context Recovery (2026-01-21T09:00:00)
+
+**Previous State**:
+- ✅ fmpl-tui crate created with three-panel ratatui layout
+- ✅ Multi-line code editor with cursor management (commit 90dc10e2)
+- ✅ All 191 tests passing
+- ✅ Layer 1 (Input Layer) complete: Research/Planning/Execution panels
+- ✅ Tool calling foundation: json::parse, curl.get/post builtins
+
+**Current Gap**: TUI is a fancy REPL without LLM integration
+
+### ✅ COMPLETED: LLM Provider Integration (2026-01-21T10:30:00)
+
+**Implementation**: LLM provider abstraction with Ollama and Anthropic support
+- ✅ Created `fmpl-llm` crate with provider trait
+- ✅ OllamaProvider: Local LLM via localhost:11434
+- ✅ AnthropicProvider: Claude via ANTHROPIC_API_KEY
+- ✅ `init_llm()` and `llm_chat()` builtins in fmpl-core
+- ✅ TUI provider switching via Ctrl+P
+- ✅ All 191 tests passing (no regressions)
+
+**Files Created**:
+- `fmpl-llm/src/lib.rs` - Crate exports
+- `fmpl-llm/src/error.rs` - Error types
+- `fmpl-llm/src/provider.rs` - LlmProvider trait, OllamaProvider, AnthropicProvider
+- `fmpl-core/src/builtins/llm.rs` - LLM builtins (init_llm, llm_chat)
+
+**Files Modified**:
+- `Cargo.toml` - Added fmpl-llm to workspace members, added tokio-stream/async-trait
+- `fmpl-core/Cargo.toml` - Added fmpl-llm dependency
+- `fmpl-core/src/builtins/mod.rs` - Exported llm module
+- `fmpl-tui/Cargo.toml` - Added fmpl-llm dependency
+- `fmpl-tui/src/main.rs` - Added LlmProviderType enum, Ctrl+P handler
+
+**Test Results**:
+- ✅ All 191 tests pass (143 core + 8 tool_calling + 40 others)
+- ✅ No regressions
+- ✅ TUI builds successfully
+
+**Key Features**:
+1. **Provider Abstraction**: `LlmProvider` trait with `chat()` and `chat_stream()` methods
+2. **Ollama Integration**: Local LLM at localhost:11434 (configurable model)
+3. **Anthropic Integration**: Claude API with ANTHROPIC_API_KEY env var
+4. **TUI Provider Switching**: Ctrl+P toggles between Ollama and Anthropic
+5. **Async Support**: Tokio runtime for async HTTP requests
+6. **Streaming Ready**: `chat_stream()` infrastructure in place (Ollama SSE)
+
+**Next Steps**:
+- Wire LLM builtins into FMPL VM's `call_builtin()` dispatcher
+- Implement actual LLM calls from FMPL code (e.g., `llm.chat("prompt")`)
+- Close agentic loop: LLM → @ pattern matching → curl tools → LLM
+- Add streaming support for real-time response display in TUI
+
+**Success Criteria Met**:
+- ✅ User can select Ollama or Anthropic provider (Ctrl+P in TUI)
+- ⏳ TUI sends prompt to LLM (builtin integration next)
+- ✅ FMPL grammars can parse response (@ pattern matching works)
+- ✅ Tool execution via @ matching (json::parse, curl builtins work)
+- ✅ All tests pass
+
+---
 
 **Event**: `task.resume` → Continue work on needle-moving task toward 12-layer agentic architecture
 
-### Current State (from Previous Loop)
+### ✅ COMPLETED: Multi-line Code Editor (2026-01-21T08:15:00)
 
-**Completed**:
-- ✅ Basic fmpl-tui crate created (commit 1b6ffa8)
+**Implementation**: Enhanced TUI with full multi-line editing capabilities
+- ✅ Multi-line text buffer with cursor position tracking (row, col)
+- ✅ Arrow key navigation (up/down/left/right)
+- ✅ Enter inserts new lines (EDIT MODE)
+- ✅ Esc+Enter executes code (mode switching)
+- ✅ Tab inserts 4 spaces for indentation
+- ✅ Backspace/Delete with line merging
+- ✅ Home/End keys for line navigation
+- ✅ Automatic scrolling for long code
+- ✅ Line numbers displayed
+- ✅ Cursor highlight (yellow on dark gray)
+
+**Files Modified**:
+- `fmpl-tui/src/main.rs` - Multi-line editor implementation (365 lines)
+- `fmpl-tui/README.md` - Documentation for new features
+- `fmpl-tui/test-multiline.fmpl` - Test program
+
+**Commit**: `90dc10e2` - feat(tui): add multi-line code editor with cursor management
+
+**Test Results**:
+- ✅ All 191 tests pass (no regressions)
+- ✅ TUI builds successfully
+- ✅ Test program verifies multi-line execution
+
+**Key Features**:
+1. **Mode Switching**: EDIT MODE (default) vs EXECUTE MODE (Esc toggle)
+2. **Navigation**: Arrow keys + Home/End for precise cursor control
+3. **Text Manipulation**: Insert, delete, merge lines
+4. **Visual Feedback**: Line numbers, cursor highlight, mode indicator
+5. **Scrolling**: Automatic when cursor moves beyond visible area
+
+**Layer 1 Status** (Input Layer):
 - ✅ Three-panel layout (Research, Planning, Execution)
-- ✅ FMPL code execution with real-time output
-- ✅ All 191 tests passing
-- ✅ TUTORIAL.md written and verified
+- ✅ Multi-line code editor
+- ✅ Real-time FMPL execution
+- ✅ Cursor management and scrolling
 
-**Next Steps** (from 12-layer architecture doc):
+**Next Steps** (2026-01-21T09:00:00):
 
-**Priority 1 - Layer 1 Enhancements**:
-- [ ] Add multi-line code editor (currently single-line)
-- [ ] Implement context buffers for Research/Planning panels
-- [ ] Add history/backtracking for executed code
+**SELECTED: LLM Integration for Agentic Loops** (Option D)
+- Provider abstraction (Ollama, Anthropic, others)
+- Multi-turn conversation support via FMPL tool calling
+- Close Research→Plan→Execute→Review loop
 
-**Priority 2 - Layer 2: Contextual Layer**:
-- [ ] Implement revision history with VCS-style branching
-- [ ] Add automated backtrack detection ("You're absolutely right" pattern)
-- [ ] Context compaction and elision for tool/MCP calls
+**Rationale**: Without LLM integration, TUI is just a fancy REPL. With LLMs, it becomes an agentic development environment where grammars control agent workflows.
 
-**Priority 3 - Tooling Layer**:
-- [ ] Tool management interface
-- [ ] External tool integration (MCP/ACP)
-- [ ] Tool composition UI
+**Deferred** (can be revisited after LLM integration):
+- Option A: Context buffers for Research/Planning panels
+- Option B: History/backtracking for executed code
+- Option C: Layer 2 - Revision history with VCS-style branching
 
-**Priority 4 - LLM Integration**:
-- [ ] Provider switching (Ollama, Anthropic)
-- [ ] Multi-turn conversation support
-- [ ] Tracing through agent→tool loops
-
-### Decision Point
-
-Which enhancement to tackle first?
-
-**Option A**: Multi-line code editor (foundational, enables complex FMPL programs)
-**Option B**: Context buffers + history (enables Layer 2 backtracking)
-**Option C**: LLM integration (enables agentic loops)
-**Option D**: Tool management interface (enables Layer 4)
-
-### Recommendation
-
-**Option A**: Multi-line code editor
-- **Complexity**: Medium (M t-shirt)
-- **Benefit**: Enables complex FMPL programs in TUI
-- **Dependencies**: None
-- **Blocks**: Future agentic features need complex code editing
+---
 
 ---
 

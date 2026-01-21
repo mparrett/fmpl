@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["fmpl-core", "fmpl-cli", "fmpl-web", "fmpl-tui"]
+members = ["fmpl-core", "fmpl-cli", "fmpl-web", "fmpl-tui", "fmpl-llm"]
 
 [workspace.package]
 version = "0.1.0"
@@ -34,3 +34,7 @@ blake3 = "1.5"
 
 # Zero-copy serialization (bytecheck enabled by default)
 rkyv = { version = "0.8", features = ["smol_str-0_3"] }
+
+# Async streaming
+tokio-stream = "0.1"
+async-trait = "0.1"

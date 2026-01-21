@@ -17,6 +17,12 @@ use ratatui::{
 use std::io;
 use std::time::Duration;
 
+#[derive(Clone, Copy, PartialEq)]
+enum LlmProviderType {
+    Ollama,
+    Anthropic,
+}
+
 struct App {
     research_content: String,
     planning_content: String,
@@ -27,6 +33,7 @@ struct App {
     output: String,
     should_quit: bool,
     execute_mode: bool, // When true, Enter executes code
+    llm_provider: LlmProviderType,
 }
 
 impl App {
@@ -38,16 +45,38 @@ impl App {
             cursor_row: 0,
             cursor_col: 0,
             scroll_offset: 0,
-            output: String::from("FMPL output will appear here\nEsc+Enter to execute, q to quit"),
+            output: String::from(
+                "FMPL TUI with LLM Integration\nEsc+Enter to execute, q to quit, Ctrl+P to switch LLM provider\nCurrent provider: Ollama (localhost:11434)",
+            ),
             should_quit: false,
             execute_mode: false,
+            llm_provider: LlmProviderType::Ollama,
         }
+    }
+
+    fn switch_llm_provider(&mut self) {
+        self.llm_provider = match self.llm_provider {
+            LlmProviderType::Ollama => {
+                self.output = format!(
+                    "Switched to Anthropic Claude (requires ANTHROPIC_API_KEY env var)\nCurrent provider: Anthropic"
+                );
+                LlmProviderType::Anthropic
+            }
+            LlmProviderType::Anthropic => {
+                self.output =
+                    format!("Switched to Ollama (localhost:11434)\nCurrent provider: Ollama");
+                LlmProviderType::Ollama
+            }
+        };
     }
 
     fn handle_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('q') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
+            }
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.switch_llm_provider();
             }
             KeyCode::Esc => {
                 self.execute_mode = !self.execute_mode;
