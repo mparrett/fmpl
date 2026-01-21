@@ -14,8 +14,46 @@ use ratatui::{
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
+use std::collections::HashMap;
 use std::io;
 use std::time::Duration;
+
+/// Unique identifier for a conversation node
+type NodeId = usize;
+
+/// Metadata about a conversation node
+#[derive(Clone, Debug)]
+struct NodeMetadata {
+    branch_name: Option<String>, // "main", "fix-1", etc.
+    edited: bool,                // True if message was edited
+    compacted: bool,             // True if elided by compaction
+}
+
+/// A node in the conversation DAG (Directed Acyclic Graph)
+#[derive(Clone, Debug)]
+struct ConversationNode {
+    id: NodeId,                // Unique identifier
+    parent_id: Option<NodeId>, // Parent in DAG
+    message: ChatMessage,      // The actual message
+    timestamp: String,         // ISO timestamp
+    metadata: NodeMetadata,    // Branch info, edited flag
+}
+
+impl ConversationNode {
+    fn new(id: NodeId, parent_id: Option<NodeId>, message: ChatMessage) -> Self {
+        ConversationNode {
+            id,
+            parent_id,
+            message,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            metadata: NodeMetadata {
+                branch_name: None,
+                edited: false,
+                compacted: false,
+            },
+        }
+    }
+}
 
 /// Block and wait for an async stream to complete.
 /// Returns the final result value or an error.
@@ -81,7 +119,10 @@ struct App {
     llm_mode: bool,     // When true, sends code to LLM instead of executing
     llm_provider: LlmProvider,
     vm: Vm,
-    conversation_history: Vec<ChatMessage>, // Track conversation turns
+    // Layer 2: Conversation DAG for backtracking and branching
+    conversation_nodes: HashMap<NodeId, ConversationNode>,
+    current_head: NodeId, // Current branch tip
+    node_counter: NodeId, // For generating IDs
 }
 
 impl App {
@@ -110,7 +151,10 @@ impl App {
             llm_mode: false,
             llm_provider: LlmProvider::Ollama,
             vm,
-            conversation_history: Vec::new(),
+            // Layer 2: Initialize empty conversation DAG
+            conversation_nodes: HashMap::new(),
+            current_head: 0,
+            node_counter: 0,
         }
     }
 
@@ -140,6 +184,86 @@ impl App {
         }
     }
 
+    // Layer 2: DAG helper methods
+
+    /// Get conversation history as a vector (traverse from root to current_head)
+    fn get_history(&self) -> Vec<ChatMessage> {
+        let mut history = Vec::new();
+        let mut current_id = self.current_head;
+
+        // Traverse backwards from current head to root
+        let mut path = Vec::new();
+        while let Some(node) = self.conversation_nodes.get(&current_id) {
+            path.push((current_id, node.clone()));
+            match node.parent_id {
+                Some(parent) => current_id = parent,
+                None => break,
+            }
+        }
+
+        // Reverse to get root → current_head order
+        path.reverse();
+
+        // Extract messages in order
+        for (_, node) in path {
+            history.push(node.message);
+        }
+
+        history
+    }
+
+    /// Add a new message to the conversation DAG
+    fn add_message(&mut self, message: ChatMessage) {
+        let new_id = self.node_counter;
+        self.node_counter += 1;
+
+        let parent_id = if self.conversation_nodes.is_empty() {
+            None
+        } else {
+            Some(self.current_head)
+        };
+
+        let node = ConversationNode::new(new_id, parent_id, message);
+        self.conversation_nodes.insert(new_id, node);
+        self.current_head = new_id;
+    }
+
+    /// Undo: move to parent node
+    fn undo(&mut self) -> Result<(), String> {
+        let current_node = self
+            .conversation_nodes
+            .get(&self.current_head)
+            .ok_or("No current node")?;
+
+        match current_node.parent_id {
+            Some(parent) => {
+                self.current_head = parent;
+                Ok(())
+            }
+            None => Err("Already at root".to_string()),
+        }
+    }
+
+    /// Redo: move to a child node (simple version: picks first child)
+    fn redo(&mut self) -> Result<(), String> {
+        // Find children of current node
+        let mut child_id = None;
+        for (&id, node) in &self.conversation_nodes {
+            if node.parent_id == Some(self.current_head) {
+                child_id = Some(id);
+                break;
+            }
+        }
+
+        match child_id {
+            Some(id) => {
+                self.current_head = id;
+                Ok(())
+            }
+            None => Err("No child to redo to".to_string()),
+        }
+    }
+
     fn handle_input(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('q') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -157,6 +281,28 @@ impl App {
                     LlmProvider::Anthropic => LlmProvider::Ollama,
                 };
                 self.update_mode_indicator();
+            }
+            KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Undo: move to parent node in conversation DAG
+                match self.undo() {
+                    Ok(()) => {
+                        self.output = format!("Undo: Moved to node {}", self.current_head);
+                    }
+                    Err(e) => {
+                        self.output = format!("Undo failed: {}", e);
+                    }
+                }
+            }
+            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Redo: move to child node in conversation DAG
+                match self.redo() {
+                    Ok(()) => {
+                        self.output = format!("Redo: Moved to node {}", self.current_head);
+                    }
+                    Err(e) => {
+                        self.output = format!("Redo failed: {}", e);
+                    }
+                }
             }
             KeyCode::Esc => {
                 self.execute_mode = !self.execute_mode;
@@ -331,8 +477,8 @@ impl App {
             LlmProvider::Anthropic => "anthropic",
         };
 
-        // Add user message to history
-        self.conversation_history.push(ChatMessage {
+        // Add user message to DAG
+        self.add_message(ChatMessage {
             role: "user".to_string(),
             content: prompt.to_string(),
         });
@@ -349,8 +495,8 @@ impl App {
                 // Wait for async response if needed
                 match wait_for_async(result) {
                     Ok(Value::String(response)) => {
-                        // Add assistant response to history
-                        self.conversation_history.push(ChatMessage {
+                        // Add assistant response to DAG
+                        self.add_message(ChatMessage {
                             role: "assistant".to_string(),
                             content: response.to_string(),
                         });
@@ -382,12 +528,12 @@ impl App {
     /// Converts Rust ChatMessage structs to FMPL array literal
     /// Output format: [%{role: "user", content: "..."}, %{role: "assistant", content: "..."}]
     fn format_history_as_fmpl(&self) -> String {
-        if self.conversation_history.is_empty() {
+        let history = self.get_history();
+        if history.is_empty() {
             return "[]".to_string();
         }
 
-        let messages: Vec<String> = self
-            .conversation_history
+        let messages: Vec<String> = history
             .iter()
             .map(|msg| format!("%{{role: \"{}\", content: {:?}}}", msg.role, msg.content))
             .collect();
@@ -397,7 +543,8 @@ impl App {
 
     /// Format conversation history for display
     fn format_history(&self) -> String {
-        if self.conversation_history.is_empty() {
+        let history = self.get_history();
+        if history.is_empty() {
             return "No conversation history yet.\n\nUse Ctrl+L to enter LLM chat mode and start a conversation.".to_string();
         }
 
@@ -405,7 +552,7 @@ impl App {
         text.push_str(&"=".repeat(40));
         text.push('\n');
 
-        for (i, msg) in self.conversation_history.iter().enumerate() {
+        for (i, msg) in history.iter().enumerate() {
             let role_label = if msg.role == "user" {
                 "👤 User"
             } else {
@@ -490,11 +637,20 @@ fn draw_ui(f: &mut Frame, app: &App) {
     };
 
     let mode_indicator = if app.llm_mode {
-        format!(" [LLM CHAT ({}) - Press Enter to send]", provider_name)
+        format!(
+            " [LLM CHAT ({}) - Node: {} - Press Enter to send]",
+            provider_name, app.current_head
+        )
     } else if app.execute_mode {
-        " [EXECUTE MODE - Press Enter to run]".to_string()
+        format!(
+            " [EXECUTE MODE - Node: {} - Press Enter to run]",
+            app.current_head
+        )
     } else {
-        " [EDIT MODE - Press Esc then Enter to run]".to_string()
+        format!(
+            " [EDIT MODE - Node: {} - Press Esc then Enter to run]",
+            app.current_head
+        )
     };
 
     let visible_lines: Vec<String> = app

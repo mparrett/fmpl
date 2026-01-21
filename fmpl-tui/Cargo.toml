@@ -10,3 +10,4 @@ repository.workspace = true
 fmpl-core = { path = "../fmpl-core" }
 ratatui = "0.29"
 crossterm = "0.28"
+chrono = "0.4"

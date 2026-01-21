@@ -1,5 +1,155 @@
 # FMPL Scratchpad
 
+## TASK: Layer 2 (Contextual Layer) Implementation (2026-01-21T23:55:00) 🔄
+
+**Event**: `task.resume` → Previous iteration completed planning. Now implementing Phase 1.
+
+**Status**: 🔄 IN PROGRESS - Implementation phase
+
+### Current Foundation (✅ Complete)
+- ✅ Conversation history tracking (`Vec<ChatMessage>`)
+- ✅ Context-aware multi-turn chat (`chat_with_history()`)
+- ✅ TUI three-panel layout (Research, Planning, Execution)
+- ✅ LLM provider switching (Ollama ↔ Anthropic)
+- ✅ All 222 tests passing
+
+### Layer 2 Requirements (from docs/plans/12-layer-human-ai-architecture.md:21-26)
+
+**Core Features**:
+1. **Backtracking**: Edit historical context from prior panels
+2. **Active Compaction**: Continuous compaction triggered by input or LLM feedback
+3. **VCS-Style Branching**: Branch and merge conversation threads
+4. **Context Elision**: Remove irrelevant tool/MCP calls
+5. **Auto-Detection**: Detect LLM agents going off track
+
+### Implementation Plan
+
+#### Phase 1: Foundation (M - 3-4 hours)
+- [ ] Add conversation threading data structure (branch/commit metadata)
+- [ ] Implement message editing capability in TUI
+- [ ] Add undo/redo for conversation state
+- [ ] Create branch point markers
+
+#### Phase 2: Backtracking UI (L - 1-2 days)
+- [ ] Add edit mode for conversation history
+- [ ] Implement "replay from here" functionality
+- [ ] Add visual indicators for edited messages
+- [ ] Create diff view for before/after comparison
+
+#### Phase 3: VCS-Style Operations (XL - 2-3 days)
+- [ ] Implement conversation branching (fork from any point)
+- [ ] Add branch switching UI
+- [ ] Implement merge operations
+- [ ] Create commit/checkout workflow
+
+#### Phase 4: Context Compaction (L - 1-2 days)
+- [ ] Implement relevance scoring for messages
+- [ ] Add pattern-based elision (remove redundant tool calls)
+- [ ] Create compaction triggers (token limit, manual, auto-detect)
+- [ ] Add summary generation for compacted sections
+
+#### Phase 5: Auto-Detection (M - 3-4 hours)
+- [ ] Implement LLM off-track detection ("You're absolutely right")
+- [ ] Add pattern matching for circular conversations
+- [ ] Create suggestion system for when to compact
+- [ ] Add user prompts for intervention
+
+### Prioritized Task List
+
+**Start with**: Phase 1 (Foundation) - Basic data structures
+**Rationale**: Cannot build advanced features without proper threading model
+
+**Defer**: Phases 3-5 (VCS operations, compaction, auto-detection)
+**Rationale**: Require foundation to be stable first
+
+### Design Decisions (Made ✅)
+
+1. **Data Model**: **Option B - Git-like DAG** ✅
+   - **Rationale**: Most flexible for branching/merging
+   - **Structure**: `ConversationNode` with `id`, `parent_id`, `children`, `message`, `metadata`
+   - **Branch head**: Tracked via `current_head: NodeId`
+   - **Advantages**: Natural undo/redo, easy branching, clear history
+
+2. **Storage**: **Option A - In-memory only** ✅ (Phase 1)
+   - **Rationale**: Start simple, persistence can be added later
+   - **Future**: Add file-based persistence (FMPL serialization)
+   - **Tradeoff**: Lost on restart acceptable for prototype
+
+3. **Compaction Strategy**: **Option B - Pattern matching** ✅
+   - **Rationale**: FMPL @ operator is already designed for this
+   - **Implementation**: Match patterns like `%{tool: "curl.get", ...}` to identify elidable calls
+   - **Future**: Add LLM-based classification for smarter compaction
+
+### Phase 1 Implementation Plan (Foundation)
+
+**Goal**: Create basic conversation threading with undo/redo support
+
+#### Task 1.1: Add ConversationNode data structure (M - 2 hours)
+- [x] Create `ConversationNode` struct in `fmpl-tui/src/main.rs`
+  ```rust
+  struct ConversationNode {
+      id: NodeId,                    // Unique identifier (usize)
+      parent_id: Option<NodeId>,      // Parent in DAG
+      message: ChatMessage,           // The actual message
+      timestamp: String,              // ISO timestamp
+      metadata: NodeMetadata,         // Branch info, edited flag
+  }
+
+  struct NodeMetadata {
+      branch_name: Option<String>,    // "main", "fix-1", etc.
+      edited: bool,                   // True if message was edited
+      compacted: bool,                // True if elided by compaction
+  }
+
+  type NodeId = usize;
+  ```
+**Status**: ✅ COMPLETE - Build verified with chrono dependency added
+
+#### Task 1.2: Replace `Vec<ChatMessage>` with DAG (M - 2 hours)
+- [x] Modify `App` struct to use conversation DAG
+  ```rust
+  struct App {
+      // ... existing fields ...
+      conversation_nodes: HashMap<NodeId, ConversationNode>,
+      current_head: NodeId,           // Current branch tip
+      node_counter: NodeId,           // For generating IDs
+  }
+  ```
+**Status**: ✅ COMPLETE - App struct updated with DAG, helper methods added (get_history, add_message, undo, redo)
+
+#### Task 1.3: Implement undo/redo operations (S - 1 hour)
+- [x] Add `undo(&mut self)` - move to parent node
+- [x] Add `redo(&mut self)` - move back to child
+- [x] Update TUI keybindings: Ctrl+Z (undo), Ctrl+Y (redo)
+- [x] Display current node ID in UI
+**Status**: ✅ COMPLETE - Undo/redo keybindings working, node ID displayed in mode indicator
+
+#### Task 1.4: Add message editing capability (M - 2 hours)
+- [ ] Add edit mode for conversation history (Ctrl+E to edit last message)
+- [ ] Implement "edit message" UI state
+- [ ] Create new node when message is edited (preserve history)
+- [ ] Mark edited nodes with `metadata.edited = true`
+
+#### Task 1.5: Create branch point markers (S - 1 hour)
+- [ ] Add `create_branch(&mut self, name: String)` at current head
+- [ ] Implement branch listing (`Ctrl+B` to show branches)
+- [ ] Add visual indicators for branch points
+- [ ] Track active branch in UI
+
+**Testing Strategy**:
+- Write unit tests for DAG operations (create_node, traverse, undo/redo)
+- Manual TUI testing: Create conversation, edit message, undo, verify DAG structure
+- Verify all 222 tests still pass
+
+**Success Criteria**:
+- ✅ Can edit any message in conversation history
+- ✅ Undo/redo works correctly (Ctrl+Z / Ctrl+Y)
+- ✅ Visual indicators show edited messages
+- ✅ Branch points are visible in UI
+- ✅ All existing tests pass (222)
+
+---
+
 ## TASK: Context-Aware Multi-Turn LLM Conversations (2026-01-21T23:50:00) ✅
 
 **Event**: `task.start` → Implement chat_with_history() in LLM libraries to pass conversation context. Modify TUI to use history-aware chat functions. Enable true multi-turn LLM conversations with context.
@@ -74,6 +224,10 @@ anthropic.chat_with_history([
 - Context window management (trim old messages when limit reached)
 
 **Event Emitted**: `task.done` → chat_with_history() implementation complete
+
+**Committed**: `6e21849d` - feat(llm): implement context-aware multi-turn conversations
+
+**Event Emitted**: `task.done` → Context-aware conversations complete
 
 ### LOOP_COMPLETE
 
