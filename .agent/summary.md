@@ -2,10 +2,14 @@
 
 **Status:** Completed successfully
 **Iterations:** 4
-**Duration:** 19m 47s
+**Duration:** 34m 45s
 
 ## Tasks
 
+- [x] Rewrite 4 failing tests to use working syntax instead of `@` pattern matching
+- [x] Verify all 8 tool_calling tests pass
+- [x] Document pattern matching limitations in specs (commit 3d4fc76f)
+- [x] Event published: task.complete
 - [x] Create spec for Indexed RPN bytecode format → specs/indexed-rpn-conversion.md
 - [x] Spec review and approval (initial)
 - [x] Enhance spec with BlockStart/BlockEnd, resolve_names ← **DONE**
@@ -48,16 +52,16 @@
 
 ## Events
 
-- 150 total events
-- 57 task.start
-- 26 loop.terminate
+- 156 total events
+- 58 task.start
+- 27 loop.terminate
 - 19 spec.start
 - 12 spec.approved
 - 7 spec.ready
-- 5 task.complete
+- 6 task.complete
+- 4 loop.complete
 - 4 task.done
 - 4 task.resume
-- 3 loop.complete
 - 2 docs.reviewed
 - 2 implementation.done
 - 2 implementation.progress
@@ -66,7 +70,9 @@
 - 1 analysis.done
 - 1 docs.complete
 - 1 review.done
+- 1 task.progress
+- 1 test.done
 
 ## Final Commit
 
-d106d31: Update git ignore
+94e21ea: docs: document pattern matching limitations

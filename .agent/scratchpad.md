@@ -73,12 +73,93 @@ Map patterns work in:
 4. Tool calling can work with `let` destructuring as intermediate step
 5. Unblocks progress toward ratatui agentic app
 
-### Next Steps
+### Ralph Loop Complete ✅ (2026-01-21T05:51:37)
 
-- [x] Rewrite 4 failing tests to use working syntax instead of `@` pattern matching
-- [x] Verify all 8 tool_calling tests pass
-- [x] Document pattern matching limitations in specs
-- [ ] Continue toward ratatui agentic app implementation
+**Final Status**:
+- ✅ All 191 tests passing (143 core + 8 tool_calling + 40 others)
+- ✅ Statement-style `let` syntax implemented
+- ✅ Tool calling foundation complete (json::parse, curl builtins)
+- ✅ Pattern matching limitations documented
+- ✅ `task.complete` event published
+
+**Next Phase**: Ratatui agentic UI (awaiting task.start from planner)
+
+**Event History**:
+- Line 153: `test.done` → tool_calling tests passing
+- Line 154: `task.complete` → tool-calling phase complete
+
+---
+
+## TASK: Ratatui Agentic UI Foundation (2026-01-21T06:30:00)
+
+**Event**: `task.resume` → Work on needle-moving task toward 12-layer agentic architecture
+
+### ✅ COMPLETED: fmpl-tui Crate Created (2026-01-21T06:45:00)
+
+**Implementation**: Basic ratatui TUI with three-panel layout
+- ✅ Created `fmpl-tui/` crate with ratatui + crossterm dependencies
+- ✅ Three-panel layout (Research, Planning, Execution views)
+- ✅ FMPL code editor panel with real-time input
+- ✅ Execution output panel showing results
+- ✅ FMPL VM wired for code execution (`eval` function)
+- ✅ crossterm event handling (keyboard input, quit on 'q')
+
+**Files Created**:
+- `fmpl-tui/Cargo.toml` - Dependencies: ratatui 0.29, crossterm 0.28, fmpl-core
+- `fmpl-tui/src/main.rs` - 204 lines: App struct, UI drawing, event loop
+
+**Test Results**:
+- ✅ All 143 core tests pass (no regressions)
+- ✅ All 8 tool_calling tests pass
+- ✅ TUI builds successfully (1 warning: unused `execution_content` field)
+
+**UI Layout**:
+```
+┌─────────────────────────────────────────┐
+│          Research View                   │  <- Problem space analysis
+├─────────────────────────────────────────┤
+│          Planning View                   │  <- Collaborative scope definition
+├──────────────────────┬──────────────────┤
+│     Code Editor      │ Execution Output │  <- FMPL execution
+└──────────────────────┴──────────────────┘
+```
+
+**Key Features**:
+1. Real-time FMPL code execution (Enter to run)
+2. Yellow-typed input for visibility
+3. Error handling with display
+4. Clean quit on 'q' key
+5. Panel-based architecture for 12-layer system
+
+**Next Steps** (future iterations):
+1. Add multi-line code editor (currently single-line)
+2. Implement LLM provider switching (Ollama, Anthropic)
+3. Add context visualization (streams, interpretation)
+4. Implement Layer 2: Contextual Layer (backtrack/revision history)
+5. Add tool management interface
+
+### Previous State Analysis
+
+**Completed Foundation**:
+- ✅ 191 tests passing (fmpl-core stable)
+- ✅ Tool calling implemented (json::parse, curl.get/post builtins)
+- ✅ Statement-style `let` syntax
+- ✅ Pattern matching (@ operator) working for simple cases
+- ✅ Indexed RPN bytecode VM
+- ✅ Streaming grammar support (push model)
+
+**12-Layer Architecture Status** (from `docs/plans/12-layer-human-ai-architecture.md`):
+- Layer 1: Input Layer (Research/Planning/Execution views) - ✅ COMPLETE (basic)
+- Layer 2: Contextual Layer (backtrack/revision history) - NOT IMPLEMENTED
+- Layer 3: Agent description/dataflow (FMPL language) - ✅ COMPLETE
+- Layer 4: Tooling Layer (curl builtins) - ✅ COMPLETE
+- **UI Components** (panel system, context editor, tool management) - ✅ PARTIAL
+
+**Codebase Structure**:
+- `fmpl-core/` - Core runtime (lexer, parser, compiler, VM, grammars)
+- `fmpl-cli/` - Command-line REPL (basic REPL exists)
+- `fmpl-web/` - Web REPL with Axum + HTMX (exists but basic)
+- ✅ `fmpl-tui/` - NEW: Ratatui TUI for 12-layer agentic system
 
 ### ✅ Test Fixes Applied (2026-01-21T06:00:00)
 
