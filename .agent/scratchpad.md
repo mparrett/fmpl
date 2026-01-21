@@ -1,24 +1,29 @@
 # FMPL Scratchpad
 
-## Ralph Loop Recovery (2026-01-22T00:45:00) → **PHASE 2 TASK 2.3 COMPLETE** (2026-01-21T14:53:00)
+## Ralph Loop Recovery (2026-01-22T01:00:00) → **PHASE 2 COMPLETE** (2026-01-21T20:00:00)
 
-**Event**: `task.resume` → Implemented Phase 2 Task 2.3 (diff view)
+**Event**: `task.resume` → Phase 2 Task 2.3 committed, Phase 2 complete
 
 **System Status**: ✅ HEALTHY
 - All tests passing (222 tests)
 - Build clean (release)
-- Phase 1 COMPLETE: Conversation DAG (undo/redo/edit/branches)
-- Phase 5 COMPLETE: Auto-detection (off-track/circular/suggestion)
-- Phase 2 Task 2.1 COMPLETE: History selection mode (Ctrl+H, visual indicators)
-- Phase 2 Task 2.2 COMPLETE: Replay from here functionality
-- Phase 2 Task 2.3 COMPLETE: Diff view for branch comparison
+- **Phase 1 COMPLETE**: Conversation DAG (undo/redo/edit/branches)
+- **Phase 5 COMPLETE**: Auto-detection (off-track/circular/suggestion)
+- **Phase 2 COMPLETE**: Backtracking UI (Tasks 2.1, 2.2, 2.3)
 
-**Recent Commits**:
-- 0b2222e chore: track Phase 2 Task 2.2 completion
-- a2bdbba chore: track loop iteration state - Phase 2 Task 2.2 complete
-- 71a0f8e feat(tui): implement Phase 2 Task 2.2 - replay_from_here functionality
-- 839ff82 fix(tui): suppress dead_code warnings for future-phase fields
-- e1c816e feat(tui): implement Phase 2 Task 2.1 - history selection mode
+**Latest Commit**: a8b5d74c - "feat(tui): implement Phase 2 Task 2.3 - diff view for branch comparison"
+
+**Phase 2 Complete Implementation**:
+- [x] Task 2.1: History selection mode (Ctrl+H, visual indicators)
+- [x] Task 2.2: Replay from here functionality
+- [x] Task 2.3: Diff view for branch comparison (Ctrl+D)
+  - format_diff_view() function (main.rs:1170-1255)
+  - get_history_from_node() helper (main.rs:1257-1272)
+  - Ctrl+D keybinding with validation
+  - Research panel integration
+  - Removed #[allow(dead_code)] attributes
+- [x] All 222 tests passing
+- [x] Build verified clean
 
 **Phase 2 Task 2.3 Implementation** (2026-01-21T14:53:00):
 - [x] `format_diff_view()` function implemented (fmpl-tui/src/main.rs:1158-1224)
@@ -43,7 +48,7 @@
 
 **Available Next Tasks**:
 1. **Phase 3**: VCS operations (branch switching, merge) - XL (2-3 days)
-   - Branch switching UI
+   - Branch switching UI (Ctrl+T)
    - Merge operations
    - Commit/checkout workflow
 2. **Phase 4**: Context compaction (relevance scoring, elision) - L (1-2 days)
@@ -51,7 +56,7 @@
    - Pattern-based elision
    - Compaction triggers
 
-**Action**: Emitting `task.done` for Phase 2 Task 2.3
+**Action**: Phase 2 complete - emitted task.done for Task 2.3, awaiting next phase selection
 
 ---
 
