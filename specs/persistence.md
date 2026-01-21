@@ -4,6 +4,13 @@ Fjall-backed durable storage for live image and streaming.
 
 **Location**: [fmpl-core/](../fmpl-core/), [fmpl-web/](../fmpl-web/)
 
+**Key files**:
+- `fmpl-core/Cargo.toml:29` — `fjall-persistence` feature
+- `fmpl-core/src/grammar/incremental.rs:14` — ParseState serialization
+- `fmpl-core/src/grammar/stream_input.rs:42` — StreamPosition with memo
+- `fmpl-core/src/stream.rs:32` — StreamBuffer/StreamSource with rkyv
+- `fmpl-web/src/image_store.rs:7` — ImageStore
+
 ---
 
 ## Overview
@@ -83,43 +90,41 @@ Value: Object (serialized via rkyv)
 
 ---
 
-## Stream Position Overflow
+## Stream Position and Fjall Backing
 
-For long-running streams (e.g., LLM output), positions spill to disk:
+StreamPosition uses OMeta-style cons-cell design with per-position memoization.
+Fjall backing is in StreamSource, not StreamPosition directly.
+
+### StreamPosition (`stream_input.rs:42-56`)
 
 ```rust
 pub struct StreamPosition {
-    buffer: Vec<Value>,        // Hot data (in-memory)
-    start_offset: usize,       // Buffer start position
-    position: usize,           // Current position
+    head: Option<Value>,
+    tail: RefCell<Option<Rc<StreamPosition>>>,
+    index: usize,
+    memo: RefCell<HashMap<SmolStr, MemoEntry>>,  // Per-position memo
+    source: Rc<StreamSource>,
 
     #[cfg(feature = "fjall-persistence")]
-    overflow: Option<FjallOverflow>,  // Cold data (on disk)
+    memo_fjall: Option<Arc<Mutex<MemoFjall>>>,   // Persistent memo
 }
 ```
 
-### Overflow Behavior
+### StreamSource with Fjall (`stream_input.rs:97-116`)
 
 ```rust
-const BUFFER_THRESHOLD: usize = 1000;
-
-impl StreamPosition {
-    fn push(&mut self, value: Value) {
-        self.buffer.push(value);
-        if self.buffer.len() > BUFFER_THRESHOLD {
-            self.spill_oldest_to_fjall();
-        }
-    }
-
-    fn get(&self, pos: usize) -> Option<Value> {
-        if pos < self.start_offset {
-            // Read from Fjall
-            self.overflow.as_ref()?.get(pos)
-        } else {
-            // Read from buffer
-            self.buffer.get(pos - self.start_offset).cloned()
-        }
-    }
+enum StreamSource {
+    Async {
+        handle: Mutex<StreamHandle>,
+        timeout: Option<Duration>,
+        positions: Mutex<Vec<Rc<StreamPosition>>>,
+        #[cfg(feature = "fjall-persistence")]
+        fjall: Option<FjallOverflow>,        // Overflow storage here
+        #[cfg(feature = "fjall-persistence")]
+        memory_limit: Option<usize>,
+    },
+    Static(Vec<Value>),
+    Empty,
 }
 ```
 
@@ -133,45 +138,67 @@ Value: Value (serialized)
 
 ---
 
-## Memo Table Persistence
+## Per-Position Memoization
 
-Packrat memoization results survive suspension:
+Memoization is per-position (not centralized MemoTable). Each StreamPosition
+has its own memo cache with optional Fjall backing.
+
+### Per-Position Memo (`stream_input.rs:49-50`)
 
 ```rust
-pub struct MemoTable {
-    hot: HashMap<(usize, SmolStr), ParseResult>,  // In-memory
+pub struct StreamPosition {
+    // ...
+    memo: RefCell<HashMap<SmolStr, MemoEntry>>,  // In-memory
 
     #[cfg(feature = "fjall-persistence")]
-    cold: FjallPartition,  // Persisted
+    memo_fjall: Option<Arc<Mutex<MemoFjall>>>,   // Persisted
 }
 ```
 
 ### Lookup Order
 
-1. Check in-memory `hot` cache
-2. Fall back to Fjall `cold` storage
+1. Check position's in-memory `memo` cache
+2. Fall back to position's `memo_fjall` if enabled
 3. If miss, compute and store
 
 ### Storage Format
 
 ```
-Partition: memo_tables
-Key:   (grammar_name, position, rule_name) as bytes
-Value: ParseResult (serialized)
+Partition: memos
+Key:   (position_index, rule_name) as bytes
+Value: MemoEntry (serialized)
 ```
 
 ---
 
 ## ParseState Serialization
 
-Durable suspension of parse states (in progress):
+Durable suspension of parse states (`incremental.rs:14-22`):
 
 ```rust
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParseState {
     pub position_index: usize,
     pub rule_stack: Vec<(SmolStr, usize)>,
     pub bindings: HashMap<SmolStr, Value>,
+}
+```
+
+### Serialization Methods (`incremental.rs:63-97`)
+
+```rust
+#[cfg(feature = "fjall-persistence")]
+impl ParseState {
+    pub fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec(self)  // Uses serde_json, not rkyv
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, serde_json::Error> {
+        serde_json::from_slice(bytes)
+    }
+
+    pub fn save_to_fjall(&self, partition: &PartitionHandle, key: &[u8]) -> Result<()>;
+    pub fn load_from_fjall(partition: &PartitionHandle, key: &[u8]) -> Result<Option<Self>>;
 }
 ```
 
@@ -180,7 +207,7 @@ pub struct ParseState {
 ```
 Partition: parse_states
 Key:   state_id (u64)
-Value: ParseState (serialized via rkyv)
+Value: ParseState (serialized via serde_json)
 ```
 
 ### Use Case
@@ -220,20 +247,28 @@ let memos = keyspace.open_partition("memos", PartitionCreateOptions::default())?
 
 ## Web Integration
 
-The web server uses Fjall for session state:
+The web server uses Fjall for session state (`image_store.rs:7-35`):
 
 ```rust
-// fmpl-web/src/image_store.rs
-
 pub struct ImageStore {
-    keyspace: fjall::Keyspace,
-    objects: fjall::Partition,
+    partition: PartitionHandle,
 }
 
 impl ImageStore {
-    pub fn open(path: &str) -> Result<Self> { ... }
-    pub fn save_object(&self, id: ObjectId, obj: &Object) -> Result<()> { ... }
-    pub fn load_object(&self, id: ObjectId) -> Result<Option<Object>> { ... }
+    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
+        let keyspace = Config::new(path).open()?;
+        let partition = keyspace.open_partition("image", Default::default())?;
+        Ok(Self { partition })
+    }
+
+    pub fn bootstrap_if_empty(&self, seed_file: &str, vm: &mut Vm) -> Result<()> {
+        // Loads seed file, stores named objects with key "obj:{name}"
+    }
+
+    pub fn has_object(&self, name: &str) -> Result<bool> {
+        let key = format!("obj:{}", name);
+        Ok(self.partition.get(key)?.is_some())
+    }
 }
 ```
 
@@ -241,21 +276,23 @@ impl ImageStore {
 
 ## Serialization
 
-Two serialization formats:
+Two serialization formats used for different types:
 
-| Format | Use Case |
-|--------|----------|
-| `rkyv` | High-performance zero-copy for hot path |
-| `serde_json` | Human-readable for debugging |
+| Type | Format | Location |
+|------|--------|----------|
+| `StreamBuffer` | rkyv + serde | `stream.rs:32-42` |
+| `StreamSource` | rkyv + serde | `stream.rs:50-53` |
+| `SinkSource` | rkyv + serde | `stream.rs:201-217` |
+| `ParseState` | serde_json only | `incremental.rs:63-97` |
 
 ```rust
-// rkyv for performance
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct Object { ... }
+// Stream types use both rkyv and serde (stream.rs:32)
+#[derive(Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize)]
+pub struct StreamBuffer { ... }
 
-// serde for compatibility
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct Object { ... }
+// ParseState uses serde_json only (incremental.rs:14)
+#[derive(Serialize, Deserialize)]
+pub struct ParseState { ... }
 ```
 
 ---

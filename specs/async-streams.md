@@ -4,6 +4,13 @@ Async stream primitives with pipe operator.
 
 **Location**: [fmpl-core/src/stream.rs](../fmpl-core/src/stream.rs), [fmpl-core/src/value.rs](../fmpl-core/src/value.rs)
 
+**Key types**:
+- `StreamHandle` — `stream.rs:158`
+- `SinkHandle` — `stream.rs:236`
+- `StreamEvent` — `stream.rs:19`
+- `StreamOp` — `value.rs:87`
+- `Stream` — `value.rs:80`
+
 ---
 
 ## Overview
@@ -67,6 +74,7 @@ h(g(f(input)))
 | `take(n)` | Take first n elements | `stream \|> take(5)` |
 | `drop(n)` | Skip first n elements | `stream \|> drop(3)` |
 | `flat_map(f)` | Map and flatten | `stream \|> flat_map(\|x\| x.items)` |
+| `reduce(f)` | Reduce with accumulator | `stream \|> reduce(\|acc, x\| acc + x)` |
 
 ### Grammar Operators
 
@@ -79,59 +87,84 @@ h(g(f(input)))
 
 ## Key Types
 
-### StreamHandle
+### StreamHandle (`stream.rs:158-193`)
 
 ```rust
 pub struct StreamHandle {
-    pub rx: tokio::sync::mpsc::Receiver<StreamEvent>,
+    pub(crate) receiver: mpsc::Receiver<StreamEvent>,
+    pub(crate) id: u64,
+    pub(crate) source: StreamSource,  // For durable suspension
 }
 ```
 
-### SinkHandle
+Methods: `new`, `with_source`, `id()`, `source()`, `recv_blocking()`
+
+### SinkHandle (`stream.rs:236-274`)
 
 ```rust
 pub struct SinkHandle {
-    pub tx: tokio::sync::mpsc::Sender<StreamEvent>,
+    pub(crate) sender: mpsc::Sender<Value>,  // Note: Value, not StreamEvent
+    pub(crate) id: u64,
+    pub(crate) source: SinkSource,  // For durable suspension
 }
 ```
 
-### StreamEvent
+Methods: `new`, `with_source`, `id()`, `source()`, `send_blocking()`
+
+### StreamEvent (`stream.rs:19-26`)
 
 ```rust
 pub enum StreamEvent {
-    Value(Value),
-    End,
-    Error(String),
+    Data(Value),   // Intermediate data
+    Ok(Value),     // Terminal success
+    Err(Value),    // Terminal error (Value, not String)
 }
 ```
 
-### StreamOp
+### StreamOp (`value.rs:87-95`)
 
 ```rust
 pub enum StreamOp {
-    Map { f: Value },
-    Filter { f: Value },
+    Map(Value),
+    Filter(Value),
+    FlatMap(Value),
+    Reduce(Value),
     Parse { grammar: Value, rule: SmolStr },
     AsyncParse { grammar: Value, rule: SmolStr },
-    Collect,
-    Take { n: usize },
-    Drop { n: usize },
-    FlatMap { f: Value },
 }
 ```
 
+Note: `Collect`, `Take`, `Drop` are not implemented as StreamOp variants.
+
 ---
 
-## Value Representation
+## Value Representation (`value.rs:16-49`)
 
 ```rust
 pub enum Value {
-    // Stream values
-    Stream(StreamHandle),
-    Sink(SinkHandle),
-    StreamOp(Box<StreamOp>),
-    Promise(PromiseHandle),
+    // Grammar value
+    Grammar(Arc<Grammar>),
+
+    // Lazy stream pipeline
+    Stream(Arc<Stream>),           // value.rs:32
+
+    // Live handles (with serialization support)
+    AsyncStream(Arc<Mutex<StreamHandle>>),  // value.rs:37
+    Sink(Arc<SinkHandle>),                  // value.rs:42
+
+    // Suspended handles (for resume after deserialize)
+    SuspendedStream(StreamSource),  // value.rs:45
+    SuspendedSink(SinkSource),      // value.rs:48
     // ...
+}
+```
+
+### Stream Struct (`value.rs:80-84`)
+
+```rust
+pub struct Stream {
+    pub source: Value,
+    pub ops: Vec<StreamOp>,  // Lazy operation pipeline
 }
 ```
 
