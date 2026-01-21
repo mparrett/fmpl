@@ -1,8 +1,8 @@
 # Loop Summary
 
 **Status:** Completed successfully
-**Iterations:** 6
-**Duration:** 20m 43s
+**Iterations:** 5
+**Duration:** 12m 32s
 
 ## Tasks
 
@@ -48,13 +48,13 @@
 
 ## Events
 
-- 178 total events
-- 64 task.start
-- 32 loop.terminate
+- 186 total events
+- 66 task.start
+- 33 loop.terminate
 - 19 spec.start
+- 13 task.complete
 - 12 spec.approved
-- 11 task.complete
-- 8 loop.complete
+- 11 loop.complete
 - 7 spec.ready
 - 5 task.resume
 - 4 task.done
@@ -71,4 +71,4 @@
 
 ## Final Commit
 
-fc9498c: feat(llm): add LLM provider integration for agentic TUI
+a0421b9: feat(llm): rewrite LLM chat in pure FMPL

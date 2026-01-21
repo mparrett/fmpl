@@ -1,8 +1,47 @@
 //! FMPL Command-Line REPL
 
-use fmpl_core::{Vm, eval};
+use fmpl_core::stream::StreamEvent;
+use fmpl_core::{Value, Vm, eval};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
+
+/// Block and wait for an async stream to complete.
+/// Returns the final result value or an error.
+fn wait_for_async(value: Value) -> Result<Value, String> {
+    match value {
+        Value::AsyncStream(handle) => {
+            let mut handle = handle.lock().map_err(|e| format!("Lock error: {}", e))?;
+
+            // Collect all events from the stream
+            let mut final_value = Value::Null;
+
+            loop {
+                match handle.recv_blocking() {
+                    Some(StreamEvent::Data(v)) => {
+                        // Intermediate data - keep last value
+                        final_value = v;
+                    }
+                    Some(StreamEvent::Ok(v)) => {
+                        // Terminal success - return result
+                        return Ok(v);
+                    }
+                    Some(StreamEvent::Err(e)) => {
+                        // Terminal error - return error
+                        return Err(format!("Async error: {}", e));
+                    }
+                    None => {
+                        // Channel closed without Ok/Err
+                        if final_value != Value::Null {
+                            return Ok(final_value);
+                        }
+                        return Err("Async stream completed without result".to_string());
+                    }
+                }
+            }
+        }
+        _ => Ok(value),
+    }
+}
 
 fn main() -> rustyline::Result<()> {
     println!("FMPL v0.1.0");
@@ -43,7 +82,21 @@ fn main() -> rustyline::Result<()> {
                 // Evaluate FMPL code
                 match eval(&mut vm, line) {
                     Ok(value) => {
-                        println!("=> {}", value);
+                        // Check if value is an async stream that needs blocking wait
+                        let display_value = if matches!(value, fmpl_core::Value::AsyncStream(_)) {
+                            // Block and wait for async result
+                            match wait_for_async(value) {
+                                Ok(result) => result,
+                                Err(e) => {
+                                    eprintln!("Error waiting for async: {}", e);
+                                    continue;
+                                }
+                            }
+                        } else {
+                            value
+                        };
+
+                        println!("=> {}", display_value);
                     }
                     Err(e) => {
                         eprintln!("Error: {}", e);

@@ -1037,6 +1037,15 @@ impl Vm {
         if name == "curl" {
             return Ok(Value::Symbol(SmolStr::new("__builtin_curl")));
         }
+        if name == "io" {
+            return Ok(Value::Symbol(SmolStr::new("__builtin_io")));
+        }
+        if name == "json" {
+            return Ok(Value::Symbol(SmolStr::new("__builtin_json")));
+        }
+        if name == "env" {
+            return Ok(Value::Symbol(SmolStr::new("__builtin_env")));
+        }
 
         // Check scopes (innermost first)
         for scope in self.scopes.iter().rev() {
@@ -1120,7 +1129,9 @@ impl Vm {
                     .runtime
                     .as_ref()
                     .ok_or_else(|| Error::Runtime("curl requires runtime handle".to_string()))?;
-                crate::builtins::CurlBuiltin::get(url, handle)
+                // Optional third argument: options map with headers
+                let options = args.get(2);
+                crate::builtins::CurlBuiltin::get(url, handle, options)
             }
             ("__builtin_curl", "post") => {
                 let url = match args.first() {
@@ -1135,7 +1146,31 @@ impl Vm {
                     .runtime
                     .as_ref()
                     .ok_or_else(|| Error::Runtime("curl requires runtime handle".to_string()))?;
-                crate::builtins::CurlBuiltin::post(url, body, handle)
+                // Optional fourth argument: options map with headers
+                let options = args.get(3);
+                crate::builtins::CurlBuiltin::post(url, body, handle, options)
+            }
+            ("__builtin_io", "load") => {
+                let path = match args.first() {
+                    Some(Value::String(s)) => s.as_str(),
+                    _ => return Err(Error::Runtime("io.load requires string path".to_string())),
+                };
+                // Capture VM for evaluation context
+                // We need to call eval on the loaded code
+                let vm_ref = self as *mut Self;
+                crate::builtins::IoBuiltin::load(path, |code| {
+                    // SAFETY: We're passing a mutable reference that's valid for this call
+                    // The VM won't be dropped while the load is in progress
+                    let vm = unsafe { &mut *vm_ref };
+                    crate::eval(vm, code)
+                })
+            }
+            ("__builtin_env", "get") => {
+                let name = match args.first() {
+                    Some(Value::String(s)) => s.as_str(),
+                    _ => return Err(Error::Runtime("env.get requires string name".to_string())),
+                };
+                crate::builtins::EnvBuiltin::get(name)
             }
             ("__builtin_json", "parse") => {
                 let json_str = match args.first() {

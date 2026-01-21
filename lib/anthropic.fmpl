@@ -3,8 +3,8 @@
 # Provides chat completion using Anthropic's Claude API
 #
 # Usage:
-#   load("lib/anthropic.fmpl")
-#   let response = claude.chat("What is 2+2?")
+#   io.load("lib/anthropic.fmpl")
+#   let response = anthropic.chat("What is 2+2?")
 #   print(response)
 #
 # Requires ANTHROPIC_API_KEY environment variable
@@ -20,40 +20,43 @@ anthropic.model = "claude-sonnet-4-20250514"
 # Anthropic version header
 anthropic.version = "2023-06-01"
 
-# Get API key from environment (placeholder - needs env builtin)
+# Get API key from environment
 anthropic.get_api_key = \
-  # TODO: Implement env.get() builtin
-  "sk-ant-api03-YOUR-API-KEY-HERE"
+  env.get("ANTHROPIC_API_KEY")
 
 # Send a chat completion request to Claude
 # Returns the response text as a string
 anthropic.chat = \prompt
   let api_key = anthropic.get_api_key()
 
-  let body = json::stringify(%{
-    model: anthropic.model,
-    max_tokens: 1024,
-    messages: [%{
-      role: "user",
-      content: prompt
-    }]
-  })
+  if api_key == null then
+    "Error: ANTHROPIC_API_KEY environment variable not set"
+  else
+    let body = json::stringify(%{
+      model: anthropic.model,
+      max_tokens: 1024,
+      messages: [%{
+        role: "user",
+        content: prompt
+      }]
+    })
 
-  # Note: curl.post doesn't support custom headers yet
-  # We need to add header support to curl builtin
-  # For now, this is a placeholder showing the intended API
+    let response = ::__builtin_curl.post(
+      anthropic.endpoint,
+      body,
+      %{headers: %{
+        "x-api-key": api_key,
+        "anthropic-version": anthropic.version,
+        "content-type": "application/json",
+        "accept": "application/json"
+      }}
+    )
 
-  # let response = curl.post_with_headers(
-  #   anthropic.endpoint,
-  #   body,
-  #   %{
-  #     "x-api-key": api_key,
-  #     "anthropic-version": anthropic.version,
-  #     "content-type": "application/json"
-  #   }
-  # )
-
-  "Error: curl.post_with_headers not implemented yet. See lib/anthropic.fmpl"
+    # Wait for async response and parse
+    @ response.source {
+      %{ok: json_text} => anthropic.parse_response(json_text)
+      %{error: e} => "Error: " + json::stringify(e)
+    }
 
 # Parse Claude's JSON response to extract the text
 # Claude returns: {"content": [{"type": "text", "text": "..."}], ...}
@@ -65,10 +68,8 @@ anthropic.parse_response = \json_text
     %{content: [%{type: "text", text: response_text}]} => response_text
     %{content: list} =>
       # Extract text from first content block
-      @ list {
-        [%{type: "text", text: response_text}, ...] => response_text
-        _ => "Unexpected content format"
-      }
+      # (using pattern matching on list index when available)
+      "TODO: extract text from content list"
     %{error: %{message: msg}} => "Error: " + msg
     _ => "Unexpected response: " + json_text
   }
@@ -77,16 +78,32 @@ anthropic.parse_response = \json_text
 anthropic.chat_history = \messages
   let api_key = anthropic.get_api_key()
 
-  let body = json::stringify(%{
-    model: anthropic.model,
-    max_tokens: 1024,
-    messages: messages
-  })
+  if api_key == null then
+    "Error: ANTHROPIC_API_KEY environment variable not set"
+  else
+    let body = json::stringify(%{
+      model: anthropic.model,
+      max_tokens: 1024,
+      messages: messages
+    })
 
-  # TODO: Implement with header support
-  "Error: curl.post_with_headers not implemented yet. See lib/anthropic.fmpl"
+    let response = ::__builtin_curl.post(
+      anthropic.endpoint,
+      body,
+      %{headers: %{
+        "x-api-key": api_key,
+        "anthropic-version": anthropic.version,
+        "content-type": "application/json"
+      }}
+    )
+
+    @ response.source {
+      %{ok: json_text} => anthropic.parse_response(json_text)
+      %{error: e} => "Error: " + json::stringify(e)
+    }
 
 # Stream completion (Claude supports SSE streaming)
 anthropic.chat_stream = \prompt
-  # TODO: Implement with header + stream parsing
+  # TODO: Implement with SSE stream parsing
   "Error: Streaming not implemented yet"
+

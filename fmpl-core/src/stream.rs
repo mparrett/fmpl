@@ -211,9 +211,33 @@ impl StreamHandle {
         &self.source
     }
 
-    /// Receive the next event (blocking).
+    /// Receive the next event, blocking until available or channel closed.
+    /// This uses a synchronous blocking wait for REPL/non-async contexts.
     pub fn recv_blocking(&mut self) -> Option<StreamEvent> {
-        self.receiver.try_recv().ok()
+        // Use blocking recv with timeout to avoid deadlocks
+        // In async contexts, use the receiver directly with proper await
+        use std::time::Duration;
+
+        // Try non-blocking first
+        if let Ok(event) = self.receiver.try_recv() {
+            return Some(event);
+        }
+
+        // Fall back to blocking recv with reasonable timeout
+        // Note: tokio mpsc doesn't have true blocking recv, so we poll
+        let timeout = Duration::from_secs(30);
+        let start = std::time::Instant::now();
+
+        while start.elapsed() < timeout {
+            std::thread::sleep(Duration::from_millis(10));
+            match self.receiver.try_recv() {
+                Ok(event) => return Some(event),
+                Err(mpsc::error::TryRecvError::Disconnected) => return None,
+                Err(mpsc::error::TryRecvError::Empty) => continue,
+            }
+        }
+
+        None // Timeout
     }
 }
 
