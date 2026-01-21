@@ -110,6 +110,40 @@ struct ChatMessage {
     content: String,
 }
 
+/// Panel types for focus management (Phase 6)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PanelType {
+    Research,
+    Planning,
+    CodeEditor,
+    Output,
+}
+
+/// Task status for planning panel (Phase 6 Task 6.3)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskStatus {
+    Pending,
+    InProgress,
+    Complete,
+}
+
+/// Task priority for planning panel (Phase 6 Task 6.3)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Priority {
+    Low,
+    Medium,
+    High,
+}
+
+/// A planning task (Phase 6 Task 6.3)
+#[derive(Clone, Debug)]
+struct PlanningTask {
+    id: usize,
+    description: String,
+    status: TaskStatus,
+    priority: Priority,
+}
+
 struct App {
     research_content: String,
     planning_content: String,
@@ -135,6 +169,15 @@ struct App {
     history_selection_mode: bool,     // When true, arrow keys navigate history
     compare_branch_id: Option<NodeId>, // Branch to compare with (for diff view)
     diff_view_mode: bool,             // When true, show diff between branches
+    // Phase 6: Panel interactivity
+    focused_panel: PanelType,    // Currently focused panel
+    research_lines: Vec<String>, // Research panel content (editable)
+    research_cursor_row: usize,  // Research panel cursor row
+    research_cursor_col: usize,  // Research panel cursor column
+    // Phase 6 Task 6.3: Planning panel with task list
+    planning_tasks: Vec<PlanningTask>, // Task list
+    selected_task_index: usize,        // Currently selected task
+    task_counter: usize,               // For generating task IDs
 }
 
 impl App {
@@ -175,6 +218,16 @@ impl App {
             history_selection_mode: false,
             compare_branch_id: None,
             diff_view_mode: false,
+            // Phase 6: Initialize focused panel (default to code editor)
+            focused_panel: PanelType::CodeEditor,
+            // Phase 6 Task 6.2: Initialize research panel (try to load from file)
+            research_lines: Self::load_research_notes(),
+            research_cursor_row: 0,
+            research_cursor_col: 0,
+            // Phase 6 Task 6.3: Initialize planning panel (try to load from file)
+            planning_tasks: Self::load_planning_tasks(),
+            selected_task_index: 0,
+            task_counter: 0,
         }
     }
 
@@ -202,6 +255,143 @@ impl App {
             String::from("No LLM libraries found")
         } else {
             results.join("\n")
+        }
+    }
+
+    // Phase 6 Task 6.2: Research panel persistence
+
+    /// Load research notes from .agent/research.md
+    fn load_research_notes() -> Vec<String> {
+        match std::fs::read_to_string(".agent/research.md") {
+            Ok(content) => {
+                if content.trim().is_empty() {
+                    vec![String::from("# Research Notes")]
+                } else {
+                    content.lines().map(String::from).collect()
+                }
+            }
+            Err(_) => vec![String::from("# Research Notes")],
+        }
+    }
+
+    /// Save research notes to .agent/research.md
+    fn save_research_notes(&self) {
+        let content = self.research_lines.join("\n");
+        match std::fs::write(".agent/research.md", content) {
+            Ok(_) => {
+                // Success - silent save
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to save research notes: {}", e);
+            }
+        }
+    }
+
+    // Phase 6 Task 6.3: Planning panel persistence
+
+    /// Parse a task line from .agent/tasks.md
+    /// Format: "- [ ] Task description [P]" where P is L/M/H
+    fn parse_task_line(line: &str, max_id: &mut usize) -> Option<PlanningTask> {
+        let trimmed = line.trim();
+
+        // Check if it's a task line (starts with "- [")
+        if !trimmed.starts_with("- [") {
+            return None;
+        }
+
+        // Extract status marker (character after "- [")
+        let status_char = trimmed.chars().nth(3)?;
+        let status = match status_char {
+            ' ' => TaskStatus::Pending,
+            '>' => TaskStatus::InProgress,
+            'x' | 'X' => TaskStatus::Complete,
+            _ => return None,
+        };
+
+        // Extract description (between "] " and " [")
+        let desc_start = trimmed.find("] ")? + 2;
+        let desc_end = trimmed.rfind(" [")?;
+
+        if desc_end <= desc_start {
+            return None;
+        }
+
+        let description = trimmed[desc_start..desc_end].trim().to_string();
+
+        // Extract priority (character between "[" and "]" at end)
+        let priority_char = trimmed.chars().nth(trimmed.len() - 2)?;
+        let priority = match priority_char {
+            'L' | 'l' => Priority::Low,
+            'M' | 'm' => Priority::Medium,
+            'H' | 'h' => Priority::High,
+            _ => return None,
+        };
+
+        *max_id += 1;
+        Some(PlanningTask {
+            id: *max_id,
+            description,
+            status,
+            priority,
+        })
+    }
+
+    /// Load planning tasks from .agent/tasks.md
+    fn load_planning_tasks() -> Vec<PlanningTask> {
+        match std::fs::read_to_string(".agent/tasks.md") {
+            Ok(content) => {
+                let mut tasks = Vec::new();
+                let mut max_id = 0;
+
+                for line in content.lines() {
+                    if line.trim().is_empty() || line.starts_with("#") {
+                        continue;
+                    }
+
+                    // Parse format: "- [ ] Task description [P]" or "- [x] Task description [P]"
+                    // where P is L/M/H for priority
+                    let task = Self::parse_task_line(line, &mut max_id);
+                    if let Some(t) = task {
+                        tasks.push(t);
+                    }
+                }
+
+                tasks
+            }
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Save planning tasks to .agent/tasks.md
+    fn save_planning_tasks(&self) {
+        let mut content = String::from("# Planning Tasks\n\n");
+
+        for task in &self.planning_tasks {
+            let status_marker = match task.status {
+                TaskStatus::Pending => " ",
+                TaskStatus::InProgress => ">",
+                TaskStatus::Complete => "x",
+            };
+
+            let priority_tag = match task.priority {
+                Priority::Low => "[L]",
+                Priority::Medium => "[M]",
+                Priority::High => "[H]",
+            };
+
+            content.push_str(&format!(
+                "- [{}] {} {}\n",
+                status_marker, task.description, priority_tag
+            ));
+        }
+
+        match std::fs::write(".agent/tasks.md", content) {
+            Ok(_) => {
+                // Success - silent save
+            }
+            Err(e) => {
+                eprintln!("Warning: Failed to save planning tasks: {}", e);
+            }
         }
     }
 
@@ -783,6 +973,180 @@ impl App {
                     );
                 }
             }
+            // Phase 6: Panel focus switching
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.focused_panel = PanelType::Research;
+                self.output = String::from(
+                    "Research panel focused.\n\nArrow keys navigate content when editable (Phase 6.2).",
+                );
+            }
+            KeyCode::Char('p')
+                if key.modifiers.contains(KeyModifiers::CONTROL) && !self.llm_mode =>
+            {
+                // Only switch to planning panel if not in LLM mode (Ctrl+P switches provider in LLM mode)
+                self.focused_panel = PanelType::Planning;
+                self.output = String::from(
+                    "Planning panel focused.\n\nArrow keys navigate tasks when editable (Phase 6.3).",
+                );
+            }
+            KeyCode::Char('e')
+                if key.modifiers.contains(KeyModifiers::CONTROL) && !self.edit_mode =>
+            {
+                // Only switch to code editor if not in edit mode (Ctrl+E enters edit mode)
+                self.focused_panel = PanelType::CodeEditor;
+                self.output =
+                    String::from("Code editor focused.\n\nType to edit, Esc+Enter to execute.");
+            }
+            KeyCode::Char('o') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.focused_panel = PanelType::Output;
+                self.output = String::from(
+                    "Output panel focused.\n\nView execution results and LLM responses.",
+                );
+            }
+            // Phase 6 Task 6.2: Ctrl+S to save research notes
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.focused_panel == PanelType::Research {
+                    self.save_research_notes();
+                    self.output = String::from(
+                        "Research notes saved to .agent/research.md\n\nUse Ctrl+R to focus research panel, then type to edit.",
+                    );
+                } else if self.focused_panel == PanelType::Planning {
+                    // Phase 6 Task 6.3: Save planning tasks
+                    self.save_planning_tasks();
+                    self.output = String::from(
+                        "Planning tasks saved to .agent/tasks.md\n\nUse Ctrl+P to focus planning panel.",
+                    );
+                }
+            }
+            // Phase 6 Task 6.3: Task management keybindings (when planning panel focused)
+            KeyCode::Char('a') if self.focused_panel == PanelType::Planning => {
+                self.task_counter += 1;
+                self.planning_tasks.push(PlanningTask {
+                    id: self.task_counter,
+                    description: String::from("New task"),
+                    status: TaskStatus::Pending,
+                    priority: Priority::Medium,
+                });
+                self.selected_task_index = self.planning_tasks.len().saturating_sub(1);
+                self.save_planning_tasks();
+                self.output = format!(
+                    "Task {} added.\n\nPress 'e' to edit description.\nPress Enter to toggle status.\nPress +/- to change priority.",
+                    self.task_counter
+                );
+            }
+            KeyCode::Char('d')
+                if self.focused_panel == PanelType::Planning && !self.planning_tasks.is_empty() =>
+            {
+                let removed = self.planning_tasks.remove(self.selected_task_index);
+                if self.selected_task_index >= self.planning_tasks.len()
+                    && !self.planning_tasks.is_empty()
+                {
+                    self.selected_task_index = self.planning_tasks.len() - 1;
+                }
+                self.save_planning_tasks();
+                self.output = format!(
+                    "Task deleted: {}\n\n{} tasks remaining.",
+                    removed.description,
+                    self.planning_tasks.len()
+                );
+            }
+            KeyCode::Char('e')
+                if self.focused_panel == PanelType::Planning && !self.planning_tasks.is_empty() =>
+            {
+                // Toggle through descriptions: "Task 1" -> "Task 2" -> etc.
+                // In a real implementation, this would enter edit mode for the description
+                let task_id = self.planning_tasks[self.selected_task_index].id;
+                self.planning_tasks[self.selected_task_index].description =
+                    format!("Edited task {}", task_id);
+                self.save_planning_tasks();
+                self.output = format!(
+                    "Task {} description updated.\n\n(Full edit mode coming soon)",
+                    task_id
+                );
+            }
+            KeyCode::Enter
+                if self.focused_panel == PanelType::Planning && !self.planning_tasks.is_empty() =>
+            {
+                // Toggle status: Pending -> InProgress -> Complete -> Pending
+                let task_id = self.planning_tasks[self.selected_task_index].id;
+                let new_status = match self.planning_tasks[self.selected_task_index].status {
+                    TaskStatus::Pending => TaskStatus::InProgress,
+                    TaskStatus::InProgress => TaskStatus::Complete,
+                    TaskStatus::Complete => TaskStatus::Pending,
+                };
+                self.planning_tasks[self.selected_task_index].status = new_status;
+                self.save_planning_tasks();
+                let status_str = match new_status {
+                    TaskStatus::Pending => "Pending",
+                    TaskStatus::InProgress => "In Progress",
+                    TaskStatus::Complete => "Complete",
+                };
+                self.output = format!(
+                    "Task {} status: {}\n\nPress Enter to cycle again.",
+                    task_id, status_str
+                );
+            }
+            KeyCode::Char('+')
+                if self.focused_panel == PanelType::Planning && !self.planning_tasks.is_empty() =>
+            {
+                // Increase priority: Low -> Medium -> High
+                let idx = self.selected_task_index;
+                let task_id = self.planning_tasks[idx].id;
+                let new_priority = match self.planning_tasks[idx].priority {
+                    Priority::Low => Priority::Medium,
+                    Priority::Medium => Priority::High,
+                    Priority::High => Priority::High, // Already at max
+                };
+                self.planning_tasks[idx].priority = new_priority;
+                self.save_planning_tasks();
+                let priority_str = match new_priority {
+                    Priority::Low => "Low",
+                    Priority::Medium => "Medium",
+                    Priority::High => "High",
+                };
+                self.output = format!(
+                    "Task {} priority: {}\n\nPress - to decrease.",
+                    task_id, priority_str
+                );
+            }
+            KeyCode::Char('-')
+                if self.focused_panel == PanelType::Planning && !self.planning_tasks.is_empty() =>
+            {
+                // Decrease priority: High -> Medium -> Low
+                let idx = self.selected_task_index;
+                let task_id = self.planning_tasks[idx].id;
+                let new_priority = match self.planning_tasks[idx].priority {
+                    Priority::Low => Priority::Low, // Already at min
+                    Priority::Medium => Priority::Low,
+                    Priority::High => Priority::Medium,
+                };
+                self.planning_tasks[idx].priority = new_priority;
+                self.save_planning_tasks();
+                let priority_str = match new_priority {
+                    Priority::Low => "Low",
+                    Priority::Medium => "Medium",
+                    Priority::High => "High",
+                };
+                self.output = format!(
+                    "Task {} priority: {}\n\nPress + to increase.",
+                    task_id, priority_str
+                );
+            }
+            // Arrow keys for task selection when planning panel focused
+            KeyCode::Up
+                if self.focused_panel == PanelType::Planning && !self.planning_tasks.is_empty() =>
+            {
+                if self.selected_task_index > 0 {
+                    self.selected_task_index -= 1;
+                }
+            }
+            KeyCode::Down
+                if self.focused_panel == PanelType::Planning && !self.planning_tasks.is_empty() =>
+            {
+                if self.selected_task_index < self.planning_tasks.len() - 1 {
+                    self.selected_task_index += 1;
+                }
+            }
             KeyCode::Esc => {
                 // Phase 2: Exit history selection mode
                 if self.history_selection_mode {
@@ -838,69 +1202,151 @@ impl App {
                 }
             }
             KeyCode::Char(c) => {
-                self.insert_char(c);
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => self.research_insert_char(c),
+                    PanelType::CodeEditor => self.insert_char(c),
+                    _ => {}
+                }
             }
             KeyCode::Backspace => {
-                self.backspace();
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => self.research_backspace(),
+                    PanelType::CodeEditor => self.backspace(),
+                    _ => {}
+                }
             }
             KeyCode::Delete => {
-                self.delete();
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => self.research_delete(),
+                    PanelType::CodeEditor => self.delete(),
+                    _ => {}
+                }
             }
             KeyCode::Enter => {
-                // Check for Ctrl+Enter to save edited message
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    if self.edit_mode {
-                        match self.save_edited_message() {
-                            Ok(()) => {
-                                self.update_mode_indicator();
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => {
+                        self.research_insert_newline();
+                    }
+                    PanelType::CodeEditor => {
+                        // Check for Ctrl+Enter to save edited message
+                        if key.modifiers.contains(KeyModifiers::CONTROL) {
+                            if self.edit_mode {
+                                match self.save_edited_message() {
+                                    Ok(()) => {
+                                        self.update_mode_indicator();
+                                    }
+                                    Err(e) => {
+                                        self.output = format!("Save failed: {}", e);
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                self.output = format!("Save failed: {}", e);
-                            }
+                        } else if self.execute_mode {
+                            self.execute_code();
+                            self.execute_mode = false;
+                        } else {
+                            self.insert_newline();
                         }
                     }
-                } else if self.execute_mode {
-                    self.execute_code();
-                    self.execute_mode = false;
-                } else {
-                    self.insert_newline();
+                    _ => {}
                 }
             }
             KeyCode::Left => {
-                if self.cursor_col > 0 {
-                    self.cursor_col -= 1;
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => self.research_cursor_left(),
+                    PanelType::CodeEditor => {
+                        if self.cursor_col > 0 {
+                            self.cursor_col -= 1;
+                        }
+                    }
+                    _ => {}
                 }
             }
             KeyCode::Right => {
-                let line_len = self.code_lines[self.cursor_row].len();
-                if self.cursor_col < line_len {
-                    self.cursor_col += 1;
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => self.research_cursor_right(),
+                    PanelType::CodeEditor => {
+                        let line_len = self.code_lines[self.cursor_row].len();
+                        if self.cursor_col < line_len {
+                            self.cursor_col += 1;
+                        }
+                    }
+                    _ => {}
                 }
             }
             KeyCode::Up => {
-                if self.cursor_row > 0 {
-                    self.cursor_row -= 1;
-                    let line_len = self.code_lines[self.cursor_row].len();
-                    self.cursor_col = self.cursor_col.min(line_len);
-                    self.adjust_scroll();
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => {
+                        self.research_cursor_up();
+                    }
+                    PanelType::CodeEditor => {
+                        if self.cursor_row > 0 {
+                            self.cursor_row -= 1;
+                            let line_len = self.code_lines[self.cursor_row].len();
+                            self.cursor_col = self.cursor_col.min(line_len);
+                            self.adjust_scroll();
+                        }
+                    }
+                    _ => {}
                 }
             }
             KeyCode::Down => {
-                if self.cursor_row < self.code_lines.len() - 1 {
-                    self.cursor_row += 1;
-                    let line_len = self.code_lines[self.cursor_row].len();
-                    self.cursor_col = self.cursor_col.min(line_len);
-                    self.adjust_scroll();
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => {
+                        self.research_cursor_down();
+                    }
+                    PanelType::CodeEditor => {
+                        if self.cursor_row < self.code_lines.len() - 1 {
+                            self.cursor_row += 1;
+                            let line_len = self.code_lines[self.cursor_row].len();
+                            self.cursor_col = self.cursor_col.min(line_len);
+                            self.adjust_scroll();
+                        }
+                    }
+                    _ => {}
                 }
             }
             KeyCode::Home => {
-                self.cursor_col = 0;
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => self.research_cursor_home(),
+                    PanelType::CodeEditor => {
+                        self.cursor_col = 0;
+                    }
+                    _ => {}
+                }
             }
             KeyCode::End => {
-                self.cursor_col = self.code_lines[self.cursor_row].len();
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => self.research_cursor_end(),
+                    PanelType::CodeEditor => {
+                        self.cursor_col = self.code_lines[self.cursor_row].len();
+                    }
+                    _ => {}
+                }
             }
             KeyCode::Tab => {
-                self.insert_str("    ");
+                // Phase 6 Task 6.2: Route to focused panel
+                match self.focused_panel {
+                    PanelType::Research => {
+                        // Insert 4 spaces in research panel
+                        for _ in 0..4 {
+                            self.research_insert_char(' ');
+                        }
+                    }
+                    PanelType::CodeEditor => {
+                        self.insert_str("    ");
+                    }
+                    _ => {}
+                }
             }
             _ => {}
         }
@@ -967,6 +1413,122 @@ impl App {
             self.scroll_offset = self.cursor_row;
         } else if self.cursor_row >= self.scroll_offset + VISIBLE_LINES {
             self.scroll_offset = self.cursor_row - VISIBLE_LINES + 1;
+        }
+    }
+
+    // Phase 6 Task 6.2: Research panel editing methods
+
+    fn research_insert_char(&mut self, c: char) {
+        // Ensure we have at least one line
+        if self.research_lines.is_empty() {
+            self.research_lines.push(String::new());
+        }
+
+        let row = self.research_cursor_row.min(self.research_lines.len() - 1);
+        let col = self.research_cursor_col.min(self.research_lines[row].len());
+
+        self.research_lines[row].insert(col, c);
+        self.research_cursor_col += 1;
+    }
+
+    fn research_backspace(&mut self) {
+        if self.research_lines.is_empty() {
+            return;
+        }
+
+        let row = self.research_cursor_row.min(self.research_lines.len() - 1);
+        let col = self.research_cursor_col.min(self.research_lines[row].len());
+
+        if col > 0 {
+            self.research_lines[row].remove(col - 1);
+            self.research_cursor_col -= 1;
+        } else if row > 0 {
+            // Merge with previous line
+            let prev_line_len = self.research_lines[row - 1].len();
+            let current_line = self.research_lines.remove(row);
+            self.research_lines[row - 1].push_str(&current_line);
+            self.research_cursor_row -= 1;
+            self.research_cursor_col = prev_line_len;
+        }
+    }
+
+    fn research_delete(&mut self) {
+        if self.research_lines.is_empty() {
+            return;
+        }
+
+        let row = self.research_cursor_row.min(self.research_lines.len() - 1);
+        let col = self.research_cursor_col.min(self.research_lines[row].len());
+
+        let line_len = self.research_lines[row].len();
+        if col < line_len {
+            self.research_lines[row].remove(col);
+        } else if row < self.research_lines.len() - 1 {
+            // Merge with next line
+            let next_line = self.research_lines.remove(row + 1);
+            self.research_lines[row].push_str(&next_line);
+        }
+    }
+
+    fn research_insert_newline(&mut self) {
+        if self.research_lines.is_empty() {
+            self.research_lines.push(String::new());
+            return;
+        }
+
+        let row = self.research_cursor_row.min(self.research_lines.len() - 1);
+        let col = self.research_cursor_col.min(self.research_lines[row].len());
+
+        let new_line = self.research_lines[row].split_off(col);
+        self.research_lines.insert(row + 1, new_line);
+        self.research_cursor_row += 1;
+        self.research_cursor_col = 0;
+    }
+
+    fn research_cursor_left(&mut self) {
+        if self.research_cursor_col > 0 {
+            self.research_cursor_col -= 1;
+        }
+    }
+
+    fn research_cursor_right(&mut self) {
+        if self.research_lines.is_empty() {
+            return;
+        }
+
+        let row = self.research_cursor_row.min(self.research_lines.len() - 1);
+        let line_len = self.research_lines[row].len();
+        if self.research_cursor_col < line_len {
+            self.research_cursor_col += 1;
+        }
+    }
+
+    fn research_cursor_up(&mut self) {
+        if self.research_cursor_row > 0 {
+            self.research_cursor_row -= 1;
+            let line_len = self.research_lines[self.research_cursor_row].len();
+            self.research_cursor_col = self.research_cursor_col.min(line_len);
+        }
+    }
+
+    fn research_cursor_down(&mut self) {
+        if !self.research_lines.is_empty()
+            && self.research_cursor_row < self.research_lines.len() - 1
+        {
+            self.research_cursor_row += 1;
+            let line_len = self.research_lines[self.research_cursor_row].len();
+            self.research_cursor_col = self.research_cursor_col.min(line_len);
+        }
+    }
+
+    fn research_cursor_home(&mut self) {
+        self.research_cursor_col = 0;
+    }
+
+    fn research_cursor_end(&mut self) {
+        if !self.research_lines.is_empty() {
+            let row = self.research_cursor_row.min(self.research_lines.len() - 1);
+            self.research_cursor_col = self.research_lines[row].len();
         }
     }
 
@@ -1359,6 +1921,15 @@ impl App {
     }
 }
 
+// Phase 6: Helper function to get panel title with focus indicator
+fn get_panel_title(base_title: &str, is_focused: bool) -> String {
+    if is_focused {
+        format!("{} [FOCUSED]", base_title)
+    } else {
+        base_title.to_string()
+    }
+}
+
 fn draw_ui(f: &mut Frame, app: &App) {
     // Main layout: split into horizontal sections
     let chunks = Layout::default()
@@ -1374,7 +1945,7 @@ fn draw_ui(f: &mut Frame, app: &App) {
         )
         .split(f.area());
 
-    // Research panel - show conversation history in LLM mode
+    // Research panel - show conversation history in LLM mode, editable notes otherwise
     let research_content = if app.llm_mode {
         if app.diff_view_mode {
             app.format_diff_view()
@@ -1382,10 +1953,11 @@ fn draw_ui(f: &mut Frame, app: &App) {
             app.format_history()
         }
     } else {
-        app.research_content.clone()
+        // Phase 6 Task 6.2: Show editable research lines with cursor indicator
+        app.research_lines.join("\n")
     };
 
-    let panel_title = if app.llm_mode {
+    let base_panel_title = if app.llm_mode {
         if app.diff_view_mode {
             "Branch Diff View"
         } else {
@@ -1395,24 +1967,146 @@ fn draw_ui(f: &mut Frame, app: &App) {
         "Research View"
     };
 
-    let research_panel = Paragraph::new(research_content.as_str())
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(panel_title)
-                .title_alignment(Alignment::Center),
-        )
-        .wrap(Wrap { trim: true });
+    let research_focused = app.focused_panel == PanelType::Research;
+    let research_title = get_panel_title(base_panel_title, research_focused);
+
+    let research_panel = if app.llm_mode {
+        // In LLM mode, just show the conversation history
+        Paragraph::new(research_content.as_str())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(research_title)
+                    .title_alignment(Alignment::Center),
+            )
+            .wrap(Wrap { trim: true })
+    } else {
+        // Phase 6 Task 6.2: In non-LLM mode, show research with cursor when focused
+        if research_focused && !app.research_lines.is_empty() {
+            let cursor_row = app.research_cursor_row.min(app.research_lines.len() - 1);
+            let cursor_col = app
+                .research_cursor_col
+                .min(app.research_lines[cursor_row].len());
+
+            // Build Text with cursor indicator
+            let mut spans = Vec::new();
+            for (i, line) in app.research_lines.iter().enumerate() {
+                if i == cursor_row {
+                    // Show cursor position
+                    let before = &line[..cursor_col];
+                    let after = &line[cursor_col..];
+                    spans.push(Line::from(vec![
+                        Span::raw(before.to_string()),
+                        Span::styled("█", Style::default().fg(Color::Yellow)),
+                        Span::raw(after.to_string()),
+                    ]));
+                } else {
+                    spans.push(Line::from(line.as_str()));
+                }
+            }
+            Paragraph::new(spans)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(research_title)
+                        .title_alignment(Alignment::Center),
+                )
+                .wrap(Wrap { trim: false })
+        } else {
+            // Not focused or empty, show plain text
+            Paragraph::new(research_content.as_str())
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(research_title)
+                        .title_alignment(Alignment::Center),
+                )
+                .wrap(Wrap { trim: true })
+        }
+    };
 
     // Planning panel
-    let planning_panel = Paragraph::new(app.planning_content.as_str())
+    let planning_focused = app.focused_panel == PanelType::Planning;
+    let planning_title = get_panel_title("Planning View", planning_focused);
+
+    // Phase 6 Task 6.3: Render planning tasks or show placeholder
+    let planning_content = if app.planning_tasks.is_empty() {
+        if planning_focused {
+            vec![
+                Line::from("No tasks yet."),
+                Line::from(""),
+                Line::from("Press 'a' to add a task."),
+            ]
+        } else {
+            vec![Line::from("Planning view - Collaborative scope definition")]
+        }
+    } else {
+        let mut lines = Vec::new();
+
+        // Add help text when focused
+        if planning_focused {
+            lines.push(Line::from("a:add e:edit Enter:toggle d:del +/-:priority"));
+            lines.push(Line::from(""));
+        }
+
+        // Render each task
+        for (idx, task) in app.planning_tasks.iter().enumerate() {
+            let is_selected = planning_focused && idx == app.selected_task_index;
+
+            // Status indicator
+            let status_marker = match task.status {
+                TaskStatus::Pending => "[ ]",
+                TaskStatus::InProgress => "[>]",
+                TaskStatus::Complete => "[x]",
+            };
+
+            // Priority color
+            let priority_color = match task.priority {
+                Priority::Low => Color::Blue,
+                Priority::Medium => Color::Yellow,
+                Priority::High => Color::Red,
+            };
+
+            let priority_tag = match task.priority {
+                Priority::Low => "[L]",
+                Priority::Medium => "[M]",
+                Priority::High => "[H]",
+            };
+
+            // Build line with task info
+            if is_selected {
+                // Selected task gets highlighted
+                lines.push(Line::from(vec![
+                    Span::styled("► ", Style::default().fg(Color::Yellow)),
+                    Span::styled(status_marker, Style::default().fg(Color::Yellow)),
+                    Span::raw(" "),
+                    Span::styled(&task.description, Style::default().fg(Color::Yellow)),
+                    Span::raw(" "),
+                    Span::styled(priority_tag, Style::default().fg(priority_color)),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::raw(status_marker),
+                    Span::raw(" "),
+                    Span::raw(&task.description),
+                    Span::raw(" "),
+                    Span::styled(priority_tag, Style::default().fg(priority_color)),
+                ]));
+            }
+        }
+
+        lines
+    };
+
+    let planning_panel = Paragraph::new(Text::from(planning_content))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Planning View")
+                .title(planning_title)
                 .title_alignment(Alignment::Center),
         )
-        .wrap(Wrap { trim: true });
+        .wrap(Wrap { trim: false }); // Don't wrap to preserve formatting
 
     // Execution panel - split horizontally into code input and output
     let execution_chunks = Layout::default()
@@ -1502,22 +2196,29 @@ fn draw_ui(f: &mut Frame, app: &App) {
 
     let code_text = Text::from(code_spans);
 
+    let code_focused = app.focused_panel == PanelType::CodeEditor;
+    let code_title = get_panel_title("Code Editor", code_focused);
+
     let code_panel = Paragraph::new(code_text)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Code Editor")
+                .title(code_title)
                 .title_alignment(Alignment::Center),
         )
         .wrap(Wrap { trim: false }); // Don't wrap - show horizontal scroll
 
     // Output panel
     let output_content = format!("{}{}", app.output, warning_text);
+
+    let output_focused = app.focused_panel == PanelType::Output;
+    let output_title = get_panel_title("Execution Output", output_focused);
+
     let output_panel = Paragraph::new(output_content.as_str())
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Execution Output")
+                .title(output_title)
                 .title_alignment(Alignment::Center),
         )
         .wrap(Wrap { trim: true });

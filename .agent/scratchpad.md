@@ -1,6 +1,28 @@
 # FMPL Scratchpad
 
-## Ralph Loop Recovery (2026-01-22T02:00:00) → **PHASE 2 COMPLETE, LOOP COMPLETE** (2026-01-21T20:02:00)
+## Ralph Loop Recovery (2026-01-21T15:40:00) → **SYSTEM IDLE** (2026-01-21T15:40:00)
+
+**Event**: `task.resume` → Recovery complete, system idle
+
+**System Status**: ✅ HEALTHY - IDLE
+- All tests passing (222 tests)
+- Build clean (release)
+- **Phase 1 COMPLETE**: Conversation DAG (undo/redo/edit/branches)
+- **Phase 2 COMPLETE**: Backtracking UI (Tasks 2.1, 2.2, 2.3)
+- **Phase 5 COMPLETE**: Auto-detection (off-track/circular/suggestion)
+
+**Latest Commits**:
+- f36583f chore: update scratchpad - Phase 2 complete, loop complete
+- 43f433c chore: update scratchpad - Phase 2 complete, system idle awaiting direction
+- f811139f chore: track Phase 2 complete state
+- a8b5d74c feat(tui): implement Phase 2 Task 2.3 - diff view for branch comparison
+
+**Action Taken**: ✅ Emitted `system.idle` event
+- Loop complete with all phases finished
+- No pending tasks in queue
+- Awaiting specification for next phase (Phase 3: VCS operations, or Phase 4: Context compaction)
+
+**LOOP_COMPLETE**
 
 **Event**: `task.resume` → Phase 2 complete, awaiting next phase direction
 
@@ -2472,3 +2494,179 @@ Press Ctrl+C to compact conversation
 3. **Phase 4**: Context compaction (relevance scoring, elision) - L
 
 **Action**: Emitting `task.done` for Phase 2 Task 2.2
+
+---
+
+## Ralph Loop - Phase 6 Planning (2026-01-21T21:00:00)
+
+**Event**: `task.resume` → Study specs, design next phase
+
+**System Status**: ✅ HEALTHY
+- All 222 tests passing
+- Phase 1 COMPLETE: Conversation DAG (undo/redo/edit/branches)
+- Phase 2 COMPLETE: Backtracking UI (history selection, replay, diff view)
+- Phase 5 COMPLETE: Auto-detection (off-track/circular detection)
+
+**12-Layer Architecture Progress**:
+- ✅ Layer 1 (Input): Panel structure exists but static
+- ✅ Layer 2 (Contextual): Conversation DAG with backtracking
+- ⏳ Layer 3 (Agent description): FMPL language implementation ongoing
+- ⏳ Layer 4 (Tooling): Basic LLM tools implemented, management UI pending
+
+**Current TUI State**:
+- 3-panel layout: Research (33%), Planning (33%), Execution (34%)
+- Research panel: Static text, shows conversation history in LLM mode
+- Planning panel: Static text
+- Execution panel: Functional (code editor + output + LLM chat)
+
+**Phase 6: Panel Interactivity** - **NEXT PHASE**
+
+**Specification**: [docs/plans/2026-01-21-phase6-panel-interactivity.md](../docs/plans/2026-01-21-phase6-panel-interactivity.md)
+
+**Tasks Breakdown**:
+- [ ] **Task 6.1**: Panel focus navigation (S - 1-2 hours)
+  - Add `focused_panel: PanelType` to App struct
+  - Keybindings: Ctrl+R (research), Ctrl+P (planning), Ctrl+E (code), Ctrl+O (output)
+  - Visual indicator for focused panel
+  
+- [ ] **Task 6.2**: Editable research panel (M - 2-3 hours)
+  - Add `research_lines: Vec<String>` with cursor tracking
+  - Typing, editing, cursor navigation
+  - Save/load to `.agent/research.md`
+  
+- [ ] **Task 6.3**: Editable planning panel with task list (M - 3-4 hours)
+  - Add `PlanningTask` struct (id, description, status, priority)
+  - Keybindings: a (add), e (edit), Enter (toggle), d (delete), +/- (priority)
+  - Save/load to `.agent/tasks.md`
+  - Visual rendering with status indicators
+  
+- [ ] **Task 6.4**: Context-sensitive help (S - 1 hour)
+  - Panel-specific keybinding help
+  - Updates when focus changes
+
+**Implementation Order**:
+1. Task 6.1 (foundation) → enables all subsequent tasks
+2. Task 6.2 (core functionality) → enables note-taking
+3. Task 6.3 (core functionality) → enables task tracking
+4. Task 6.4 (polish) → improves UX
+
+**Success Criteria**:
+- [ ] Can switch focus between all 4 panels
+- [ ] Can type/edit/save/load research notes
+- [ ] Can manage tasks (add/edit/delete/toggle/prioritize)
+- [ ] Persistence to `.agent/research.md` and `.agent/tasks.md`
+- [ ] All 222 tests still pass
+- [ ] Build clean (cargo build --release)
+
+**Beyond Phase 6**:
+- Phase 7: Tool management interface
+- Phase 3: VCS operations (branch switching, merge)
+- Phase 4: Context compaction UI
+
+
+## Ralph Loop - Phase 6 Task 6.1 Implementation (2026-01-21T21:30:00)
+
+**Event**: `task.resume` → Implement Phase 6 Task 6.1: Panel focus navigation
+
+**Task 6.1: Panel Focus Navigation** - ✅ COMPLETE
+
+**Implementation Summary**:
+- [x] Added `PanelType` enum with variants: Research, Planning, CodeEditor, Output (main.rs:111-118)
+- [x] Added `focused_panel: PanelType` field to App struct (main.rs:146)
+- [x] Initialized `focused_panel` to `PanelType::CodeEditor` in App::new() (main.rs:188)
+- [x] Implemented keybindings for panel switching (main.rs:760-778):
+  - Ctrl+R: Focus research panel
+  - Ctrl+P: Focus planning panel (only when not in LLM mode)
+  - Ctrl+E: Focus code editor (only when not in edit mode)
+  - Ctrl+O: Focus output panel
+- [x] Added `get_panel_title()` helper function to append [FOCUSED] to active panel title (main.rs:1295-1302)
+- [x] Updated all 4 panel titles to use focus indicator:
+  - Research panel (main.rs:1349-1350)
+  - Planning panel (main.rs:1362-1363)
+  - Code editor panel (main.rs:1451-1452)
+  - Output panel (main.rs:1466-1467)
+
+**Keybinding Conflicts Resolved**:
+- Ctrl+P: Only switches to planning panel when NOT in LLM mode (otherwise switches provider)
+- Ctrl+E: Only switches to code editor when NOT in edit mode (otherwise enters edit mode)
+
+**Build Status**: ✅ Clean
+- `cargo build --release` succeeded in 2.38s
+- All 222 tests passing
+- No new warnings
+
+**Visual Indicator**: 
+- Focused panel shows "[FOCUSED]" in title
+- Example: "Research View [FOCUSED]" vs "Planning View"
+
+**Next Steps**:
+- Task 6.2: Editable research panel (M - 2-3 hours)
+- Task 6.3: Editable planning panel with task list (M - 3-4 hours)
+- Task 6.4: Context-sensitive help (S - 1 hour)
+
+**Action**: Emitting `task.done` for Task 6.1
+
+
+
+## Ralph Loop - Phase 6 Task 6.2 Implementation (2026-01-21T22:00:00)
+
+**Event**: `task.resume` → Implement Phase 6 Task 6.2: Editable research panel
+
+**Task 6.2: Editable Research Panel** - ✅ COMPLETE
+
+**Implementation Summary**:
+- [x] Added research panel fields to App struct (main.rs:147-149):
+  - `research_lines: Vec<String>` - Editable content
+  - `research_cursor_row: usize` - Cursor row position
+  - `research_cursor_col: usize` - Cursor column position
+- [x] Implemented `load_research_notes()` helper (main.rs:229-240):
+  - Loads from `.agent/research.md` on startup
+  - Creates default "# Research Notes" if file doesn't exist
+- [x] Implemented `save_research_notes()` helper (main.rs:243-253):
+  - Saves to `.agent/research.md`
+  - Silent success, stderr warning on error
+- [x] Added research panel editing methods (main.rs:1002-1114):
+  - `research_insert_char()` - Type characters
+  - `research_backspace()` - Delete backward
+  - `research_delete()` - Delete forward
+  - `research_insert_newline()` - Insert line break
+  - `research_cursor_left/right/up/down()` - Navigation
+  - `research_cursor_home/end()` - Line navigation
+- [x] Refactored key handlers to route to focused panel (main.rs:869-1015):
+  - Char, Backspace, Delete, Enter, Arrow keys, Home, End, Tab
+  - Routes to research panel when focused
+  - Routes to code editor otherwise
+- [x] Added Ctrl+S keybinding (main.rs:816-821):
+  - Saves research notes when research panel is focused
+  - Shows confirmation message
+- [x] Updated research panel rendering (main.rs:1558-1634):
+  - Shows conversation history in LLM mode (existing behavior)
+  - Shows editable research notes in non-LLM mode
+  - Yellow block cursor (█) indicator when focused
+  - Plain text when not focused
+
+**Keybindings**:
+- Ctrl+R: Focus research panel (Task 6.1)
+- Type characters: Insert text
+- Backspace/Delete: Delete text
+- Enter: Insert new line
+- Arrow keys: Navigate cursor
+- Home/End: Jump to line start/end
+- Tab: Insert 4 spaces
+- Ctrl+S: Save to `.agent/research.md`
+
+**Build Status**: ✅ Clean
+- `cargo build --release` succeeded in 2.50s
+- All 222 tests passing
+- Only 1 warning: `research_content` field now unused (expected)
+
+**Testing**:
+- All 222 existing tests pass
+- Manual testing required for TUI interaction
+
+**Next Steps**:
+- Task 6.3: Editable planning panel with task list (M - 3-4 hours)
+- Task 6.4: Context-sensitive help (S - 1 hour)
+
+**Action**: Emitted `task.done` for Task 6.2
+

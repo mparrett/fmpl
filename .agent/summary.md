@@ -1,11 +1,124 @@
 # Loop Summary
 
-**Status:** Completed successfully
-**Iterations:** 5
-**Duration:** 12m 32s
+**Status:** Stopped: max iterations reached
+**Iterations:** 100
+**Duration:** 3h 0m 31s
 
 ## Tasks
 
+- [x] Task 2.1: History selection mode (Ctrl+H, visual indicators)
+- [x] Task 2.2: Replay from here functionality
+- [x] Task 2.3: Diff view for branch comparison (Ctrl+D)
+- [x] All 222 tests passing
+- [x] Build verified clean
+- [x] `format_diff_view()` function implemented (fmpl-tui/src/main.rs:1158-1224)
+- [x] `get_history_from_node()` helper implemented (main.rs:1226-1241)
+- [x] Ctrl+D keybinding added (main.rs:732-748)
+- [x] Research panel integration (main.rs:1280-1307)
+- [x] Removed #[allow(dead_code)] attributes
+- [x] Build verified clean
+- [x] All 222 tests passing
+- [ ] Add conversation threading data structure (branch/commit metadata)
+- [ ] Implement message editing capability in TUI
+- [ ] Add undo/redo for conversation state
+- [ ] Create branch point markers
+- [ ] Add edit mode for conversation history
+- [ ] Implement "replay from here" functionality
+- [ ] Add visual indicators for edited messages
+- [ ] Create diff view for before/after comparison
+- [ ] Implement conversation branching (fork from any point)
+- [ ] Add branch switching UI
+- [ ] Implement merge operations
+- [ ] Create commit/checkout workflow
+- [ ] Implement relevance scoring for messages
+- [ ] Add pattern-based elision (remove redundant tool calls)
+- [ ] Create compaction triggers (token limit, manual, auto-detect)
+- [ ] Add summary generation for compacted sections
+- [x] Implement LLM off-track detection ("You're absolutely right")
+- [x] Add pattern matching for circular conversations
+- [x] Create suggestion system for when to compact
+- [x] Add user prompts for intervention
+- [x] Add `selected_node_id: Option<NodeId>` field to App struct
+- [x] Add `history_selection_mode: bool` flag for navigating history
+- [x] Implement Up/Down arrow key handling in history selection mode
+- [x] Show visual indicator (►) for selected message in `format_history()`
+- [x] Add keybinding to enter history selection mode (Ctrl+H)
+- [ ] Add `compare_branch_id: Option<NodeId>` to track original branch
+- [ ] Implement `replay_from_node(node_id: NodeId)` function:
+- [ ] Add keybinding to trigger replay (e.g., Ctrl+R or Enter when selected)
+- [ ] Auto-switch to replayed branch after generation
+- [ ] Add `diff_view_mode: bool` flag
+- [ ] Implement `show_diff_view()` to compare two branches:
+- [ ] Add keybinding to toggle diff view (e.g., Ctrl+D)
+- [ ] Integrate diff view into Research panel display
+- [x] Create `ConversationNode` struct in `fmpl-tui/src/main.rs`
+- [x] Modify `App` struct to use conversation DAG
+- [x] Add `undo(&mut self)` - move to parent node
+- [x] Add `redo(&mut self)` - move back to child
+- [x] Update TUI keybindings: Ctrl+Z (undo), Ctrl+Y (redo)
+- [x] Display current node ID in UI
+- [x] Add edit mode for conversation history (Ctrl+E to edit last message)
+- [x] Implement "edit message" UI state
+- [x] Create new node when message is edited (preserve history)
+- [x] Mark edited nodes with `metadata.edited = true`
+- [x] Add `create_branch(&mut self, name: String)` at current head
+- [x] Implement branch listing (`Ctrl+B` to show branches)
+- [x] Add visual indicators for branch points
+- [x] Track active branch in UI
+- [ ] Add edit mode for conversation history
+- [ ] Implement "replay from here" functionality
+- [ ] Add visual indicators for edited messages
+- [ ] Create diff view for before/after comparison
+- [ ] Implement conversation branching (fork from any point)
+- [ ] Add branch switching UI
+- [ ] Implement merge operations
+- [ ] Create commit/checkout workflow
+- [ ] Implement relevance scoring for messages
+- [ ] Add pattern-based elision (remove redundant tool calls)
+- [ ] Create compaction triggers (token limit, manual, auto-detect)
+- [ ] Add summary generation for compacted sections
+- [ ] Implement LLM off-track detection ("You're absolutely right")
+- [ ] Add pattern matching for circular conversations
+- [ ] Create suggestion system for when to compact
+- [ ] Add user prompts for intervention
+- [x] Task 1: Fix REPL Async Handling (COMPLETED)
+- [x] Task 2: Add Header Support to curl (COMPLETED)
+- [x] Task 3: Implement load() Builtin (COMPLETED)
+- [x] Task 4: Implement env.get() Builtin (COMPLETED)
+- [x] **Task 5: Wire LLM Loop into TUI** ← DONE!
+- [ ] SSE stream parsing for real-time response display
+- [ ] Multi-turn conversation history buffer
+- [ ] Message accumulation for context-aware conversations
+- [ ] Tool calling workflow integration
+- [x] Task 1: Fix REPL Async Handling ✅
+- [x] Task 2: Add Header Support to curl ✅
+- [x] Task 3: Implement load() Builtin ✅
+- [x] Task 4: Implement env.get() Builtin ✅
+- [x] Task 5: Wire LLM Loop into TUI ✅
+- [x] **Task 6: Tool Registry via @ Patterns** ✅ (ALREADY WORKING!)
+- [ ] SSE stream parsing for real-time LLM response display
+- [ ] Multi-turn conversation history buffer in TUI
+- [ ] Message accumulation for context-aware conversations
+- [ ] Advanced tool calling workflows (tool result streaming)
+- [x] Task 1: Fix REPL Async Handling
+- [x] Task 2: Add Header Support to curl
+- [x] Task 3: Implement load() Builtin
+- [x] Task 4: Implement env.get() Builtin
+- [x] **Task: Add json::stringify() Builtin** ← DONE!
+- [ ] Task 5: Wire LLM Loop into TUI (L - 1-2 days)
+- [ ] Task 6: Tool Registry via @ Patterns (XL - 2-3 days)
+- [ ] SSE stream parsing for Ollama/Claude streaming responses
+- [ ] Map/list pattern matching in `@` operator (for tool calling)
+- [x] Task 1: Fix REPL Async Handling (XS)
+- [x] Task 2: Add Header Support to curl (S)
+- [x] Task 3: Implement load() Builtin (M)
+- [x] Task 4: Implement env.get() Builtin (XS)
+- [x] **json::stringify() Builtin** (M) ← DONE!
+- [ ] SSE stream parsing for Ollama/Claude streaming responses
+- [ ] Map/list pattern matching in `@` operator (for tool calling)
+- [ ] Add `json::stringify()` builtin (needed by anthropic.fmpl)
+- [ ] SSE stream parsing for Ollama/Claude streaming responses
+- [ ] Map/list pattern matching in `@` operator (for tool calling)
 - [x] Create spec for Indexed RPN bytecode format → specs/indexed-rpn-conversion.md
 - [x] Spec review and approval (initial)
 - [x] Enhance spec with BlockStart/BlockEnd, resolve_names ← **DONE**
@@ -45,19 +158,43 @@
 - [x] Fix feature gating for ParseStateError
 - [x] Refactor to if-let chains (Rust 2024 style)
 - [x] Add clippy allow attributes for intentional design
+- [ ] Task 5: Wire LLM loop into TUI (L - 1-2 days)
+- [ ] Task 6: Tool registry via @ patterns (XL - 2-3 days)
+- [ ] Add `json::stringify()` builtin (needed by anthropic.fmpl)
+- [ ] SSE stream parsing for Ollama/Claude streaming responses
+- [ ] Map/list pattern matching in `@` operator (for tool calling)
+- [ ] Pattern: "You're absolutely right" → agent is groveling/apologizing
+- [ ] Pattern: "I apologize for the confusion" → defensive language
+- [ ] Pattern: Repeated similar responses → circular reasoning
+- [ ] Implement detection function in FMPL
+- [ ] Add TUI notification when detected
+- [ ] Track last N messages (rolling buffer)
+- [ ] Detect repeating patterns in user/assistant exchanges
+- [ ] Pattern matching via @ operator (regex based)
+- [ ] Suggest compaction when circularity detected
+- [ ] Add "Suggest compact" prompt to TUI
+- [ ] Display detection reason (off-track, circular, token limit)
+- [ ] User confirmation before compacting
+- [ ] Compact from current head backward
+- [x] `replay_from_node(node_id: NodeId)` function implemented (fmpl-tui/src/main.rs:485-638)
+- [x] Enter key handler updated (main.rs:772-786)
+- [x] Build verified clean
+- [x] All 222 tests passing
 
 ## Events
 
-- 186 total events
-- 66 task.start
-- 33 loop.terminate
-- 19 spec.start
-- 13 task.complete
+- 302 total events
+- 83 task.start
+- 54 loop.complete
+- 34 loop.terminate
+- 25 task.done
+- 21 task.resume
+- 20 spec.start
+- 17 task.complete
 - 12 spec.approved
-- 11 loop.complete
+- 7 phase.done
 - 7 spec.ready
-- 5 task.resume
-- 4 task.done
+- 3 system.idle
 - 2 docs.reviewed
 - 2 implementation.done
 - 2 implementation.progress
@@ -65,10 +202,13 @@
 - 2 spec.rejected
 - 2 test.done
 - 1 analysis.done
+- 1 build.done
 - 1 docs.complete
+- 1 loop.done
+- 1 plan.done
 - 1 review.done
 - 1 task.progress
 
 ## Final Commit
 
-a0421b9: feat(llm): rewrite LLM chat in pure FMPL
+f36583f: chore: update scratchpad - Phase 2 complete, loop complete
