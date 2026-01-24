@@ -415,20 +415,22 @@ counter.increment()
 
 ### Special Variables
 
-Objects have access to special variables:
+Objects have access to special variables (magical variables) in method context:
 
-- `T_SELF` - Reference to current object (`this`)
-- `T_PARENT` - Reference to parent object (prototype chain)
-- `T_CALLER` - Reference to calling object
-- `T_ARGS` - Function arguments
-- `T_NULL` - Null value
+- `self` - Reference to current object (the receiver of the method call)
+- `parent` - Reference to parent object (for prototype chain lookup)
+- `caller` - Reference to the object that called this method
+- `user` - Reference to the current user context
+- `args` - The list of all arguments passed to the method
 
 ```fmpl
 object {
   value: 42
-  show(): "Value is: " + T_SELF.value
+  show(): "Value is: " + self.value
 }
 ```
+
+These variables are always available within method bodies, similar to `this` in JavaScript or `self` in Python/Smalltalk.
 
 ---
 

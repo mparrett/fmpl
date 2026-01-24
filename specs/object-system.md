@@ -13,7 +13,7 @@ Prototype-based object system inspired by [Spritely Goblins](https://spritely.in
 - **Prototype inheritance** — Objects delegate to parent objects (`object.rs:102`)
 - **Facets** — Capability-based restricted views (`object.rs:152`)
 - **spawn** — Create object instances from parent objects (`vm.rs:1018`)
-- **Sync/async calls** — `$` for same-vat, `<-` for async (planned)
+- **Sync/async calls** — `$` for same-vat, `<-` for async (Phase 1 implemented)
 
 ---
 
@@ -74,14 +74,24 @@ let c = spawn counter(10)  -- Creates counter, calls init(10)
 
 ---
 
-## Sync vs Async (Planned)
+## Sync vs Async (Phase 1)
 
 ```fmpl
-$ obj.method()      -- synchronous, same-vat
+$ obj.method()      -- synchronous, same-vat (pass-through)
 <- obj.method()     -- asynchronous, returns stream
 ```
 
-These operators are in the language design but not yet implemented.
+**Status**: Phase 1 implemented (`vm.rs:586-609`, `parser.rs:458-467`)
+
+**Phase 1 behavior**:
+- `$ expr` — Passes through the value unchanged (same-vat call is implicit)
+- `<- expr` — Wraps the value in an `AsyncStream` for consumption
+
+**Future phases**:
+- Phase 2: Multi-VAT support for cross-vat async calls
+- Promise pipelining: `<- (<- a.b()).c()` syntax
+
+**Tests**: `fmpl-core/tests/sync_async_operators.rs`
 
 ---
 
@@ -145,6 +155,44 @@ pub struct Method {
     pub code: Arc<CompiledCode>,
 }
 ```
+
+### Magical Variables in Method Context
+
+Methods have access to special variables that are **always available** in their execution environment:
+
+| Variable | Description |
+|----------|-------------|
+| `self` | Reference to the current object (the receiver of the method call) |
+| `parent` | Reference to the object's prototype parent (for prototype chain lookup) |
+| `caller` | Reference to the object that called this method |
+| `user` | Reference to the current user context (from VM's `current_user`) |
+| `args` | The list of all arguments passed to the method |
+
+**Design rationale**: These magical variables provide essential context for method execution without requiring explicit parameter passing. They are similar to reserved words in languages like Self, JavaScript, and Python (`self`, `this`, `super`, etc.).
+
+**Example usage**:
+
+```fmpl
+object authenticated_agent {
+  secret_key: "hidden"
+
+  .#public
+  do_action(arg): {
+    -- 'self' gives access to own properties
+    if user.authenticated then {
+      -- 'user' is pre-bound from VM context
+      self.perform(arg)
+    }
+  }
+
+  .#private
+  perform(arg): arg + secret_key
+}
+```
+
+**Implementation note**: Currently, `self`, `parent`, `caller`, `user`, and `args` are implemented as dedicated bytecode instructions (`LoadSelf`, `LoadParent`, etc.) in the compiler ([compiler.rs:53](../fmpl-core/src/compiler.rs:53)) and VM ([vm.rs:326](../fmpl-core/src/vm.rs:326)). The lexer tokenizes these as keywords ([lexer.rs:59-68](../fmpl-core/src/lexer.rs:59-68)).
+
+**Future direction**: These may be bound as actual local variables in the method's environment for consistency with parameter passing, allowing them to be captured, shadowed, or passed as first-class values.
 
 ### ObjectDb (`object.rs:51`)
 
@@ -222,7 +270,8 @@ Object data lives in `ObjectDb`; `Value::Object` is just a handle.
 - [x] **Constructor invocation** — `spawn` calls constructor method (`vm.rs:1602-1629`)
 - [ ] **bcom pattern** — Functional state updates (become pattern)
 - [ ] **Visibility enforcement** — `.#private`/`.#public` at runtime
-- [ ] **$ and <- operators** — Sync/async method calls
+- [x] **$ and <- operators (Phase 1)** — Sync/async method calls (`vm.rs:586-609`)
+- [ ] **$ and <- operators (Phase 2)** — Multi-VAT support
 - [ ] **Promise pipelining** — `<- (<- a.b()).c()`
 - [ ] **Multi-VAT** — Distributed objects
 

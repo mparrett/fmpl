@@ -217,6 +217,37 @@ Variables are resolved at **compile time** by the `resolve_names` pass:
 // Index 3: Call { func: 0, args: [1, 2] } → creates new frame, executes lambda body
 ```
 
+### Method Calls and Magical Variables
+
+When a method is called on an object, the new frame's environment is **pre-bound** with magical variables that provide context about the call:
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `self` | `ObjectId` | The object receiving the method call |
+| `parent` | `ObjectId` or `null` | The object's prototype parent (for prototype chain lookup) |
+| `caller` | `ObjectId` or `null` | The object that initiated this method call |
+| `user` | `ObjectId` or `null` | The current user context (from `VM.current_user`) |
+| `args` | `List` | The list of all arguments passed to the method |
+
+These are bound as **local variables** in the method's execution environment, accessible by name just like normal parameters:
+
+```fmpl
+object counter {
+  value: 0
+
+  increment(): self.value + 1   -- 'self' is pre-bound
+  get_parent(): parent          -- 'parent' is pre-bound
+}
+```
+
+**Implementation** ([vm.rs:1352](../fmpl-core/src/vm.rs:1352)):
+- When `MethodCall` executes, a new `Frame` is created
+- `frame.this` is set to the receiver object ID
+- `frame.caller` is set to the previous frame's `this` (if any)
+- The magical variables are implicitly available through special `LoadSelf`, `LoadParent`, `LoadCaller`, `LoadUser`, `LoadArgs` instructions
+
+**Note**: The current implementation uses dedicated bytecode instructions (`LoadSelf`, etc.) rather than explicit environment binding. Future implementations may bind these as actual local variables for consistency with parameter passing.
+
 ### Async Operations
 
 ```
