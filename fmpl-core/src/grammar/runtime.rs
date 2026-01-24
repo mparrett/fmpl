@@ -1157,13 +1157,21 @@ pub fn apply_grammar_to_value_with_evaluator<'e>(
             }
         }
         Value::List(items) => {
-            // Wrap the list in another list so it becomes a single element in the stream
-            // This allows patterns like [x] to match the entire list
-            let values = vec![Value::List(items.clone())];
+            // For anonymous grammars (used in @ { [x] => x } pattern matching),
+            // wrap the list so patterns like [x] can match the entire list.
+            // For named grammars (base::tree.int, etc.), treat the list as a stream
+            // of elements so each element can be matched individually.
+            let is_anonymous = grammar.name.starts_with("<");
+            let values = if is_anonymous {
+                vec![Value::List(items.clone())]
+            } else {
+                (*items).clone()
+            };
+            let len = values.len();
             let mut runtime =
                 value_runtime(values, registry, grammar.clone()).with_action_evaluator(evaluator);
             match runtime.parse(rule_name)? {
-                ParseResult::Success(v, pos) if pos == 1 => Ok(Some(v)),
+                ParseResult::Success(v, pos) if pos == len => Ok(Some(v)),
                 ParseResult::Success(_, _) => Ok(None),
                 ParseResult::Failure => Ok(None),
             }
