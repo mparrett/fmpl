@@ -980,6 +980,14 @@ impl Vm {
                     frame.set_current(val);
                 }
 
+                // === Tuple Space ===
+                Instruction::TupleSpaceNew => {
+                    use crate::tuplespace::store::TupleSpace;
+                    let space = TupleSpace::new();
+                    let frame = self.frames.last_mut().unwrap();
+                    frame.set_current(Value::TupleSpace(Arc::new(std::sync::Mutex::new(space))));
+                }
+
                 // === Nop ===
                 Instruction::Nop => {
                     // Do nothing
@@ -1079,6 +1087,9 @@ impl Vm {
         }
         if name == "sse" {
             return Ok(Value::Symbol(SmolStr::new("__builtin_sse")));
+        }
+        if name == "tuplespace" {
+            return Ok(Value::Symbol(SmolStr::new("__builtin_tuplespace")));
         }
 
         // Check scopes (innermost first)
@@ -1275,6 +1286,16 @@ impl Vm {
                     }
                 };
                 crate::builtins::SseBuiltin::parse(text)
+            }
+            ("__builtin_tuplespace", "new") => {
+                if !args.is_empty() {
+                    return Err(Error::Runtime(
+                        "tuplespace.new() takes no arguments".to_string(),
+                    ));
+                }
+                use crate::tuplespace::store::TupleSpace;
+                let space = TupleSpace::new();
+                Ok(Value::TupleSpace(Arc::new(std::sync::Mutex::new(space))))
             }
             _ => Err(Error::Runtime(format!(
                 "unknown builtin: {}.{}",

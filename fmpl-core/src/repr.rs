@@ -566,6 +566,7 @@ impl SourceRepr for Value {
             Value::Sink(s) => format!("<sink #{}>", s.id()),
             Value::SuspendedStream(source) => format!("<suspended_stream {:?}>", source),
             Value::SuspendedSink(source) => format!("<suspended_sink {:?}>", source),
+            Value::TupleSpace(_) => "<tuplespace>".to_string(),
         }
     }
 }

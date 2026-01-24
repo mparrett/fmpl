@@ -305,6 +305,9 @@ pub enum Instruction {
         source: InstrIndex,
     },
 
+    // Tuple space operations
+    TupleSpaceNew,
+
     // No-op (placeholder, for eliminated Dup/Pop or control flow)
     Nop,
 }

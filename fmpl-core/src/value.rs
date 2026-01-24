@@ -46,6 +46,9 @@ pub enum Value {
     /// Suspended sink awaiting reconnection.
     /// Created when deserializing a serialized Sink.
     SuspendedSink(SinkSource),
+    /// Tuple space for pattern-based coordination.
+    #[serde(skip)]
+    TupleSpace(Arc<std::sync::Mutex<crate::tuplespace::store::TupleSpace>>),
 }
 
 /// Serialize AsyncStream by extracting its source metadata.
@@ -153,6 +156,7 @@ impl Value {
             Value::Sink(_) => "sink",
             Value::SuspendedStream(_) => "suspended_stream",
             Value::SuspendedSink(_) => "suspended_sink",
+            Value::TupleSpace(_) => "tuplespace",
         }
     }
 
@@ -482,6 +486,7 @@ impl fmt::Display for Value {
             Value::Sink(s) => write!(f, "<sink #{}>", s.id()),
             Value::SuspendedStream(source) => write!(f, "<suspended_stream {:?}>", source),
             Value::SuspendedSink(source) => write!(f, "<suspended_sink {:?}>", source),
+            Value::TupleSpace(_) => write!(f, "<tuplespace>"),
         }
     }
 }

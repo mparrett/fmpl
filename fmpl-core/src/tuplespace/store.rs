@@ -12,12 +12,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Subscriber to tuple space events.
+#[derive(Debug)]
 pub struct TupleSubscriber {
     pattern: TuplePattern,
     sender: tokio::sync::mpsc::Sender<crate::stream::StreamEvent>,
 }
 
 /// In-memory tuple space with Fjall persistence.
+#[derive(Debug)]
 pub struct TupleSpace {
     /// Next sequence number
     next_seq: Arc<AtomicU64>,
