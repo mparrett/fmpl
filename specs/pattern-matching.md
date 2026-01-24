@@ -52,12 +52,12 @@ result @ {
 }
 ```
 
-**⚠️ Limitation**: Map and list patterns in `@` match expressions are not yet fully implemented. Only `Var` (name binding) and `Wildcard` (`_`) patterns currently work in `@` expressions. See the [Pattern Types Summary](#pattern-types-summary) below for details and workarounds.
+✅ **IMPLEMENTED**: Map and list patterns in `@` match expressions are now fully implemented. All pattern types work correctly in `@` expressions.
 
 ### List Patterns
 
 ```fmpl
--- ⚠️ This syntax is planned but not yet implemented in @ expressions
+-- ✅ These patterns are fully implemented in @ expressions
 list @ {
   []              => "empty"
   [x]             => "single: " + x
@@ -66,27 +66,15 @@ list @ {
 }
 ```
 
-**Workaround** - Use `let` destructuring:
-```fmpl
-let [first | rest] = list
--- ... then use first and rest directly
-```
-
 ### Map Patterns
 
 ```fmpl
--- ⚠️ This syntax is planned but not yet implemented in @ expressions
+-- ✅ These patterns are fully implemented in @ expressions
 data @ {
   %{type: "user", name: n, age: a} => "User " + n + " is " + a
   %{type: "bot", id: i}            => "Bot #" + i
   %{}                              => "empty map"
 }
-```
-
-**Workaround** - Use `let` destructuring:
-```fmpl
-let %{type: "user", name: n, age: a} = data
--- ... then use n and a directly
 ```
 
 ### Literal Patterns
@@ -125,15 +113,7 @@ result @ {
 }
 ```
 
-**Workaround** - Use `let` destructuring before the match:
-```fmpl
-let %{status: s, data: d, error: e} = result
-value @ {
-  _ when s == 200  => process(d)
-  _ when s >= 400 => handle_error(e)
-  _ => ...
-}
-```
+**Note**: Map patterns with guards work directly in `@` expressions - no workaround needed.
 
 Note: The `&{ condition }` syntax is for grammar predicates only (`grammar/parser.rs:248`).
 
@@ -144,7 +124,7 @@ Note: The `&{ condition }` syntax is for grammar predicates only (`grammar/parse
 Bind matched values to names using `as` (`parser.rs:1199-1204`):
 
 ```fmpl
--- ⚠️ Map and list patterns in @ expressions are planned but not yet implemented
+-- ✅ Map and list patterns with 'as' binding are fully implemented
 -- Bind entire match
 input @ {
   %{nested: inner} as whole => use_both(whole, inner)
@@ -156,13 +136,6 @@ list @ {
 }
 ```
 
-**Workaround** - Use `let` destructuring:
-```fmpl
-let %{nested: inner} = input
-let whole = input  -- Keep reference to original
--- ... use both whole and inner
-```
-
 ---
 
 ## Nested Patterns
@@ -170,19 +143,13 @@ let whole = input  -- Keep reference to original
 Patterns can nest arbitrarily:
 
 ```fmpl
--- ⚠️ Map and list patterns in @ expressions are planned but not yet implemented
+-- ✅ Nested map and list patterns are fully implemented in @ expressions
 data @ {
   %{
     user: %{name: n, prefs: %{theme: t}},
     items: [first | _]
   } => "User " + n + " with theme " + t + " has " + first
 }
-```
-
-**Workaround** - Use `let` destructuring:
-```fmpl
-let %{user: %{name: n, prefs: %{theme: t}}, items: [first | _]} = data
--- ... then use n, t, and first directly
 ```
 
 ---
@@ -192,19 +159,12 @@ let %{user: %{name: n, prefs: %{theme: t}}, items: [first | _]} = data
 Pattern match on async results:
 
 ```fmpl
--- ⚠️ Map patterns in @ expressions are planned but not yet implemented
+-- ✅ Map patterns with async streams are fully implemented
 <- http.get(url) @ {
   %{status: 200, body: b} => parse_json(b)
   %{status: 404}          => not_found()
   %{error: e}             => handle_error(e)
 }
-```
-
-**Workaround** - Use `let` destructuring:
-```fmpl
-let response = <- http.get(url)
-let %{status: s, body: b, error: e} = response
--- ... then use s, b, and e with conditional logic
 ```
 
 ---
@@ -262,36 +222,13 @@ value @ {
 | Literal | Exact value | `42 => ...` | Parsed, not compiled |
 | `:symbol` | Symbol | `:ok => ...` | Parsed, not compiled |
 | `name` | Bind to name | `x => use(x)` | Implemented ✅ |
-| `%{k: v}` | Map with key | `%{id: i} => ...` | **Let-binding only** ⚠️ |
-| `[...]` | List | `[a, b] => ...` | **Let-binding only** ⚠️ |
-| `[h \| t]` | Head/tail | `[first \| rest] => ...` | Parsed only |
+| `%{k: v}` | Map with key | `%{id: i} => ...` | Implemented ✅ |
+| `[...]` | List | `[a, b] => ...` | Implemented ✅ |
+| `[h \| t]` | Head/tail | `[first \| rest] => ...` | Implemented ✅ |
 | `p when g` | Pattern with guard | `n when n > 0 => ...` | Implemented ✅ |
-| `p as name` | Bind match to name | `%{...} as whole => ...` | Parsed, not compiled |
+| `p as name` | Bind match to name | `%{...} as whole => ...` | Implemented ✅ |
 
-**⚠️ Current Limitation**: Map `%{}` and list `[]` patterns are **not supported in `@` match expressions**.
-
-They work in:
-- ✅ `let` destructuring: `let %{tool: t, args: a} = expr`
-- ❌ `@` pattern matching: `expr @ {%{tool: t} => ...}`
-
-**Workaround**: Use `let` destructuring before match expressions:
-
-```fmpl
--- Instead of:
-response @ {
-  %{tool: t, args: a} => execute(t, a)  -- ❌ Not supported
-  _ => default()
-}
-
--- Use:
-let %{tool: t, args: a} = response
--- ... then use t and a directly
-```
-
-**Implementation Note**: Match expressions (`compiler.rs:526`) only support `Var` and `Wildcard` patterns.
-Let destructuring (`compiler.rs:729`) supports `Map` and fixed-length `List` patterns.
-
-Full map/list pattern matching in `@` expressions is planned but not yet implemented (requires extending pattern compilation to handle value-level patterns).
+**✅ All pattern types are now supported in `@` match expressions**, including map patterns, list patterns, head/tail patterns, patterns with guards, and as-patterns.
 
 ---
 
@@ -304,11 +241,13 @@ Full map/list pattern matching in `@` expressions is planned but not yet impleme
 | Guards (`when`) | ✓ | ✓ | ✓ |
 | Let map destructure | ✓ | ✓ | ✓ |
 | Let list destructure | ✓ | ✓ (fixed-length) | ✓ |
-| Literal patterns | ✓ | — | — |
-| Symbol patterns | ✓ | — | — |
-| Head/tail lists | ✓ | — | — |
-| As-patterns | ✓ | — | — |
-| Constructor patterns | ✓ | — | — |
+| **Map patterns in @** | ✓ | ✓ | ✓ |
+| **List patterns in @** | ✓ | ✓ | ✓ |
+| **Head/tail lists in @** | ✓ | ✓ | ✓ |
+| **As-patterns in @** | ✓ | ✓ | ✓ |
+| **Literal patterns** | ✓ | ✓ | ✓ |
+| **Symbol patterns** | ✓ | ✓ | ✓ |
+| **Constructor patterns** | ✓ | — | — |
 
 ---
 
