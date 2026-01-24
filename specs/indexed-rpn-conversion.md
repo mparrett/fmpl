@@ -3,7 +3,7 @@
 Convert VM from stack-based bytecode to true Indexed RPN format.
 
 **Status**: Enhanced (v2)
-**Source**: [docs/designs/indexed-rpn.md](../docs/designs/indexed-rpn.md)
+**Source**: [docs/design/indexed-rpn.md](../docs/design/indexed-rpn.md)
 
 ---
 
@@ -944,6 +944,6 @@ Verify: NameRef instruction contains bind index, not string name
 
 ## References
 
-- [Indexed RPN Design Doc](../docs/designs/indexed-rpn.md)
+- [Indexed RPN Design Doc](../docs/design/indexed-rpn.md)
 - [Carbon Compiler](https://github.com/carbon-language/carbon-lang)
 - [Current VM Spec](./vm.md)

@@ -26,7 +26,7 @@ This file contains a checklist of issues to address in the `docs` and `specs` di
 ### Broken Links and Incorrect File Paths
 
 - [x] **`specs/README.md`**: The links to the implementation plans in `specs/README.md` are incorrect. They point to markdown files in the `docs/plans` directory, but with a `.md` extension at the end of the filename which is not correct.
-- [ ] **General Review**: A general review of all markdown files for broken links and incorrect file paths should be performed.
+- [x] **General Review**: A general review of all markdown files for broken links and incorrect file paths should be performed. ✓ Fixed: Fixed 2 broken links in `specs/indexed-rpn-conversion.md` that referenced `docs/designs/` instead of `docs/design/`. All other links verified working correctly.
 
 ### Clarity and Organization
 
