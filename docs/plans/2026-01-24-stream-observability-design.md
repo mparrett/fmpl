@@ -1,8 +1,8 @@
 # Stream Observability Design
 
-**Goal:** Enable comprehensive observation and debugging of streaming agent interactions through a unified cursor-based interface that treats everything—network connections, agents, TUI panels, and cursors—as immutable streams.
+**Goal:** Enable comprehensive observation and debugging of streaming agent interactions through a unified cursor-based interface that treats everything—network connections, agents, TUI panels, and cursors—as immutable streams with full lineage tracking.
 
-**Core thesis:** Since all streams are immutable cons chains with head/tail structure, and stream buffers already persist to Fjall for backtracking, a cursor is simply a stream that starts at a specific position. `observe(stream)` returns a cursor, enabling live inspection, forking for alternative downstream experiments, and time-travel via position rewinding.
+**Core thesis:** Since all streams are immutable cons chains with head/tail structure, and stream buffers already persist to Fjall for backtracking, a cursor is simply a stream that starts at a specific position with full access to its transformation lineage. `observe(stream)` returns a cursor, enabling live inspection, forking at any stage, time-travel via position rewinding, and upstream navigation to inspect or modify intermediate transformations.
 
 ---
 
@@ -89,6 +89,91 @@ let branch2 = observe(cursor) |> map(|x| x + 10)
 - All cursors share the same underlying immutable stream
 - Can fork recursively: `observe(observe(cursor))`
 
+### Lineage-Aware Cursors
+
+Streams carry metadata about their transformation history, enabling cursors to navigate the entire stream graph, not just a single position:
+
+```fmpl
+let original = http.get(url)
+let parsed = original |> parse(tool_grammar)
+let handled = parsed |> handle_result
+
+-- Observe with full lineage awareness
+let lineage = observe(handled)  -- Captures transformation chain
+
+-- Navigate the stream graph
+*lineage                  -- Current value at end of chain
+lineage.upstream()        -- Cursor to previous stream stage
+lineage.upstream(2)       -- Jump back 2 stages
+lineage.trace()           -- Full transformation history
+
+-- Each stage is independently observable
+let parse_cursor = lineage.upstream()     -- At parse stage
+let original_cursor = lineage.upstream(2) -- At http.get stage
+
+-- Fork at any stage
+let alt_parse = observe(parse_cursor) |> parse(alternative_grammar)
+let alt_source = observe(original_cursor) |> http.get(alt_url)
+```
+
+**Stream Lineage Structure:**
+
+```fmpl
+Stream {
+  source: Value,
+  ops: Vec<StreamOp>,
+  lineage: Vec<StreamId>,  -- Parent stream references
+}
+```
+
+Each stream maintains references to its parent streams, creating a directed acyclic graph (DAG) of transformations.
+
+**Lineage Metadata:**
+
+```fmpl
+-- trace() returns transformation history
+lineage.trace()  == [
+  %{stage: "http.get", position: pos1, timestamp: t1},
+  %{stage: "parse", position: pos2, timestamp: t2},
+  %{stage: "handle_result", position: pos3, timestamp: t3}
+]
+```
+
+**Cursor Value with Lineage:**
+
+```fmpl
+-- When dereferencing, you get full context
+*lineage @ {
+  %{
+    value: result,
+    lineage: [
+      %{stage: "parse", position: pos1, stream_id: id1},
+      %{stage: "filter", position: pos2, stream_id: id2},
+      %{stage: "map", position: pos3, stream_id: id3}
+    ]
+  } => {
+    -- Access any stage in the chain
+    let parse_stage = lineage.upstream_to(pos1)
+    let filter_stage = lineage.upstream_to(pos2)
+  }
+}
+```
+
+**Use Cases:**
+
+1. **Debugging transformations** - See intermediate values at each stage
+2. **Performance analysis** - Identify bottlenecks in the pipeline
+3. **Alternative experiments** - Fork at any stage with different logic
+4. **Audit trails** - Full provenance of how a value was produced
+5. **Time-travel debugging** - Rewind to any stage and replay
+
+**Implementation Notes:**
+
+- Each `StreamOp` stores a reference to its parent stream
+- `StreamPosition` is globally unique across all streams
+- `Cursor.upstream(n)` walks the lineage chain
+- Fjall persistence ensures each stage's buffer is independently replayable
+
 ### Time-Travel via Rewinding
 
 Persistent stream buffers enable rewinding to earlier positions:
@@ -161,6 +246,12 @@ cursor.peek()              -- Look at next value without consuming
 observe(cursor)            -- Fork: create independent copy at current position
 cursor.rewind(pos)        -- Rewind to specific position
 cursor.position()          -- Get current position ID
+
+-- Lineage navigation
+cursor.upstream()          -- Move to parent stream stage
+cursor.upstream(n)         -- Jump back n stages
+cursor.trace()             -- Get full transformation history
+cursor.upstream_to(pos)    -- Jump to specific stage by position ID
 ```
 
 ### Dereference: *cursor
@@ -200,6 +291,40 @@ cursor.rewind(pos1)         -- Rewind to pos1
 - Fjall-backed buffers enable replay from any historical position
 - Rewinding doesn't affect the original stream
 - Multiple cursors can rewind independently
+
+### upstream() and trace()
+
+Navigate the transformation lineage to inspect or fork at any stage:
+
+```fmpl
+let chain = source |> map(|x| x + 1) |> filter(|x| x > 0) |> handle
+let cursor = observe(chain)
+
+-- Get full transformation history
+let history = cursor.trace()
+-- [
+--   %{stage: "source", position: pos1, timestamp: t1, stream_id: id1},
+--   %{stage: "map", position: pos2, timestamp: t2, stream_id: id2},
+--   %{stage: "filter", position: pos3, timestamp: t3, stream_id: id3},
+--   %{stage: "handle", position: pos4, timestamp: t4, stream_id: id4}
+-- ]
+
+-- Navigate upstream
+let filter_cursor = cursor.upstream()     -- At filter stage
+let map_cursor = cursor.upstream(2)       -- At map stage
+let source_cursor = cursor.upstream(3)    -- At source stage
+
+-- Fork at any stage
+let alt_filter = observe(filter_cursor) |> filter(|x| x > 5)
+let alt_map = observe(map_cursor) |> map(|x| x * 2)
+```
+
+**Lineage navigation behavior:**
+- `upstream()` without arguments moves to immediate parent stage
+- `upstream(n)` jumps back n stages in the lineage chain
+- `trace()` returns full transformation history with timestamps
+- `upstream_to(position_id)` jumps to a specific stage by position ID
+- Each stage maintains its own Fjall-backed buffer for independent replay
 
 ---
 
@@ -292,6 +417,45 @@ Add a new `Value::Cursor(Arc<Cursor>)` variant to `value.rs`:
 pub struct Cursor {
     stream: Arc<Stream>,
     position: StreamPosition,
+    lineage: Vec<StreamId>,  -- Transformation history
+}
+
+pub struct Stream {
+    id: StreamId,
+    source: Value,
+    ops: Vec<StreamOp>,
+    parent: Option<Arc<Stream>>,  -- Parent stream for lineage
+}
+```
+
+### Stream Lineage Tracking
+
+Each stream maintains a reference to its parent, enabling lineage traversal:
+
+```rust
+pub struct StreamOp {
+    op_type: OpType,  // map, filter, parse, etc.
+    parent_stream: Arc<Stream>,
+    timestamp: SystemTime,
+}
+
+impl Stream {
+    pub fn trace(&self) -> Vec<LineageEntry> {
+        let mut history = vec![];
+        let mut current = Some(self.clone());
+
+        while let Some(stream) = current {
+            history.push(LineageEntry {
+                stage: stream.op_type.clone(),
+                position: stream.current_position(),
+                timestamp: stream.timestamp,
+                stream_id: stream.id,
+            });
+            current = stream.parent.clone();
+        }
+
+        history.reverse()
+    }
 }
 ```
 
@@ -335,11 +499,18 @@ pub fn observe(value: &Value) -> Result<Value> {
 
 Implement cursor methods as built-in functions or VM instructions:
 
+**Position:**
 - `*cursor` → Load current head value
 - `cursor.next()` → Consume next value, update position
 - `cursor.peek()` → Look at next value without consuming
 - `cursor.rewind(pos)` → Jump to earlier position
 - `cursor.position()` → Get current position ID
+
+**Lineage:**
+- `cursor.upstream()` → Create cursor at parent stream stage
+- `cursor.upstream(n)` → Jump back n stages in lineage
+- `cursor.trace()` → Get full transformation history
+- `cursor.upstream_to(pos)` → Jump to specific stage by position ID
 
 **Note**: Forking is done via `observe(cursor)`, not a separate method.
 
@@ -363,6 +534,9 @@ Leverage existing `StreamPosition` with Fjall backing:
 - `cursor_dereference_gets_current_value` - Test `*cursor` behavior
 - `cursor_rewind_jumps_to_position` - Time-travel correctness
 - `multiple_observers_dont_interfere` - Concurrent observation
+- `cursor_upstream_navigates_lineage` - Verify upstream() walks parent chain
+- `cursor_trace_returns_full_history` - Test trace() returns transformation history
+- `cursor_fork_at_upstream_stage` - Fork at different stages in lineage
 
 ### Integration Tests
 
@@ -370,12 +544,16 @@ Leverage existing `StreamPosition` with Fjall backing:
 - `agent_stream_forking` - Try alternative transformations at same point
 - `cursor_rewind_with_fjall` - Rewind across persisted buffer boundaries
 - `tui_panel_as_stream` - TUI panel changes observable as stream
+- `lineage_tracking_across_pipeline` - Verify lineage tracked across map/filter/parse
+- `upstream_fork_alternative_path` - Fork at upstream stage with different transformation
 
 ### Manual Tests
 
 - Start agent, observe output stream at mid-execution
 - Fork cursor with `observe(cursor)`, try different debug transformations
 - Rewind cursor to earlier position, replay with different logic
+- Navigate upstream to inspect intermediate transformations
+- Fork at upstream stage with alternative logic
 - Verify original agent unaffected by observations
 
 ---
