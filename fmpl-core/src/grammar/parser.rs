@@ -365,7 +365,35 @@ impl<'a> GrammarParser<'a> {
                 let is_list_pattern = if let Some(next) = self.peek_char() {
                     match next {
                         ']' | '[' | '%' | '_' | ':' | '"' | '\'' => true,
-                        c if c.is_alphabetic() => true,
+                        c if c.is_alphabetic() => {
+                            // Check for range pattern [a-z] vs list [x, y]
+                            let mut lookahead_pos = self.pos;
+                            let mut found_range = false;
+                            let mut found_comma = false;
+                            let mut found_end = false;
+
+                            // Look ahead up to 10 characters to detect the pattern
+                            for _ in 0..10 {
+                                if let Some(c) = self.source[lookahead_pos..].chars().next() {
+                                    if c == '-' && !found_range {
+                                        found_range = true;
+                                    } else if c == ',' {
+                                        found_comma = true;
+                                        break;
+                                    } else if c == ']' {
+                                        found_end = true;
+                                        break;
+                                    }
+                                    lookahead_pos += c.len_utf8();
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            // It's a list pattern if: has comma, OR (no range AND found end)
+                            // It's a char class if: has range AND no comma
+                            found_comma || (!found_range && found_end)
+                        }
                         c if c.is_ascii_digit() => {
                             // Check if this looks like a range (char class) or a list element
                             // Look ahead: if we see '-' after digit, it's a range (char class)
@@ -660,6 +688,8 @@ impl<'a> GrammarParser<'a> {
                 Ok(Pattern::SymbolMatch(name))
             }
             Some('[') => {
+                // For value patterns (inside map/list), we only support list patterns, not char classes
+                // Char classes are only supported in top-level grammar patterns
                 self.advance();
                 self.parse_list_pattern()
             }
