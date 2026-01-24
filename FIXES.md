@@ -14,7 +14,7 @@ This file contains a checklist of issues to address in the `docs` and `specs` di
 
 ### Missing Documentation
 
-- [ ] **Missing Specs**: There are no specs for the `lib` directory, which contains `anthropic.fmpl`, `compaction.fmpl`, `llm-common.fmpl`, and `ollama.fmpl`.
+- [x] **Missing Specs**: There are no specs for the `lib` directory, which contains `anthropic.fmpl`, `compaction.fmpl`, `llm-common.fmpl`, and `ollama.fmpl`. ✓ Fixed: Created `specs/lib.md` documenting all library modules with usage examples, exports, and design notes.
 - [ ] **Missing Implementation Plans**: There are no implementation plans for several of the features described in the design documents, such as the multi-VAT architecture, the tuple space, and the PASETO-based security model.
 
 ### Build Instructions

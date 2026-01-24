@@ -27,6 +27,12 @@ Design documentation for FMPL, a streaming-first DSL for building AI agents with
 | [async-streams.md](./async-streams.md) | [fmpl-core/src/stream.rs](../fmpl-core/src/stream.rs) | Async streams with pipe operator |
 | [pattern-matching.md](./pattern-matching.md) | [fmpl-core/src/vm.rs](../fmpl-core/src/vm.rs) | Pattern matching with `@` operator |
 
+## Standard Library
+
+| Spec | Code | Purpose |
+|------|------|---------|
+| [lib.md](./lib.md) | [lib/](../lib/) | Standard library modules (LLM clients, compaction detection) |
+
 ## Design Documents
 
 | Document | Purpose |
