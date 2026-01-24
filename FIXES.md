@@ -36,5 +36,6 @@ This file contains a checklist of issues to address in the `docs` and `specs` di
 
 ## Low-Priority Issues
 
+- [x] **`specs/README.md`: Incorrect VM description**: The table on line 20 incorrectly described the VM as "Stack-based bytecode VM" when FMPL uses Indexed RPN architecture. ✓ Fixed: Changed to "Indexed RPN bytecode VM with async support" to match the actual implementation.
 - [ ] **Spelling and Grammar**: A general review of all documentation for spelling and grammar errors should be performed.
 - [ ] **Update `TUTORIAL.md`**: The `TUTORIAL.md` file is likely out of date. It should be reviewed and updated to reflect the current state of the language and tools.

@@ -17,7 +17,7 @@ Design documentation for FMPL, a streaming-first DSL for building AI agents with
 | Spec | Code | Purpose |
 | [grammar-system.md](./grammar-system.md) | [fmpl-core/src/grammar/](../fmpl-core/src/grammar/) | OMeta-style PEG grammars with inheritance and streaming support |
 | [object-system.md](./object-system.md) | [fmpl-core/src/object.rs](../fmpl-core/src/object.rs) | Goblins-inspired objects with spawn, facets |
-| [vm.md](./vm.md) | [fmpl-core/src/vm.rs](../fmpl-core/src/vm.rs) | Stack-based bytecode VM with async support |
+| [vm.md](./vm.md) | [fmpl-core/src/vm.rs](../fmpl-core/src/vm.rs) | Indexed RPN bytecode VM with async support |
 | [persistence.md](./persistence.md) | [fmpl-core/](../fmpl-core/), [fmpl-web/](../fmpl-web/) | Fjall-backed live image and memo persistence |
 
 ## Language Features
