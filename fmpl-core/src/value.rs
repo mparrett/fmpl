@@ -49,6 +49,9 @@ pub enum Value {
     /// Tuple space for pattern-based coordination.
     #[serde(skip)]
     TupleSpace(Arc<std::sync::Mutex<crate::tuplespace::store::TupleSpace>>),
+    /// Facet-restricted tuple space with capability security.
+    #[serde(skip)]
+    TupleSpaceFacet(Arc<std::sync::Mutex<crate::tuplespace::facet::TupleSpaceFacet>>),
 }
 
 /// Serialize AsyncStream by extracting its source metadata.
@@ -157,6 +160,7 @@ impl Value {
             Value::SuspendedStream(_) => "suspended_stream",
             Value::SuspendedSink(_) => "suspended_sink",
             Value::TupleSpace(_) => "tuplespace",
+            Value::TupleSpaceFacet(_) => "tuplespace_facet",
         }
     }
 
@@ -487,6 +491,7 @@ impl fmt::Display for Value {
             Value::SuspendedStream(source) => write!(f, "<suspended_stream {:?}>", source),
             Value::SuspendedSink(source) => write!(f, "<suspended_sink {:?}>", source),
             Value::TupleSpace(_) => write!(f, "<tuplespace>"),
+            Value::TupleSpaceFacet(_) => write!(f, "<tuplespace_facet>"),
         }
     }
 }

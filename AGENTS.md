@@ -77,11 +77,11 @@ The `@` operator unifies parsing, pattern matching, and tree transformation:
 
 ```fmpl
 "hello world" @ grammar.rule    -- Parse text
-obj @ { %{type: t} => t }       -- Pattern match (limited)
+obj @ { %{type: t} => t }       -- Pattern match (fully functional)
 stream @ parser.incremental     -- Streaming parse
 ```
 
-**Current limitation**: Map/list patterns (`%{k: v}`, `[a, b]`) work in `let` destructuring but NOT in `@` blocks. See `specs/pattern-matching.md`.
+**Note**: Map/list patterns (`%{k: v}`, `[a, b]`) work in both `let` destructuring and `@` blocks. See `specs/pattern-matching.md`.
 
 ### 4. Grammars in FMPL, Not Rust
 
@@ -153,8 +153,7 @@ All integration tests use `run(code).expect("runtime error")` or `map_err(|e| e.
 
 ## Current Limitations (Jan 2026)
 
-- Map/list patterns in `@` blocks not yet implemented (use `let` destructuring)
-- Lambdas have parameter binding issues after Indexed RPN transition
+- Lambda parameter binding issues after Indexed RPN transition
 - Some operators partially implemented (`&&`, `||`, `!=`)
 - Object system persistence not fully integrated with Fjall backend
 

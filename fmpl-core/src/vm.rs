@@ -1538,6 +1538,126 @@ impl Vm {
                         };
                         Self::tuple_to_value(result)
                     }
+                    "namespace" => {
+                        // namespace(name) -> TupleSpaceFacet restricted to namespace
+                        if args.len() != 1 {
+                            return Err(Error::Runtime(format!(
+                                "namespace() expects 1 argument (namespace_name), got {}",
+                                args.len()
+                            )));
+                        }
+                        let namespace = match &args[0] {
+                            Value::String(s) => s.clone(),
+                            Value::Symbol(s) if s.starts_with(':') => SmolStr::new(&s[1..]),
+                            Value::Symbol(s) => s.clone(),
+                            other => {
+                                return Err(Error::Runtime(format!(
+                                    "namespace() argument must be a string or symbol, got {}",
+                                    other.type_name()
+                                )));
+                            }
+                        };
+                        use crate::tuplespace::facet::TupleSpaceFacet;
+                        let facet = TupleSpaceFacet::new(space.clone()).with_namespace(namespace);
+                        Value::TupleSpaceFacet(Arc::new(std::sync::Mutex::new(facet)))
+                    }
+                    "readonly" => {
+                        // readonly() -> TupleSpaceFacet with read-only permissions
+                        if !args.is_empty() {
+                            return Err(Error::Runtime(format!(
+                                "readonly() expects 0 arguments, got {}",
+                                args.len()
+                            )));
+                        }
+                        use crate::tuplespace::facet::TupleSpaceFacet;
+                        let facet = TupleSpaceFacet::new(space.clone()).readonly();
+                        Value::TupleSpaceFacet(Arc::new(std::sync::Mutex::new(facet)))
+                    }
+                    "writeonly" => {
+                        // writeonly() -> TupleSpaceFacet with write-only permissions
+                        if !args.is_empty() {
+                            return Err(Error::Runtime(format!(
+                                "writeonly() expects 0 arguments, got {}",
+                                args.len()
+                            )));
+                        }
+                        use crate::tuplespace::facet::TupleSpaceFacet;
+                        let facet = TupleSpaceFacet::new(space.clone()).writeonly();
+                        Value::TupleSpaceFacet(Arc::new(std::sync::Mutex::new(facet)))
+                    }
+                    _ => return Err(Error::UndefinedMethod(name.to_string())),
+                };
+                let frame = self.frames.last_mut().unwrap();
+                frame.set_current(result);
+            }
+            Value::TupleSpaceFacet(facet) => {
+                // Facet methods: out, in, rd, inp, rdp, namespace, readonly, writeonly
+                let result = match name {
+                    "out" => {
+                        // out(type_name, data) -> null
+                        if args.len() != 2 {
+                            return Err(Error::Runtime(format!(
+                                "out() expects 2 arguments (type_name, data), got {}",
+                                args.len()
+                            )));
+                        }
+                        let type_name = match &args[0] {
+                            Value::String(s) => s.clone(),
+                            Value::Symbol(s) if s.starts_with(':') => SmolStr::new(&s[1..]),
+                            Value::Symbol(s) => s.clone(),
+                            other => {
+                                return Err(Error::Runtime(format!(
+                                    "out() type_name must be a string or symbol, got {}",
+                                    other.type_name()
+                                )));
+                            }
+                        };
+                        let mut facet = facet.lock().unwrap();
+                        facet.out(type_name, args[1].clone())?;
+                        Value::Null
+                    }
+                    "in" | "inp" => {
+                        // in(pattern) -> map | null
+                        // inp(pattern) -> map | null (non-blocking)
+                        if args.len() != 1 {
+                            return Err(Error::Runtime(format!(
+                                "{}() expects 1 argument (pattern), got {}",
+                                name,
+                                args.len()
+                            )));
+                        }
+                        let pattern = Self::value_to_tuple_pattern(&args[0])?;
+                        let mut facet = facet.lock().unwrap();
+                        let result = if name == "in" {
+                            facet.r#in(&pattern)?
+                        } else {
+                            facet.inp(&pattern)?.ok_or_else(|| {
+                                Error::Runtime("no matching tuple found".to_string())
+                            })?
+                        };
+                        Self::tuple_to_value(result)
+                    }
+                    "rd" | "rdp" => {
+                        // rd(pattern) -> map | null
+                        // rdp(pattern) -> map | null (non-blocking)
+                        if args.len() != 1 {
+                            return Err(Error::Runtime(format!(
+                                "{}() expects 1 argument (pattern), got {}",
+                                name,
+                                args.len()
+                            )));
+                        }
+                        let pattern = Self::value_to_tuple_pattern(&args[0])?;
+                        let mut facet = facet.lock().unwrap();
+                        let result = if name == "rd" {
+                            facet.rd(&pattern)?
+                        } else {
+                            facet.rdp(&pattern)?.ok_or_else(|| {
+                                Error::Runtime("no matching tuple found".to_string())
+                            })?
+                        };
+                        Self::tuple_to_value(result)
+                    }
                     _ => return Err(Error::UndefinedMethod(name.to_string())),
                 };
                 let frame = self.frames.last_mut().unwrap();

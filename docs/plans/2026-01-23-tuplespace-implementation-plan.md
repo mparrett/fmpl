@@ -1,6 +1,6 @@
 # Tuple Space Implementation Plan
 
-**Status**: In Progress (Phase 1: Tasks 1.1-1.3 Complete)
+**Status**: Complete (Phase 1: All Tasks Complete)
 **Date**: 2026-01-23
 **Updated**: 2026-01-24
 **Related**: [2025-12-27-tuplespace-vat-actor-conversion.md](../research/2025-12-27-tuplespace-vat-actor-conversion.md), [project-overview-draft.md](../design/project-overview-draft.md)
@@ -10,8 +10,8 @@
 - ✅ **Task 1.1 (Complete)**: Tuple data model with pattern matching
 - ✅ **Task 1.2 (Complete)**: Tuple space store with out/in/rd/inp/rdp operations
 - ✅ **Task 1.3 (Complete)**: Stream integration with subscribe support
-- ⏳ **Task 1.4 (Pending)**: VM integration (Tuple* instructions)
-- ⏳ **Task 1.5 (Pending)**: Capability security (TupleSpaceFacet)
+- ✅ **Task 1.4 (Complete)**: VM integration (Tuple* instructions)
+- ✅ **Task 1.5 (Complete)**: Capability security (TupleSpaceFacet)
 
 ---
 
@@ -259,13 +259,19 @@ impl TupleSpaceFacet {
 **Usage**:
 
 ```fmpl
-let system = tuplespace()
+let system = tuplespace.new()
 
-let user_space = system.as(:user_123)
+let user_space = system.namespace(:user_123)
 
-user_space.out(%{type: :action, data: "click"})  -- OK
-user_space.in(%{namespace: :other, ...})          -- Denied
+user_space.out("action", "click")  -- OK, gets user_123 namespace
+user_space.in("event")             -- Only sees user_123 tuples
 ```
+
+**Note**: The method name is `namespace()` instead of `as()` because `as` is a reserved keyword in FMPL.
+
+**Additional methods**:
+- `readonly()` - Creates a read-only facet (only rd/rdp allowed)
+- `writeonly()` - Creates a write-only facet (only out allowed)
 
 **Acceptance criteria**:
 - [x] Facet enforces namespace isolation

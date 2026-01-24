@@ -567,6 +567,7 @@ impl SourceRepr for Value {
             Value::SuspendedStream(source) => format!("<suspended_stream {:?}>", source),
             Value::SuspendedSink(source) => format!("<suspended_sink {:?}>", source),
             Value::TupleSpace(_) => "<tuplespace>".to_string(),
+            Value::TupleSpaceFacet(_) => "<tuplespace_facet>".to_string(),
         }
     }
 }

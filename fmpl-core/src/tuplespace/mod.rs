@@ -3,6 +3,7 @@
 //! The tuple space provides time/space decoupled coordination between agents
 //! through pattern-based matching instead of direct addressing.
 
+pub mod facet;
 pub mod store;
 pub mod stream;
 
