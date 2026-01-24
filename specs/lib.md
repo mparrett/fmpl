@@ -25,7 +25,7 @@ The `lib/` directory contains FMPL standard library modules that provide common 
 - `llm.execute_tool(tool_call)` — Execute a tool call (placeholder, needs tool registry)
 - `llm.tool_loop(prompt, chat_fn, max_iterations)` — Tool calling loop: LLM → Tool → Result → LLM
 - `llm.collect_stream(stream)` — Collect stream chunks into a single string
-- `llm.parse_sse(stream)` — Parse Server-Sent Events (TODO: not yet implemented)
+- `llm.parse_sse(stream)` — Parse Server-Sent Events (implemented via `sse.parse()` builtin)
 - `llm.safe_chat(chat_fn, prompt)` — Wrap a chat call with error handling
 - `llm.retry_chat(chat_fn, prompt, max_retries)` — Retry with exponential backoff (TODO: not yet implemented)
 
