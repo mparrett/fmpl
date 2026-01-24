@@ -364,12 +364,13 @@ impl<'a> GrammarParser<'a> {
                 //   We treat single digits/chars as list patterns for value matching
                 let is_list_pattern = if let Some(next) = self.peek_char() {
                     match next {
-                        ']' | '[' | '%' | '_' | ':' | '"' | '\'' => true,
+                        ']' | '[' | '%' | '_' | ':' | '"' | '\'' | '|' => true, // | indicates rest pattern
                         c if c.is_alphabetic() => {
                             // Check for range pattern [a-z] vs list [x, y]
                             let mut lookahead_pos = self.pos;
                             let mut found_range = false;
                             let mut found_comma = false;
+                            let mut found_pipe = false; // | indicates rest pattern
                             let mut found_end = false;
 
                             // Look ahead up to 10 characters to detect the pattern
@@ -379,6 +380,9 @@ impl<'a> GrammarParser<'a> {
                                         found_range = true;
                                     } else if c == ',' {
                                         found_comma = true;
+                                        break;
+                                    } else if c == '|' {
+                                        found_pipe = true;
                                         break;
                                     } else if c == ']' {
                                         found_end = true;
@@ -390,9 +394,9 @@ impl<'a> GrammarParser<'a> {
                                 }
                             }
 
-                            // It's a list pattern if: has comma, OR (no range AND found end)
-                            // It's a char class if: has range AND no comma
-                            found_comma || (!found_range && found_end)
+                            // It's a list pattern if: has comma, has pipe (rest), OR (no range AND found end)
+                            // It's a char class if: has range AND no comma/pipe
+                            found_comma || found_pipe || (!found_range && found_end)
                         }
                         c if c.is_ascii_digit() => {
                             // Check if this looks like a range (char class) or a list element
@@ -401,6 +405,7 @@ impl<'a> GrammarParser<'a> {
                             let mut lookahead_pos = self.pos;
                             let mut found_range = false;
                             let mut found_comma = false;
+                            let mut found_pipe = false; // | indicates rest pattern
                             let mut found_end = false;
                             // Look ahead up to 10 characters to detect the pattern
                             for _ in 0..10 {
@@ -409,6 +414,9 @@ impl<'a> GrammarParser<'a> {
                                         found_range = true;
                                     } else if c == ',' {
                                         found_comma = true;
+                                        break;
+                                    } else if c == '|' {
+                                        found_pipe = true;
                                         break;
                                     } else if c == ']' {
                                         found_end = true;
@@ -419,9 +427,9 @@ impl<'a> GrammarParser<'a> {
                                     break;
                                 }
                             }
-                            // It's a list pattern if: has comma, OR (no range AND single element)
-                            // It's a char class if: has range AND no comma
-                            found_comma || (!found_range && found_end)
+                            // It's a list pattern if: has comma, has pipe (rest), OR (no range AND single element)
+                            // It's a char class if: has range AND no comma/pipe
+                            found_comma || found_pipe || (!found_range && found_end)
                         }
                         _ => false,
                     }

@@ -1304,6 +1304,115 @@ impl Vm {
         }
     }
 
+    /// Convert a Value to a TuplePattern for tuple matching.
+    fn value_to_tuple_pattern(value: &Value) -> Result<crate::tuplespace::TuplePattern> {
+        use crate::tuplespace::{Pattern, TuplePattern};
+        use std::collections::HashMap;
+
+        Ok(match value {
+            // Symbol type-only match: :log becomes Symbol("log") in AST
+            // Treat any Symbol as a keyword type pattern
+            Value::Symbol(type_name) => TuplePattern::TypeAndData {
+                type_name: type_name.clone(),
+                data: Pattern::Wildcard,
+            },
+            // String type-only match
+            Value::String(type_name) => TuplePattern::TypeAndData {
+                type_name: type_name.clone(),
+                data: Pattern::Wildcard,
+            },
+            // Map pattern: %{type: "log", data: %{...}}
+            Value::Map(map) => {
+                let type_name = match map.get("type") {
+                    Some(Value::String(s)) => s.clone(),
+                    Some(Value::Symbol(s)) => s.clone(),
+                    other => {
+                        return Err(Error::Runtime(format!(
+                            "pattern type must be a string or keyword, got {:?}",
+                            other
+                        )));
+                    }
+                };
+
+                // Check for namespace in pattern
+                if let Some(namespace_value) = map.get("namespace") {
+                    let namespace = match namespace_value {
+                        Value::String(s) => s.clone(),
+                        Value::Symbol(s) => s.clone(),
+                        other => {
+                            return Err(Error::Runtime(format!(
+                                "pattern namespace must be a string or keyword, got {:?}",
+                                other
+                            )));
+                        }
+                    };
+
+                    // Extract data pattern if provided
+                    let data_pattern = match map.get("data") {
+                        None => Pattern::Wildcard,
+                        Some(Value::Map(data_map)) => {
+                            let mut required = HashMap::new();
+                            for (k, v) in data_map.iter() {
+                                required.insert(k.clone(), v.clone());
+                            }
+                            Pattern::Map { required }
+                        }
+                        Some(other) => Pattern::Exact(other.clone()),
+                    };
+
+                    TuplePattern::Full {
+                        namespace,
+                        type_name,
+                        data: data_pattern,
+                    }
+                } else {
+                    // No namespace, use TypeAndData
+                    let data_pattern = match map.get("data") {
+                        None => Pattern::Wildcard,
+                        Some(Value::Map(data_map)) => {
+                            let mut required = HashMap::new();
+                            for (k, v) in data_map.iter() {
+                                required.insert(k.clone(), v.clone());
+                            }
+                            Pattern::Map { required }
+                        }
+                        Some(other) => Pattern::Exact(other.clone()),
+                    };
+
+                    TuplePattern::TypeAndData {
+                        type_name,
+                        data: data_pattern,
+                    }
+                }
+            }
+            other => {
+                return Err(Error::Runtime(format!(
+                    "invalid pattern: expected symbol or map, got {}",
+                    other.type_name()
+                )));
+            }
+        })
+    }
+
+    /// Convert a Tuple to a Value map representation.
+    fn tuple_to_value(tuple: crate::tuplespace::Tuple) -> Value {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let mut map = HashMap::new();
+        map.insert(SmolStr::new("type"), Value::String(tuple.type_name));
+        if let Some(ns) = tuple.namespace {
+            map.insert(SmolStr::new("namespace"), Value::String(ns));
+        }
+        map.insert(
+            SmolStr::new("timestamp"),
+            Value::Int(tuple.timestamp as i64),
+        );
+        map.insert(SmolStr::new("seq"), Value::Int(tuple.seq as i64));
+        map.insert(SmolStr::new("data"), tuple.data);
+        Value::Map(Arc::new(map))
+    }
+
     fn call_method(&mut self, receiver: Value, name: &str, args: Vec<Value>) -> Result<()> {
         match receiver {
             Value::Symbol(ref s) if s.starts_with("__builtin_") => {
@@ -1353,6 +1462,82 @@ impl Vm {
                     "len" => Value::Int(s.len() as i64),
                     "upper" => Value::String(SmolStr::new(s.to_uppercase())),
                     "lower" => Value::String(SmolStr::new(s.to_lowercase())),
+                    _ => return Err(Error::UndefinedMethod(name.to_string())),
+                };
+                let frame = self.frames.last_mut().unwrap();
+                frame.set_current(result);
+            }
+            Value::TupleSpace(space) => {
+                // Tuple space methods: out, in, rd, inp, rdp, subscribe
+                use crate::tuplespace::Tuple;
+
+                let result = match name {
+                    "out" => {
+                        // out(type_name, data) -> null
+                        if args.len() != 2 {
+                            return Err(Error::Runtime(format!(
+                                "out() expects 2 arguments (type_name, data), got {}",
+                                args.len()
+                            )));
+                        }
+                        let type_name = match &args[0] {
+                            Value::String(s) => s.clone(),
+                            Value::Symbol(s) if s.starts_with(':') => SmolStr::new(&s[1..]),
+                            Value::Symbol(s) => s.clone(),
+                            other => {
+                                return Err(Error::Runtime(format!(
+                                    "out() type_name must be a string or symbol, got {}",
+                                    other.type_name()
+                                )));
+                            }
+                        };
+                        let tuple = Tuple::new(type_name, args[1].clone());
+                        let mut space = space.lock().unwrap();
+                        space.out(tuple)?;
+                        Value::Null
+                    }
+                    "in" | "inp" => {
+                        // in(pattern) -> map | null
+                        // inp(pattern) -> map | null (non-blocking)
+                        if args.len() != 1 {
+                            return Err(Error::Runtime(format!(
+                                "{}() expects 1 argument (pattern), got {}",
+                                name,
+                                args.len()
+                            )));
+                        }
+                        let pattern = Self::value_to_tuple_pattern(&args[0])?;
+                        let mut space = space.lock().unwrap();
+                        let result = if name == "in" {
+                            space.r#in(&pattern)?
+                        } else {
+                            space.inp(&pattern)?.ok_or_else(|| {
+                                Error::Runtime("no matching tuple found".to_string())
+                            })?
+                        };
+                        Self::tuple_to_value(result)
+                    }
+                    "rd" | "rdp" => {
+                        // rd(pattern) -> map | null
+                        // rdp(pattern) -> map | null (non-blocking)
+                        if args.len() != 1 {
+                            return Err(Error::Runtime(format!(
+                                "{}() expects 1 argument (pattern), got {}",
+                                name,
+                                args.len()
+                            )));
+                        }
+                        let pattern = Self::value_to_tuple_pattern(&args[0])?;
+                        let mut space = space.lock().unwrap();
+                        let result = if name == "rd" {
+                            space.rd(&pattern)?
+                        } else {
+                            space.rdp(&pattern)?.ok_or_else(|| {
+                                Error::Runtime("no matching tuple found".to_string())
+                            })?
+                        };
+                        Self::tuple_to_value(result)
+                    }
                     _ => return Err(Error::UndefinedMethod(name.to_string())),
                 };
                 let frame = self.frames.last_mut().unwrap();

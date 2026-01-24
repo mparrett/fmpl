@@ -848,7 +848,20 @@ impl<'a> Parser<'a> {
 
     /// Parse a single map entry.
     fn parse_map_entry(&mut self) -> Result<MapEntry> {
-        // Check for symbol key (name: value)
+        // Check for symbol literal key (:symbol: value)
+        // The lexer tokenizes ":type" as Token::Symbol("type")
+        if self.check_symbol_key() {
+            let name = match self.peek_token() {
+                Some(Token::Symbol(s)) => s.clone(),
+                _ => return Err(self.error("expected symbol key")),
+            };
+            self.advance(); // symbol token
+            self.expect(&Token::Colon)?;
+            let value = self.parse_expr()?;
+            return Ok(MapEntry::Symbol(name, value));
+        }
+
+        // Check for identifier key (name: value)
         // Allow both Ident and keyword tokens as map keys
         let is_symbol_key = match self.peek_token() {
             Some(Token::Ident(_)) => true,
@@ -1292,6 +1305,12 @@ impl<'a> Parser<'a> {
 
     fn check_ident(&self, name: &str) -> bool {
         matches!(self.peek_token(), Some(Token::Ident(s)) if s == name)
+    }
+
+    /// Check if current position is a symbol key (Symbol followed by Colon)
+    fn check_symbol_key(&self) -> bool {
+        matches!(self.peek_token(), Some(Token::Symbol(_)))
+            && self.peek_ahead(1).map(|t| &t.token) == Some(&Token::Colon)
     }
 
     fn expect(&mut self, token: &Token) -> Result<()> {

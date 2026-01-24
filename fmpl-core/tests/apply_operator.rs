@@ -503,3 +503,133 @@ mod edge_cases {
         assert!(matches!(result, Value::Null), "got {:?}", result);
     }
 }
+
+// =============================================================================
+// Map and List pattern matching in anonymous blocks
+// =============================================================================
+
+mod map_list_patterns {
+    use super::*;
+
+    #[test]
+    fn map_pattern_single_key() {
+        let mut vm = Vm::new();
+        // Match a map with a single key-value pair
+        let result = eval(&mut vm, r#"%{name: "Alice"} @ { %{name: n} => n }"#).unwrap();
+        assert!(
+            matches!(result, Value::String(ref s) if s == "Alice"),
+            "got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn map_pattern_multiple_keys() {
+        let mut vm = Vm::new();
+        // Match a map with multiple keys
+        let result = eval(
+            &mut vm,
+            r#"%{type: "user", name: "Bob", age: 30} @ { %{type: t, name: n} => n }"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(result, Value::String(ref s) if s == "Bob"),
+            "got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn map_pattern_nested_binding() {
+        let mut vm = Vm::new();
+        // Map pattern with symbol key
+        // Note: Symbol keys in map literals use :key: value syntax (two colons)
+        // In grammar patterns, symbol keys also use :key: pattern syntax
+        let result = eval(
+            &mut vm,
+            r#"%{:type: "user", :name: "Charlie"} @ { %{:type: t, :name: n} => n }"#,
+        )
+        .unwrap();
+        assert!(
+            matches!(result, Value::String(ref s) if s == "Charlie"),
+            "got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn map_pattern_mismatch_fails() {
+        let mut vm = Vm::new();
+        // Map pattern should fail if key doesn't exist
+        let result = eval(&mut vm, r#"%{foo: "bar"} @ { %{baz: b} => b }"#);
+        assert!(
+            result.is_err(),
+            "expected mismatch failure, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn list_pattern_single_element() {
+        let mut vm = Vm::new();
+        // Match a list with a single element
+        let result = eval(&mut vm, r#"[42] @ { [x] => x }"#).unwrap();
+        assert!(matches!(result, Value::Int(42)), "got {:?}", result);
+    }
+
+    #[test]
+    fn list_pattern_multiple_elements() {
+        let mut vm = Vm::new();
+        // Match a list with multiple elements
+        let result = eval(&mut vm, r#"["a", "b", "c"] @ { [x, y, z] => z }"#).unwrap();
+        assert!(
+            matches!(result, Value::String(ref s) if s == "c"),
+            "got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn list_pattern_with_rest() {
+        let mut vm = Vm::new();
+        // Match a list with rest pattern
+        let result = eval(&mut vm, r#"[1, 2, 3, 4, 5] @ { [first | rest] => first }"#).unwrap();
+        assert!(matches!(result, Value::Int(1)), "got {:?}", result);
+    }
+
+    #[test]
+    fn list_pattern_length_mismatch_fails() {
+        let mut vm = Vm::new();
+        // List pattern should fail if length doesn't match
+        let result = eval(&mut vm, r#"[1, 2, 3] @ { [x, y] => x }"#);
+        assert!(
+            result.is_err(),
+            "expected length mismatch failure, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn list_pattern_type_mismatch_fails() {
+        let mut vm = Vm::new();
+        // List pattern should fail if element type doesn't match
+        let result = eval(&mut vm, r#"["a", "b"] @ { [x: int, y: int] => x }"#);
+        assert!(
+            result.is_err(),
+            "expected type mismatch failure, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn nested_map_in_list_pattern() {
+        let mut vm = Vm::new();
+        // Match a list containing maps
+        let result = eval(
+            &mut vm,
+            r#"[%{x: 1}, %{x: 2}] @ { [%{x: a}, %{x: b}] => a + b }"#,
+        )
+        .unwrap();
+        assert!(matches!(result, Value::Int(3)), "got {:?}", result);
+    }
+}
