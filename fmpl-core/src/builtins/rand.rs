@@ -1,6 +1,6 @@
 //! Random number generation built-ins for FMPL.
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::value::Value;
 use rand::Rng;
 
@@ -8,20 +8,29 @@ use rand::Rng;
 pub struct RandBuiltin;
 
 impl RandBuiltin {
-    /// Generate a random integer in the range [min, max].
+    /// Generate a random integer in the range [min, max).
     ///
     /// Arguments:
     /// - min: Minimum value (inclusive, integer)
-    /// - max: Maximum value (inclusive, integer)
+    /// - max: Maximum value (exclusive, integer)
     ///
-    /// Returns a random integer.
+    /// Returns a random integer i where min <= i < max.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if min >= max (empty range).
     ///
     /// # Notes
     ///
-    /// - If min >= max, the bounds are automatically swapped
     /// - Uses the rand crate's thread_rng() for randomness
     /// - The range is [min, max) - max is exclusive
     pub fn int(min: i64, max: i64) -> Result<Value> {
+        if min >= max {
+            return Err(Error::Runtime(format!(
+                "rand.int requires min < max, got min={}, max={}",
+                min, max
+            )));
+        }
         let mut rng = rand::thread_rng();
         let random = rng.gen_range(min..max);
         Ok(Value::Int(random))
@@ -36,7 +45,7 @@ impl RandBuiltin {
     /// - Uses the rand crate's thread_rng() for randomness
     pub fn float() -> Result<Value> {
         let mut rng = rand::thread_rng();
-        let random: f64 = rng.gen_range(0.0..1.0);
+        let random = rng.gen_range(0.0..1.0);
         Ok(Value::Float(random))
     }
 }
