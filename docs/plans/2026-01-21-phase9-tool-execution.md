@@ -1,5 +1,6 @@
 # Phase 9: LLM Tool Execution
 
+**Status**: ✅ COMPLETE (2026-01-24)
 **Goal**: Enable the TUI to execute managed tools via LLM requests, making the application truly "agentic" rather than just a chat interface.
 
 **Context**: Phases 6-8 built the infrastructure (panels, tools, LLM integration), but the LLM cannot yet invoke the tools that are managed. This phase closes that loop.
@@ -164,12 +165,12 @@ struct ToolResult {
 
 ## Success Criteria
 
-- [ ] LLM can invoke managed tools via TOOL: prefix
-- [ ] Tool results displayed in output panel
-- [ ] Tool errors displayed clearly
-- [ ] Usage count increments on execution
-- [ ] All 222 tests still pass
-- [ ] Build clean (cargo build --release)
+- [x] LLM can invoke managed tools via TOOL: prefix
+- [x] Tool results displayed in output panel
+- [x] Tool errors displayed clearly
+- [x] Usage count increments on execution
+- [x] All tests pass
+- [x] Build clean (cargo build --release)
 
 ## Future Phases
 

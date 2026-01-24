@@ -235,7 +235,22 @@ impl<'a> Parser<'a> {
 
     /// Parse an expression.
     fn parse_expr(&mut self) -> Result<Expr> {
-        self.parse_pipe()
+        self.parse_assignment()
+    }
+
+    /// Parse assignment (lowest precedence).
+    /// Assignment is right-associative: a = b = c means a = (b = c)
+    fn parse_assignment(&mut self) -> Result<Expr> {
+        let left = self.parse_pipe()?;
+
+        // Check if this is an assignment
+        if self.check(&Token::Eq) {
+            self.advance();
+            let right = self.parse_assignment()?; // Right-associative
+            return Ok(Expr::Assignment(Box::new(left), Box::new(right)));
+        }
+
+        Ok(left)
     }
 
     /// Parse pipe and grammar application operators (lowest precedence).

@@ -200,6 +200,8 @@ pub enum Expr {
     Let(Vec<LetBinding>, Box<Expr>),
     /// Let statement: let name = expr - binds to current scope, returns the value
     LetStmt(SmolStr, Box<Expr>),
+    /// Assignment: target = expr - mutates existing variable, returns the assigned value
+    Assignment(Box<Expr>, Box<Expr>),
 
     /// Sequence (block).
     Sequence(Vec<Expr>),

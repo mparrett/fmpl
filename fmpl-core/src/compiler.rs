@@ -622,6 +622,7 @@ impl Compiler {
             Expr::ShortLambda(param, body) => self.compile_lambda(&[param.clone()], body),
             Expr::Let(bindings, body) => self.compile_let(bindings, body),
             Expr::LetStmt(name, expr) => self.compile_let_stmt(name, expr),
+            Expr::Assignment(target, value) => self.compile_assignment(target, value),
             Expr::Sequence(exprs) => self.compile_sequence(exprs),
             Expr::ObjectDef(def) => self.compile_object_def(def),
             Expr::Match(scrutinee, cases) => self.compile_match(scrutinee, cases),
@@ -1069,6 +1070,30 @@ impl Compiler {
         });
         // Return the bound value
         Ok(self.code.emit(Instruction::Copy { source: value }))
+    }
+
+    /// Compile assignment: target = value
+    /// The target must be a simple variable name (Ident).
+    /// Emits: StoreVar(name, value), returns the assigned value
+    fn compile_assignment(&mut self, target: &Expr, value: &Expr) -> Result<InstrIndex> {
+        // Only simple identifiers are supported as assignment targets
+        let name = match target {
+            Expr::Ident(n) => n.clone(),
+            _ => {
+                return Err(Error::Compiler(format!(
+                    "assignment target must be a simple variable name, got {:?}",
+                    target
+                )));
+            }
+        };
+
+        let value_idx = self.compile_expr(value)?;
+        self.code.emit(Instruction::StoreVar {
+            name,
+            value: value_idx,
+        });
+        // Return the assigned value
+        Ok(self.code.emit(Instruction::Copy { source: value_idx }))
     }
 
     /// Compile sequence of expressions.

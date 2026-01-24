@@ -313,6 +313,9 @@ impl Display for Expr {
             Expr::LetStmt(name, expr) => {
                 write!(f, "let {} = {}", name, expr)
             }
+            Expr::Assignment(target, value) => {
+                write!(f, "{} = {}", target, value)
+            }
 
             Expr::Sequence(exprs) => {
                 write!(f, "{{")?;
