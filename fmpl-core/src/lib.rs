@@ -19,6 +19,7 @@ pub mod object;
 pub mod parser;
 pub mod repr;
 pub mod stream;
+pub mod tuplespace;
 pub mod value;
 pub mod vm;
 
