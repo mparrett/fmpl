@@ -149,7 +149,6 @@ fn main() -> fmpl_core::Result<()> {
 
 ## Related Specs
 
-- [grammar-system.md](./grammar-system.md) — OMeta-style grammars
-- [streaming-grammar.md](./streaming-grammar.md) — Incremental parsing
+- [grammar-system.md](./grammar-system.md) — OMeta-style grammars with streaming support
 - [object-system.md](./object-system.md) — Goblins-inspired objects
 - [vm.md](./vm.md) — Bytecode VM details

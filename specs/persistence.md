@@ -299,7 +299,7 @@ pub struct ParseState { ... }
 
 ## Related Specs
 
-- [streaming-grammar.md](./streaming-grammar.md) — Uses overflow storage
+- [grammar-system.md](./grammar-system.md) — Streaming grammar uses overflow storage
 - [object-system.md](./object-system.md) — Object persistence
 - [fmpl-web.md](./fmpl-web.md) — Web server integration
 

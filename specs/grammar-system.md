@@ -14,7 +14,184 @@ PEG-based parsing with grammar inheritance, packrat memoization, and semantic ac
 - **Binary** — Byte streams for protocols/file formats
 - **Objects** — Lists/trees of values for AST transformation
 
-For incremental/streaming parsing, see [streaming-grammar.md](./streaming-grammar.md).
+## Streaming and Incremental Parsing
+
+The grammar system supports push-based incremental parsing for async streams (LLM output, HTTP chunks) with:
+
+- **Push-based parsing** — Values arrive asynchronously, grammar emits matches
+- **Unlimited backtracking** — OMeta-style cons-cell positions with Fjall overflow
+- **Packrat memoization** — Per-position memo tables with optional Fjall backing
+- **Incremental API** — `start()`/`resume()` for durable parse states
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    ParseDriver                          │
+│  driver.rs:24                                           │
+│  - Collects values from async stream                    │
+│  - Runs grammar against each value                      │
+│  - Emits matched values downstream                      │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────┐
+│                   PegRuntime                            │
+│  runtime.rs:900                                         │
+│  - start(rule) → ParseState                             │
+│  - resume(state) → ParseNext                            │
+│  - Per-position packrat memoization                     │
+└─────────────────────┬───────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────┐
+│               StreamPosition                            │
+│  stream_input.rs:42                                     │
+│  - Immutable cons-cell with lazy tail                   │
+│  - Per-position memo table                              │
+│  - Fjall overflow in StreamSource::Async                │
+└─────────────────────────────────────────────────────────┘
+```
+
+### ParseState (`incremental.rs:15`)
+
+Represents suspended parse state:
+
+```rust
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ParseState {
+    /// Current position index in input
+    pub position_index: usize,
+    /// Rule call stack: (rule_name, entry_position_index)
+    pub rule_stack: Vec<(SmolStr, usize)>,
+    /// Current variable bindings
+    pub bindings: HashMap<SmolStr, Value>,
+}
+```
+
+Serialization methods (`incremental.rs:65-97`, feature-gated):
+- `to_bytes()` / `from_bytes()` — rkyv serialization
+- `save_to_fjall()` / `load_from_fjall()` — durable persistence
+
+### ParseNext (`incremental.rs:26`)
+
+Result of incremental parse step:
+
+```rust
+pub enum ParseNext {
+    /// Rule matched, here's the result value
+    Match(Value),
+    /// Need more input - here's state to resume from
+    NeedInput(ParseState),
+    /// Input stream ended
+    End,
+}
+```
+
+### StreamPosition (`stream_input.rs:42`)
+
+OMeta-style immutable cons-cell for streaming input:
+
+```rust
+pub struct StreamPosition {
+    /// The value at this position (None = end of stream)
+    head: Option<Value>,
+    /// The next position (lazily computed)
+    tail: RefCell<Option<Rc<StreamPosition>>>,
+    /// Position index (for memoization keys)
+    index: usize,
+    /// Per-position memoization table
+    memo: RefCell<HashMap<SmolStr, MemoEntry>>,
+    /// Source reference for pulling more data
+    source: Rc<StreamSource>,
+    /// Optional Fjall partition for memo persistence
+    #[cfg(feature = "fjall-persistence")]
+    memo_fjall: Option<Arc<Mutex<MemoFjall>>>,
+}
+```
+
+### Pipeline Syntax
+
+```fmpl
+-- LLM stream → parser → handler
+llm_stream |> parser.tool_call |> execute_tool
+
+-- With async parse operator
+llm_stream |> AsyncParse { grammar: ToolParser, rule: "output" } |> handler
+```
+
+### Incremental API (`runtime.rs:900-945`)
+
+```rust
+// Start parsing
+let input = StreamingInput::from_values(values);
+let mut runtime = PegRuntime::new(input, &registry, grammar);
+let state = runtime.start("rule_name");
+
+// Resume and get result
+match runtime.resume(state)? {
+    ParseNext::Match(value) => {
+        // Successfully matched - use value
+    }
+    ParseNext::NeedInput(state) => {
+        // Need more input - state can be saved for later
+    }
+    ParseNext::End => {
+        // Input stream ended
+    }
+}
+```
+
+### Fjall Backing
+
+For async streams, positions can spill to Fjall when memory is limited:
+
+```rust
+enum StreamSource {
+    Async {
+        handle: Mutex<StreamHandle>,
+        timeout: Option<Duration>,
+        /// Cached positions for index lookup
+        positions: Mutex<Vec<Rc<StreamPosition>>>,
+        /// Fjall overflow for spilled positions
+        #[cfg(feature = "fjall-persistence")]
+        fjall: Option<FjallOverflow>,
+        /// Memory limit before spilling
+        #[cfg(feature = "fjall-persistence")]
+        memory_limit: Option<usize>,
+    },
+    Static(Vec<Value>),
+    Empty,
+}
+```
+
+### StreamOp Variants (`value.rs:87`)
+
+```rust
+pub enum StreamOp {
+    Map(Value),
+    Filter(Value),
+    FlatMap(Value),
+    Reduce(Value),
+    Parse { grammar: Value, rule: SmolStr },      // Blocking parse
+    AsyncParse { grammar: Value, rule: SmolStr }, // Incremental parse
+}
+```
+
+### ParseDriver (`driver.rs:24`)
+
+Async driver connecting streams to grammars:
+
+```rust
+pub struct ParseDriver {
+    input_handle: StreamHandle,
+    grammar: Arc<Grammar>,
+    rule: String,
+    registry: GrammarRegistry,
+    output: mpsc::Sender<Value>,
+    timeout: Option<Duration>,
+}
+```
+
+---
 
 ---
 
@@ -305,9 +482,9 @@ let mut runtime = runtime.with_action_evaluator(evaluator);
 
 ## Related Specs
 
-- [streaming-grammar.md](./streaming-grammar.md) — Incremental parsing and durable suspension
 - [fmpl-core.md](./fmpl-core.md) — Core runtime
 - [async-streams.md](./async-streams.md) — Stream types for grammar pipelines
+- [persistence.md](./persistence.md) — Fjall storage for durable state
 
 ---
 

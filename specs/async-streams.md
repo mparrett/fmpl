@@ -270,6 +270,6 @@ let results = <- pipeline |> collect
 
 ## Related Specs
 
-- [streaming-grammar.md](./streaming-grammar.md) — Incremental parsing
+- [grammar-system.md](./grammar-system.md) — Streaming and incremental parsing
 - [vm.md](./vm.md) — Async VM support
 - [fmpl-core.md](./fmpl-core.md) — Core runtime

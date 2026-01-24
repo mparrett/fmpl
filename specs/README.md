@@ -13,8 +13,7 @@ Design documentation for FMPL, a streaming-first DSL for building AI agents with
 ## Core Systems
 
 | Spec | Code | Purpose |
-| [grammar-system.md](./grammar-system.md) | [fmpl-core/src/grammar/](../fmpl-core/src/grammar/) | OMeta-style PEG grammars with inheritance |
-| [streaming-grammar.md](./streaming-grammar.md) | [fmpl-core/src/grammar/](../fmpl-core/src/grammar/) | Push-based incremental parsing for async streams |
+| [grammar-system.md](./grammar-system.md) | [fmpl-core/src/grammar/](../fmpl-core/src/grammar/) | OMeta-style PEG grammars with inheritance and streaming support |
 | [object-system.md](./object-system.md) | [fmpl-core/src/object.rs](../fmpl-core/src/object.rs) | Goblins-inspired objects with spawn, facets |
 | [vm.md](./vm.md) | [fmpl-core/src/vm.rs](../fmpl-core/src/vm.rs) | Stack-based bytecode VM with async support |
 | [persistence.md](./persistence.md) | [fmpl-core/](../fmpl-core/), [fmpl-web/](../fmpl-web/) | Fjall-backed live image and memo persistence |
@@ -57,6 +56,7 @@ Design documentation for FMPL, a streaming-first DSL for building AI agents with
 | [streaming-grammar-push-model-implementation.md](../docs/plans/2026-01-20-streaming-grammar-push-model-implementation-plan.md) | Complete | Incremental parse with Fjall backing |
 | [async-await-spawn-implementation.md](../docs/plans/2026-01-20-async-await-spawn-implementation.md) | Complete | Async operators implementation |
 | [apply-operator-implementation.md](../docs/plans/2026-01-19-apply-operator-implementation-plan.md) | Complete | Grammar application (`@`) |
+| [tuplespace-implementation-plan.md](../docs/plans/2026-01-23-tuplespace-implementation-plan.md) | Draft | Linda-style tuple space for coordination |
 
 ## External References
 

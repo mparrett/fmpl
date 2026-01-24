@@ -588,8 +588,7 @@ This enables:
 ### Core Specifications
 
 - **[vm.md](specs/vm.md)** - Virtual machine architecture, bytecode format, execution model
-- **[grammar-system.md](specs/grammar-system.md)** - OMeta-style grammar parsing engine
-- **[streaming-grammar.md](specs/streaming-grammar.md)** - Incremental parsing for async streams
+- **[grammar-system.md](specs/grammar-system.md)** - OMeta-style grammar parsing engine with streaming support
 - **[object-system.md](specs/object-system.md)** - Prototype-based objects, capabilities, facets
 - **[pattern-matching.md](specs/pattern-matching.md)** - Pattern matching syntax and semantics
 

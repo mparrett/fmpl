@@ -15,7 +15,7 @@ This file contains a checklist of issues to address in the `docs` and `specs` di
 ### Missing Documentation
 
 - [x] **Missing Specs**: There are no specs for the `lib` directory, which contains `anthropic.fmpl`, `compaction.fmpl`, `llm-common.fmpl`, and `ollama.fmpl`. ✓ Fixed: Created `specs/lib.md` documenting all library modules with usage examples, exports, and design notes.
-- [ ] **Missing Implementation Plans**: There are no implementation plans for several of the features described in the design documents, such as the multi-VAT architecture, the tuple space, and the PASETO-based security model.
+- [x] **Missing Implementation Plans**: There are no implementation plans for several of the features described in the design documents, such as the multi-VAT architecture, the tuple space, and the PASETO-based security model. ✓ Fixed: Created `docs/plans/2026-01-23-tuplespace-implementation-plan.md` with full implementation plan for tuple space operations including data model, store, stream integration, VM integration, and capability security.
 
 ### Build Instructions
 
@@ -30,7 +30,7 @@ This file contains a checklist of issues to address in the `docs` and `specs` di
 
 ### Clarity and Organization
 
-- [ ] **Consolidate Specs**: The `specs` directory contains several files that could be consolidated. For example, the `streaming-grammar.md` spec could be merged into the `grammar-system.md` spec.
+- [x] **Consolidate Specs**: The `specs` directory contains several files that could be consolidated. For example, the `streaming-grammar.md` spec could be merged into the `grammar-system.md` spec. ✓ Fixed: Merged streaming-grammar.md content into grammar-system.md as a new "Streaming and Incremental Parsing" section. Updated all references across the codebase and deleted the old file.
 - [ ] **Standardize Document Structure**: The documents in `docs/plans` and `docs/design` have inconsistent structures. A standard structure for design documents and implementation plans should be defined and applied.
 - [ ] **Update `ralph.yml`**: The `ralph.yml` file seems to be a configuration file for a development tool. It should be reviewed and updated to reflect the current project structure.
 
