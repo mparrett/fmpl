@@ -38,4 +38,4 @@ This file contains a checklist of issues to address in the `docs` and `specs` di
 
 - [x] **`specs/README.md`: Incorrect VM description**: The table on line 20 incorrectly described the VM as "Stack-based bytecode VM" when FMPL uses Indexed RPN architecture. ✓ Fixed: Changed to "Indexed RPN bytecode VM with async support" to match the actual implementation.
 - [ ] **Spelling and Grammar**: A general review of all documentation for spelling and grammar errors should be performed.
-- [ ] **Update `TUTORIAL.md`**: The `TUTORIAL.md` file is likely out of date. It should be reviewed and updated to reflect the current state of the language and tools.
+- [x] **Update `TUTORIAL.md`**: The `TUTORIAL.md` file is likely out of date. It should be reviewed and updated to reflect the current state of the language and tools. ✓ Fixed: Updated examples to reflect functional semantics—removed mutable variable usage, fixed undefined variables in examples, clarified that list methods like `.map()` and `.filter()` are not yet implemented, added prominent note about immutable bindings and recursion-based iteration.

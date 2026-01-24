@@ -4,6 +4,8 @@ A practical guide to FMPL ("of Accardi"), a prototype-based object-oriented prog
 
 **Target Audience**: Experienced programmers who want to understand FMPL's syntax, semantics, and practical usage.
 
+> **Important**: FMPL is a **purely functional language** with **immutable bindings**. All variables are immutable—once bound, they cannot be changed. Loops and iteration are implemented via recursion, not mutable counters.
+
 ---
 
 ## Table of Contents
@@ -118,11 +120,9 @@ null
 
 -- Empty list
 []
-
--- List methods (when implemented)
-[1, 2, 3].length()     -- 3
-[1, 2, 3].get(0)       -- 1
 ```
+
+**Note**: Lists are currently immutable data structures. Methods like `.length()` and `.get()` are planned. Use pattern matching with the `@` operator or recursive functions to process lists.
 
 ### Maps (Hash Tables)
 
@@ -264,34 +264,53 @@ let enhanced_json = json_parser <: {
 
 ```fmpl
 -- if-then-else
-if x > 10 then "big" else "small"
+if 15 > 10 then "big" else "small"
+-- Returns: "big"
 
--- Nested
-if x > 100 then
+-- Nested with expressions
+if 150 > 100 then
   "huge"
-else if x > 10 then
+else if 15 > 10 then
   "big"
 else
   "small"
+-- Returns: "huge"
+
+-- With let bindings
+let (value = 42)
+  if value > 10 then "big" else "small"
+-- Returns: "big"
 ```
 
 **Note**: FMPL uses `then`/`else` keywords (not braces).
 
-### Loops
+### Loops and Recursion
+
+**Important**: FMPL is a **purely functional language** with **immutable bindings**. There are no mutable variables or assignment statements. Loops are implemented via recursion.
 
 ```fmpl
--- while-do
-let x = 0
-while x < 10 do {
-  x = x + 1
-}
+-- Sum numbers recursively
+let sum_range = {start, end}
+  if start > end then
+    0
+  else
+    start + sum_range(start + 1, end)
 
--- do-while (repeat until condition is false)
-let x = 0
-do {
-  x = x + 1
-} while x < 10
+sum_range(1, 10)
+-- Returns: 55
+
+-- Factorial via recursion
+let factorial = {n}
+  if n <= 1 then
+    1
+  else
+    n * factorial(n - 1)
+
+factorial(5)
+-- Returns: 120
 ```
+
+The `while` and `do-while` syntax exists but requires careful implementation using recursive functions or streaming patterns, as immutable bindings prevent traditional loop counter patterns.
 
 ### Let-Bindings
 
@@ -352,13 +371,28 @@ doubler(7)          -- 14
 ### Higher-Order Functions
 
 ```fmpl
--- Map over list (when implemented)
-let numbers = [1, 2, 3, 4]
-numbers.map(\x x * 2)    -- [2, 4, 6, 8]
+-- Functions can take other functions as arguments
+let apply_twice = {f, x}
+  f(f(x))
 
--- Filter
-numbers.filter(\x x > 2) -- [3, 4]
+let add_one = {x} x + 1
+apply_twice(add_one, 5)
+-- Returns: 7
+
+-- List operations via recursion (map pattern)
+let map_list = {f, list}
+  -- Would use pattern matching on list structure here
+  -- Full implementation requires list destructuring patterns
+  list
+
+-- Filter via recursion (filter pattern)
+let filter_list = {pred, list}
+  -- Would use pattern matching on list structure here
+  -- Full implementation requires list destructuring patterns
+  list
 ```
+
+**Note**: Higher-order functions are supported, but list methods like `.map()` and `.filter()` require list destructuring patterns which are planned but not yet implemented.
 
 ---
 
@@ -717,5 +751,5 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ---
 
-**Last Updated**: 2026-01-21
+**Last Updated**: 2026-01-23
 **Version**: 0.1.0 (experimental)
