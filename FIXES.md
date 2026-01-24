@@ -32,7 +32,7 @@ This file contains a checklist of issues to address in the `docs` and `specs` di
 
 - [x] **Consolidate Specs**: The `specs` directory contains several files that could be consolidated. For example, the `streaming-grammar.md` spec could be merged into the `grammar-system.md` spec. ✓ Fixed: Merged streaming-grammar.md content into grammar-system.md as a new "Streaming and Incremental Parsing" section. Updated all references across the codebase and deleted the old file.
 - [x] **Standardize Document Structure**: The documents in `docs/plans` and `docs/design` have inconsistent structures. A standard structure for design documents and implementation plans should be defined and applied. ✓ Fixed: Created `docs/STANDARDS.md` defining standard structure for design documents, implementation plans, and specifications. Includes templates, style guidelines, file naming conventions, and document lifecycle management.
-- [ ] **Update `ralph.yml`**: The `ralph.yml` file seems to be a configuration file for a development tool. It should be reviewed and updated to reflect the current project structure.
+- [x] **Update `ralph.yml`**: The `ralph.yml` file seems to be a configuration file for a development tool. It should be reviewed and updated to reflect the current project structure. ✓ Fixed: Updated ralph.yml with FMPL-specific project configuration including project metadata, core guardrails referencing AGENTS.md, Indexed RPN and grammar system reminders, build/test commands, documentation standards references, and example custom hats for spec harmonizer and grammar reviewer workflows.
 
 ## Low-Priority Issues
 
