@@ -2,6 +2,8 @@
 
 Design documentation for FMPL, a streaming-first DSL for building AI agents with grammars, capabilities, and durable state.
 
+> **Documentation Standards**: See [docs/STANDARDS.md](../docs/STANDARDS.md) for standard structure and formatting guidelines for design documents, implementation plans, and specifications.
+
 ## Crate Structure
 
 | Spec | Code | Purpose |

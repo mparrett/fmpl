@@ -143,6 +143,7 @@ All integration tests use `run(code).expect("runtime error")` or `map_err(|e| e.
 
 ## Design Documentation
 
+- `docs/STANDARDS.md` — **Documentation standards** for design docs, implementation plans, and specs
 - `specs/README.md` — Spec index and crate overview
 - `docs/design/language-guide.md` — DSL concepts and examples
 - `docs/plans/2026-01-19-unified-grammars-and-agents-design.md` — `@` operator unification
