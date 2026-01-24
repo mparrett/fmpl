@@ -106,7 +106,7 @@ value @ {
 Combined with destructuring:
 
 ```fmpl
--- ⚠️ Map patterns in @ expressions are planned but not yet implemented
+-- ✅ Map patterns with guards are fully implemented in @ expressions
 result @ {
   %{status: s, data: d} when s == 200  => process(d)
   %{status: s, error: e} when s >= 400 => handle_error(e)
@@ -193,7 +193,7 @@ grammar ToolAgent <: base::tree {
 Patterns are tried in order. Use `_` for catch-all:
 
 ```fmpl
--- ⚠️ Map patterns in @ expressions are planned but not yet implemented
+-- ✅ Map patterns in @ expressions are fully implemented
 value @ {
   %{type: "a"} => ...
   %{type: "b"} => ...
