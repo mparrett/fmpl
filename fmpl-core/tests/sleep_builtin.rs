@@ -10,11 +10,6 @@ fn run(src: &str) -> Result<Value, String> {
     eval(&mut vm, src).map_err(|e| e.to_string())
 }
 
-/// Helper to create an Int value
-fn int(n: i64) -> Value {
-    Value::Int(n)
-}
-
 /// T-1: Sleep builtin returns nil after delay
 #[test]
 fn test_sleep_returns_nil() {
