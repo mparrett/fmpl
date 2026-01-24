@@ -4,6 +4,7 @@
 //! through pattern-based matching instead of direct addressing.
 
 pub mod store;
+pub mod stream;
 
 use crate::value::Value;
 use smol_str::SmolStr;

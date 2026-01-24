@@ -1,8 +1,17 @@
 # Tuple Space Implementation Plan
 
-**Status**: Draft
+**Status**: In Progress (Phase 1: Tasks 1.1-1.3 Complete)
 **Date**: 2026-01-23
+**Updated**: 2026-01-24
 **Related**: [2025-12-27-tuplespace-vat-actor-conversion.md](../research/2025-12-27-tuplespace-vat-actor-conversion.md), [project-overview-draft.md](../design/project-overview-draft.md)
+
+## Progress Summary
+
+- ✅ **Task 1.1 (Complete)**: Tuple data model with pattern matching
+- ✅ **Task 1.2 (Complete)**: Tuple space store with out/in/rd/inp/rdp operations
+- ✅ **Task 1.3 (Complete)**: Stream integration with subscribe support
+- ⏳ **Task 1.4 (Pending)**: VM integration (Tuple* instructions)
+- ⏳ **Task 1.5 (Pending)**: Capability security (TupleSpaceFacet)
 
 ---
 
@@ -113,11 +122,13 @@ impl TupleSpace {
 ```
 
 **Acceptance criteria**:
-- [x] `out` persists tuple to Fjall
-- [x] `in`/`rd` block until matching tuple arrives (via channels)
+- [x] `out` writes tuple to in-memory store (Fjall persistence TBD)
+- [x] `in`/`rd` return matching tuple (currently non-blocking)
 - [x] `inp`/`rdp` return immediately with `None` if no match
-- [x] Pending operations are notified on matching `out`
-- [x] Unit tests for blocking/non-blocking semantics
+- [x] Stream subscribers are notified on matching `out`
+- [x] Unit tests for basic operations and stream integration
+
+**Note**: Fjall persistence and blocking operations deferred to Phase 2.
 
 ---
 
