@@ -286,6 +286,39 @@ impl Display for Expr {
             }
             Expr::While(cond, body) => write!(f, "while {} do {}", cond, body),
             Expr::DoWhile(body, cond) => write!(f, "do {} while {}", body, cond),
+            Expr::For(pattern, iterable, body) => {
+                write!(f, "for {} in {} {}", pattern, iterable, body)
+            }
+            Expr::Fold {
+                initial,
+                acc_var,
+                iterable,
+                body,
+            } => {
+                write!(f, "fold {}, {} in {} {}", initial, acc_var, iterable, body)
+            }
+            Expr::Foldr {
+                initial,
+                acc_var,
+                iterable,
+                body,
+            } => {
+                write!(f, "foldr {}, {} in {} {}", initial, acc_var, iterable, body)
+            }
+            Expr::MapEach {
+                elem_var,
+                iterable,
+                body,
+            } => {
+                write!(f, "map {} in {} {}", elem_var, iterable, body)
+            }
+            Expr::Filter {
+                elem_var,
+                iterable,
+                body,
+            } => {
+                write!(f, "filter {} in {} {}", elem_var, iterable, body)
+            }
             Expr::Return(Some(expr)) => write!(f, "return {}", expr),
             Expr::Return(None) => write!(f, "return"),
 
@@ -571,6 +604,7 @@ impl SourceRepr for Value {
             Value::SuspendedSink(source) => format!("<suspended_sink {:?}>", source),
             Value::TupleSpace(_) => "<tuplespace>".to_string(),
             Value::TupleSpaceFacet(_) => "<tuplespace_facet>".to_string(),
+            Value::Cursor(c) => format!("<cursor branch:{} pos:{}>", c.branch_id, c.position.index),
         }
     }
 }
@@ -622,6 +656,15 @@ impl SourceRepr for Stream {
                 }
                 StreamOp::Reduce(f) => {
                     result = format!("{} |> reduce({})", result, f.source_repr());
+                }
+                StreamOp::Collect => {
+                    result = format!("{} |> collect", result);
+                }
+                StreamOp::Take { n } => {
+                    result = format!("{} |> take({})", result, n.source_repr());
+                }
+                StreamOp::Drop { n } => {
+                    result = format!("{} |> drop({})", result, n.source_repr());
                 }
                 StreamOp::Parse { grammar, rule } => {
                     result = format!("{} |> parse({}.{})", result, grammar.source_repr(), rule);

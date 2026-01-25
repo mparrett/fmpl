@@ -1,0 +1,1 @@
+fold (\acc \elem acc + elem) 0 [1, 2, 3]

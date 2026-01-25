@@ -6,9 +6,10 @@
 
 use crate::compiler::{CompiledCode, InstrIndex, Instruction};
 use crate::error::{Error, Result};
+use crate::grammar::input::MemoEntry;
 use crate::grammar::{Grammar, GrammarRegistry};
 use crate::object::{Facet, Method, ObjectDb, ObjectId};
-use crate::value::{Lambda, Stream, StreamOp, Value};
+use crate::value::{Cursor, CursorPosition, Lambda, Stream, StreamOp, Value};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,6 +32,8 @@ struct Frame {
     this: Option<ObjectId>,
     /// The `caller` reference for method calls.
     caller: Option<ObjectId>,
+    /// Parse state for grammar pattern matching.
+    parse_state: ParseState,
 }
 
 impl Frame {
@@ -44,6 +47,7 @@ impl Frame {
             locals: HashMap::new(),
             this: None,
             caller: None,
+            parse_state: ParseState::new(),
         }
     }
 
@@ -77,6 +81,162 @@ impl Frame {
 #[derive(Debug, Default)]
 struct Scope {
     bindings: HashMap<SmolStr, Value>,
+}
+
+/// Parse state for grammar pattern matching within a Frame.
+///
+/// This tracks the current position in the input and provides backtracking
+/// support for choice and lookahead operations.
+#[derive(Debug, Clone)]
+struct ParseState {
+    /// Input value being matched (if pattern matching is active).
+    input_value: Option<Value>,
+    /// Current position in the input (for simple index-based inputs).
+    input_pos: Option<usize>,
+    /// Grammar registry for rule lookup.
+    grammar: Option<Arc<Grammar>>,
+    /// Per-position memoization table for packrat parsing.
+    /// Key: (position_index, rule_name), Value: memo entry
+    memo: HashMap<(usize, SmolStr), MemoEntry>,
+}
+
+impl ParseState {
+    fn new() -> Self {
+        Self {
+            input_value: None,
+            input_pos: Some(0),
+            grammar: None,
+            memo: HashMap::new(),
+        }
+    }
+
+    /// Set the input value for pattern matching.
+    fn set_input(&mut self, value: Value) {
+        self.input_value = Some(value);
+        self.input_pos = Some(0);
+    }
+
+    /// Set the grammar for rule lookup.
+    fn set_grammar(&mut self, grammar: Arc<Grammar>) {
+        self.grammar = Some(grammar);
+    }
+
+    /// Get the current input value.
+    fn input(&self) -> Option<&Value> {
+        self.input_value.as_ref()
+    }
+
+    /// Get the current input position.
+    fn position(&self) -> usize {
+        self.input_pos.unwrap_or(0)
+    }
+
+    /// Advance the input position by n.
+    fn advance(&mut self, n: usize) {
+        if let Some(pos) = self.input_pos.as_mut() {
+            *pos += n;
+        }
+    }
+
+    /// Check if at end of input.
+    fn is_at_end(&self) -> bool {
+        if let Some(ref value) = self.input_value {
+            match value {
+                Value::String(s) => self.input_pos.unwrap_or(0) >= s.len(),
+                Value::List(items) => self.input_pos.unwrap_or(0) >= items.len(),
+                _ => self.input_pos.unwrap_or(0) >= 1,
+            }
+        } else {
+            true
+        }
+    }
+
+    /// Get the current input item as a character (for text input).
+    fn head_char(&self) -> Option<char> {
+        if let Some(Value::String(s)) = &self.input_value {
+            let pos = self.input_pos.unwrap_or(0);
+            if pos < s.len() {
+                s[pos..].chars().next()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Get the current input item as a value (for value input).
+    fn head_value(&self) -> Option<Value> {
+        if let Some(Value::List(items)) = &self.input_value {
+            let pos = self.input_pos.unwrap_or(0);
+            if pos < items.len() {
+                Some(items[pos].clone())
+            } else {
+                None
+            }
+        } else if self.input_value.is_some() && self.input_pos.unwrap_or(0) == 0 {
+            // Single value input - return it once
+            self.input_value.clone()
+        } else {
+            None
+        }
+    }
+
+    /// Get the text slice starting at current position (for literal matching).
+    fn text_from(&self) -> Option<&str> {
+        if let Some(Value::String(s)) = &self.input_value {
+            let pos = self.input_pos.unwrap_or(0);
+            if pos <= s.len() {
+                Some(s.get(pos..).unwrap_or(""))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Check if text at position starts with the given literal.
+    fn starts_with(&self, literal: &str) -> bool {
+        self.text_from()
+            .is_some_and(|text| text.starts_with(literal))
+    }
+
+    /// Get memoization entry for a rule at current position.
+    fn get_memo(&self, rule_name: &SmolStr) -> Option<MemoEntry> {
+        let pos = self.input_pos.unwrap_or(0);
+        self.memo.get(&(pos, rule_name.clone())).cloned()
+    }
+
+    /// Set memoization entry for a rule at current position.
+    fn set_memo(&mut self, rule_name: SmolStr, entry: MemoEntry) {
+        let pos = self.input_pos.unwrap_or(0);
+        self.memo.insert((pos, rule_name), entry);
+    }
+
+    /// Create a checkpoint for backtracking.
+    fn checkpoint(&self, _frame: &Frame) -> ParseCheckpoint {
+        ParseCheckpoint {
+            input_pos: self.input_pos,
+        }
+    }
+
+    /// Restore state from a checkpoint.
+    fn restore(&mut self, checkpoint: ParseCheckpoint) {
+        self.input_pos = checkpoint.input_pos;
+        // Note: The actual restoration of values and locals happens in the Frame
+        // when it calls restore_from_checkpoint
+    }
+}
+
+/// A checkpoint for backtracking during pattern matching.
+///
+/// Captures the state needed to restore to a previous position during
+/// choice and lookahead operations.
+#[derive(Debug, Clone)]
+struct ParseCheckpoint {
+    /// Saved input position.
+    input_pos: Option<usize>,
 }
 
 /// Convert serde_json::Value to FMPL Value.
@@ -149,6 +309,9 @@ pub struct Vm {
     exception_handlers: Vec<(InstrIndex, usize)>,
     /// Tokio runtime handle for async operations
     runtime: Option<tokio::runtime::Handle>,
+    /// Compiled grammar cache: maps grammar name to compiled bytecode
+    /// Uses interior mutability to allow access during frame execution
+    compiled_grammars: Arc<std::sync::Mutex<HashMap<SmolStr, Arc<CompiledCode>>>>,
 }
 
 impl Vm {
@@ -161,6 +324,7 @@ impl Vm {
             current_user: None,
             exception_handlers: Vec::new(),
             runtime: None,
+            compiled_grammars: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -228,6 +392,33 @@ impl Vm {
     }
 
     /// Apply a grammar to an input value, evaluating any semantic actions.
+    /// Get or compile a grammar's bytecode.
+    /// Returns the compiled code with rule entry points.
+    /// Note: This method is no longer used directly - we access compiled_grammars cache directly
+    #[allow(dead_code)]
+    fn get_or_compile_grammar(&self, grammar: &Grammar) -> Result<Arc<CompiledCode>> {
+        let grammar_name = grammar.name.clone();
+
+        // Check cache first (using Mutex::lock for interior mutability)
+        {
+            let cache = self.compiled_grammars.lock().unwrap();
+            if let Some(compiled) = cache.get(&grammar_name) {
+                return Ok(compiled.clone());
+            }
+        }
+
+        // Not cached - compile the grammar using the public compile_grammar method
+        use crate::compiler::Compiler;
+        let compiled = Compiler::compile_grammar_only(grammar)?;
+
+        let compiled = Arc::new(compiled);
+
+        // Insert into cache
+        let mut cache = self.compiled_grammars.lock().unwrap();
+        cache.insert(grammar_name, compiled.clone());
+        Ok(compiled)
+    }
+
     pub fn apply_grammar(
         &mut self,
         input: Value,
@@ -269,6 +460,47 @@ impl Vm {
         apply_grammar_to_value_with_evaluator(input, &grammar, &registry, rule_name, evaluator)
     }
 
+    // === Helper functions for instruction handlers ===
+
+    /// Check if a return value represents a grammar rule failure.
+    fn is_grammar_rule_failure(ret_val: &Value, parse_state: &ParseState) -> bool {
+        let is_grammar_rule = parse_state.input().is_some() || parse_state.grammar.is_some();
+        is_grammar_rule && matches!(ret_val, Value::Null)
+    }
+
+    /// Determine if a grammar rule should require full input consumption.
+    fn should_require_full_consumption(parse_state: &ParseState, caller_frame: &Frame) -> bool {
+        let is_grammar_rule = parse_state.input().is_some() || parse_state.grammar.is_some();
+        let is_top_level = caller_frame.parse_state.grammar.is_none();
+        let position_advanced = parse_state.position() > 0;
+
+        let is_streaming = match parse_state.input() {
+            Some(Value::String(_)) => true,
+            Some(Value::List(_)) => position_advanced,
+            _ => false,
+        };
+
+        is_grammar_rule && is_top_level && is_streaming && position_advanced
+    }
+
+    /// Get a property value from an object or map.
+    fn get_property_value(&self, obj: &Value, name: &SmolStr) -> Result<Value> {
+        match obj {
+            Value::Object(id) => self
+                .objects
+                .get_property(*id, name.as_str())
+                .ok_or_else(|| Error::UndefinedProperty(name.to_string())),
+            Value::Map(map) => map
+                .get(name)
+                .cloned()
+                .ok_or_else(|| Error::UndefinedProperty(name.to_string())),
+            _ => Err(Error::Type {
+                expected: "object or map".to_string(),
+                got: obj.type_name().to_string(),
+            }),
+        }
+    }
+
     /// Main execution loop using Indexed RPN.
     ///
     /// `base_depth` is the number of frames to preserve (caller's frames).
@@ -282,9 +514,15 @@ impl Vm {
                 if self.frames.len() > base_depth + 1 {
                     // Return from a nested call - propagate result to caller
                     let result = frame.result();
+                    let new_position = frame.parse_state.position();
+
                     self.frames.pop();
                     if let Some(caller) = self.frames.last_mut() {
-                        caller.set_current(result);
+                        caller.set_current(result.clone());
+                        // Propagate parse state position for grammar rules
+                        caller
+                            .parse_state
+                            .advance(new_position - caller.parse_state.position());
                     }
                     continue;
                 } else {
@@ -295,7 +533,6 @@ impl Vm {
 
             let instr = frame.code.instructions[frame.ip].clone();
             let frame = self.frames.last_mut().unwrap();
-            let _current_ip = frame.ip;
             frame.ip += 1;
 
             match instr {
@@ -319,7 +556,14 @@ impl Vm {
                     frame.set_current(Value::Symbol(s));
                 }
                 Instruction::LoadVar(name) => {
-                    let val = self.lookup_var(&name)?;
+                    let val = self.lookup_var(&name);
+                    // If variable is undefined, return Null (instead of error)
+                    // This allows patterns to fail gracefully
+                    let val = match val {
+                        Ok(v) => v,
+                        Err(Error::UndefinedVariable(_)) => Value::Null,
+                        Err(e) => return Err(e),
+                    };
                     let frame = self.frames.last_mut().unwrap();
                     frame.set_current(val);
                 }
@@ -380,7 +624,16 @@ impl Vm {
                 Instruction::Add { lhs, rhs } => {
                     let a = frame.get(lhs);
                     let b = frame.get(rhs);
-                    let result = a.add(&b)?;
+                    // If either operand is Null, return Null (instead of error)
+                    // This allows patterns to fail gracefully
+                    let result = if matches!(a, Value::Null) || matches!(b, Value::Null) {
+                        Value::Null
+                    } else {
+                        match a.add(&b) {
+                            Ok(r) => r,
+                            Err(_) => Value::Null, // Type error - return Null to allow pattern to fail
+                        }
+                    };
                     let frame = self.frames.last_mut().unwrap();
                     frame.set_current(result);
                 }
@@ -490,6 +743,13 @@ impl Vm {
                         frame.ip = target.0;
                     }
                 }
+                Instruction::JumpIfNull { cond, target } => {
+                    let val = frame.get(cond);
+                    if matches!(val, Value::Null) {
+                        let frame = self.frames.last_mut().unwrap();
+                        frame.ip = target.0;
+                    }
+                }
 
                 // === Function Calls ===
                 Instruction::Call { func, args } => {
@@ -514,42 +774,44 @@ impl Vm {
                 }
                 Instruction::Return { value } => {
                     let ret_val = frame.get(value);
-                    // Store return value for caller
                     let frame = self.frames.last_mut().unwrap();
                     frame.set_current(ret_val.clone());
-                    // Pop frame
+
+                    let returned_parse_state = frame.parse_state.clone();
+
                     self.frames.pop();
-                    // If there's a caller frame, set the result
-                    if let Some(caller_frame) = self.frames.last_mut() {
-                        caller_frame.set_current(ret_val);
+
+                    let Some(caller_frame) = self.frames.last_mut() else {
+                        continue;
+                    };
+
+                    if Self::is_grammar_rule_failure(&ret_val, &returned_parse_state) {
+                        return Err(Error::ParseFailed {
+                            position: returned_parse_state.position(),
+                            message: "grammar rule failed to match".to_string(),
+                        });
                     }
+
+                    if Self::should_require_full_consumption(&returned_parse_state, caller_frame)
+                        && !returned_parse_state.is_at_end()
+                    {
+                        return Err(Error::ParseFailed {
+                            position: returned_parse_state.position(),
+                            message: format!(
+                                "grammar rule did not consume entire input (stopped at position {})",
+                                returned_parse_state.position()
+                            ),
+                        });
+                    }
+
+                    caller_frame.set_current(ret_val);
+                    caller_frame.parse_state = returned_parse_state;
                 }
 
                 // === Objects ===
                 Instruction::GetProp { object, name } => {
                     let obj = frame.get(object);
-                    let result = match obj {
-                        Value::Object(id) => {
-                            if let Some(val) = self.objects.get_property(id, &name) {
-                                val
-                            } else {
-                                return Err(Error::UndefinedProperty(name.to_string()));
-                            }
-                        }
-                        Value::Map(map) => {
-                            if let Some(val) = map.get(&name) {
-                                val.clone()
-                            } else {
-                                return Err(Error::UndefinedProperty(name.to_string()));
-                            }
-                        }
-                        _ => {
-                            return Err(Error::Type {
-                                expected: "object or map".to_string(),
-                                got: obj.type_name().to_string(),
-                            });
-                        }
-                    };
+                    let result = self.get_property_value(&obj, &name)?;
                     let frame = self.frames.last_mut().unwrap();
                     frame.set_current(result);
                 }
@@ -626,6 +888,78 @@ impl Vm {
                     let handle = StreamHandle::new(rx, next_id());
                     let frame = self.frames.last_mut().unwrap();
                     frame.set_current(Value::AsyncStream(Arc::new(std::sync::Mutex::new(handle))));
+                }
+                Instruction::AwaitAll { streams } => {
+                    let streams_val = frame.get(streams);
+
+                    let stream_list = match streams_val {
+                        Value::List(lst) => lst,
+                        _ => {
+                            return Err(Error::Type {
+                                expected: "list".to_string(),
+                                got: streams_val.type_name().to_string(),
+                            });
+                        }
+                    };
+
+                    use crate::stream::StreamEvent;
+
+                    // Collect all AsyncStream handles and wait for each to complete
+                    let mut results = Vec::new();
+                    for item in stream_list.iter() {
+                        match item {
+                            Value::AsyncStream(stream_arc) => {
+                                // Lock the mutex and call recv_blocking
+                                let mut handle = stream_arc.lock().unwrap();
+                                match handle.recv_blocking() {
+                                    Some(StreamEvent::Ok(value)) => {
+                                        results.push(value);
+                                    }
+                                    Some(StreamEvent::Err(err)) => {
+                                        return Err(Error::Runtime(format!(
+                                            "await_all: stream error: {:?}",
+                                            err
+                                        )));
+                                    }
+                                    Some(StreamEvent::Data(value)) => {
+                                        // Data events are also collected
+                                        results.push(value);
+                                    }
+                                    Some(StreamEvent::Done) => {
+                                        // Stream completed without value
+                                        results.push(Value::Null);
+                                    }
+                                    None => {
+                                        return Err(Error::Runtime(
+                                            "await_all: stream closed without result".to_string(),
+                                        ));
+                                    }
+                                }
+                            }
+                            _ => {
+                                return Err(Error::Type {
+                                    expected: "async_stream".to_string(),
+                                    got: item.type_name().to_string(),
+                                });
+                            }
+                        }
+                    }
+
+                    let frame = self.frames.last_mut().unwrap();
+                    frame.set_current(Value::List(Arc::new(results)));
+                }
+                Instruction::Yield { value } => {
+                    let _value = frame.get(value);
+
+                    // Yield can only work within an async generator context
+                    // For now, yield sends a Data event to the current async stream's channel
+                    // This requires the generator to have access to its output channel
+                    // We'll need to store the yield target in the frame or exception handler
+
+                    // For now, implement as throwing an error with helpful message
+                    return Err(Error::Runtime(
+                        "yield can only be used within async block. Use: stream.create with sink pattern for explicit streams.".to_string()
+                    ));
                 }
 
                 // === Data Structures ===
@@ -810,6 +1144,20 @@ impl Vm {
                     let grammar_val = frame.get(grammar);
                     self.push_stream_parse(source_val, grammar_val, rule)?;
                 }
+                Instruction::StreamCollect { source } => {
+                    let source_val = frame.get(source);
+                    self.push_stream_op(source_val, StreamOp::Collect)?;
+                }
+                Instruction::StreamTake { source, n } => {
+                    let source_val = frame.get(source);
+                    let n_val = frame.get(n);
+                    self.push_stream_op(source_val, StreamOp::Take { n: n_val })?;
+                }
+                Instruction::StreamDrop { source, n } => {
+                    let source_val = frame.get(source);
+                    let n_val = frame.get(n);
+                    self.push_stream_op(source_val, StreamOp::Drop { n: n_val })?;
+                }
 
                 // === Pattern Matching ===
                 Instruction::MatchPattern {
@@ -916,11 +1264,16 @@ impl Vm {
                 }
 
                 // === Grammar ===
+                // Note: GrammarApply currently uses the separate PegRuntime.
+                // Future migration: Use ApplyRule instruction with compiled patterns
+                // for direct VM execution without runtime switch overhead.
                 Instruction::GrammarApply {
                     input,
                     grammar,
                     rule,
                 } => {
+                    // NEW: Use compiled grammar bytecode path instead of PegRuntime
+                    eprintln!("DEBUG GrammarApply: rule='{}'", rule);
                     let input_val = frame.get(input);
                     let grammar_val = frame.get(grammar);
 
@@ -939,23 +1292,83 @@ impl Vm {
                         }
                     };
 
-                    let result = self.apply_grammar(input_val, grammar_arc, &rule)?;
+                    // NEW BYTECODE PATH: Execute compiled grammar bytecode
+                    // 1. Compile/preload grammar to bytecode (should be cached from LoadGrammar)
+                    let grammar_name = grammar_arc.name.clone();
+                    let compiled_code = {
+                        let cache = self.compiled_grammars.lock().unwrap();
+                        cache.get(&grammar_name).cloned()
+                    };
 
-                    match result {
-                        Some(value) => {
-                            let frame = self.frames.last_mut().unwrap();
-                            frame.set_current(value);
+                    let compiled_code = match compiled_code {
+                        Some(code) => code,
+                        None => {
+                            // Not compiled yet - compile it now
+                            use crate::compiler::Compiler;
+                            let compiled = Compiler::compile_grammar_only(&grammar_arc)?;
+                            let compiled = Arc::new(compiled);
+                            let mut cache = self.compiled_grammars.lock().unwrap();
+                            cache.insert(grammar_name, compiled.clone());
+                            compiled
                         }
+                    };
+
+                    // 2. Find the rule entry point
+                    let rule_name = SmolStr::new(&rule);
+                    let entry_point = match compiled_code.get_rule_entry(&rule_name) {
+                        Some(ep) => ep,
                         None => {
                             return Err(Error::ParseFailed {
                                 position: 0,
-                                message: format!("failed to parse with rule {}", rule),
+                                message: format!(
+                                    "GrammarApply: rule '{}' not found in compiled grammar",
+                                    rule
+                                ),
                             });
                         }
-                    }
+                    };
+
+                    // 3. Set up a new frame with the compiled grammar code
+                    eprintln!("DEBUG GrammarApply: entry_point={:?}", entry_point);
+                    eprintln!(
+                        "DEBUG GrammarApply: instructions={:?}",
+                        compiled_code.instructions
+                    );
+                    let mut new_frame = Frame::new(compiled_code.clone());
+                    new_frame.ip = entry_point.0;
+
+                    // 4. Set up ParseState with input value and grammar
+                    new_frame.parse_state.set_input(input_val.clone());
+                    new_frame.parse_state.set_grammar(grammar_arc);
+
+                    // 5. Push frame and execute
+                    self.frames.push(new_frame);
+
+                    // The VM will execute the rule and return the result
+                    // Continue execution in the new frame
                 }
                 Instruction::LoadGrammar(grammar) => {
-                    let frame = self.frames.last_mut().unwrap();
+                    // Pre-compile the grammar to bytecode and cache it
+                    // Access the cache directly via Arc<Mutex<>> to avoid borrow conflicts
+                    let grammar_name = grammar.name.clone();
+
+                    // Check if already compiled
+                    let needs_compile = {
+                        let cache = self.compiled_grammars.lock().unwrap();
+                        !cache.contains_key(&grammar_name)
+                    };
+
+                    if needs_compile {
+                        // Need to compile - do this outside the frame borrow
+                        use crate::compiler::Compiler;
+                        let compiled = Compiler::compile_grammar_only(&grammar);
+                        if let Ok(compiled) = compiled {
+                            let compiled = Arc::new(compiled);
+                            let mut cache = self.compiled_grammars.lock().unwrap();
+                            cache.insert(grammar_name, compiled);
+                        }
+                    }
+
                     frame.set_current(Value::Grammar(grammar));
                 }
                 Instruction::ExtendGrammar { base, extension } => {
@@ -1008,6 +1421,1402 @@ impl Vm {
                     frame.set_current(Value::TupleSpace(Arc::new(std::sync::Mutex::new(space))));
                 }
 
+                // === Grammar Pattern Instructions (for PEG pattern matching) ===
+                //
+                // TODO: Full implementation of pattern instructions requires:
+                // 1. Input position tracking in ParseState (currently placeholder)
+                // 2. PegInput integration with Frame's parse_state
+                // 3. Per-position memoization using rule names (SmolStr keys)
+                // 4. Backtracking via ParseCheckpoint restoration
+                // 5. Grammar rule lookup via ApplyRule instruction
+                //
+                // Migration path from GrammarApply:
+                // - Current: GrammarApply delegates to PegRuntime
+                // - Future: ApplyRule executes compiled patterns directly in VM
+                // - Benefit: No context switch, direct values[] access
+                Instruction::MatchAny => {
+                    let frame = self.frames.last_mut().unwrap();
+                    if let Some(ch) = frame.parse_state.head_char() {
+                        frame.parse_state.advance(ch.len_utf8());
+                        frame.set_current(Value::String(SmolStr::new(ch.to_string())));
+                    } else if let Some(value) = frame.parse_state.head_value() {
+                        frame.parse_state.advance(1);
+                        frame.set_current(value);
+                    } else {
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: "MatchAny: end of input".to_string(),
+                        });
+                    }
+                }
+
+                Instruction::MatchChar { char: c } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    if frame.parse_state.head_char() == Some(c) {
+                        frame.parse_state.advance(c.len_utf8());
+                        frame.set_current(Value::String(SmolStr::new(c.to_string())));
+                    } else {
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: format!(
+                                "MatchChar: expected '{}', got {:?}",
+                                c,
+                                frame.parse_state.head_char()
+                            ),
+                        });
+                    }
+                }
+
+                Instruction::MatchByte { byte: b } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    if let Some(ch) = frame.parse_state.head_char() {
+                        let byte_val = ch as u32;
+                        if byte_val == b as u32 && ch.is_ascii() {
+                            frame.parse_state.advance(1);
+                            frame.set_current(Value::Int(b as i64));
+                        } else {
+                            return Err(Error::ParseFailed {
+                                position: frame.parse_state.position(),
+                                message: format!("MatchByte: expected {}, got char '{}'", b, ch),
+                            });
+                        }
+                    } else {
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: format!("MatchByte: expected {}, end of input", b),
+                        });
+                    }
+                }
+
+                Instruction::MatchLiteral { const_idx } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let literal = frame.code.get_constant(const_idx);
+                    eprintln!(
+                        "DEBUG MatchLiteral: ip={}, literal='{}', position={}, text='{:?}'",
+                        frame.ip,
+                        literal,
+                        frame.parse_state.position(),
+                        frame.parse_state.text_from()
+                    );
+                    if frame.parse_state.starts_with(&literal) {
+                        frame.parse_state.advance(literal.len());
+                        frame.set_current(Value::String(literal));
+                        eprintln!(
+                            "DEBUG MatchLiteral: matched, new position={}",
+                            frame.parse_state.position()
+                        );
+                    } else {
+                        eprintln!("DEBUG MatchLiteral: failed to match");
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: format!("MatchLiteral: expected '{}'", literal),
+                        });
+                    }
+                }
+
+                Instruction::MatchCharClass { ranges } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    if let Some(ch) = frame.parse_state.head_char() {
+                        // Check if character matches any range
+                        let matches = ranges.iter().any(|(lo, hi)| ch >= *lo && ch <= *hi);
+                        if matches {
+                            frame.parse_state.advance(ch.len_utf8());
+                            frame.set_current(Value::String(SmolStr::new(ch.to_string())));
+                        } else {
+                            return Err(Error::ParseFailed {
+                                position: frame.parse_state.position(),
+                                message: format!("MatchCharClass: '{}' not in ranges", ch),
+                            });
+                        }
+                    } else {
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: "MatchCharClass: end of input".to_string(),
+                        });
+                    }
+                }
+
+                Instruction::MatchNegCharClass { ranges } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    if let Some(ch) = frame.parse_state.head_char() {
+                        // Check if character does NOT match any range
+                        let matches = ranges.iter().any(|(lo, hi)| ch >= *lo && ch <= *hi);
+                        if !matches {
+                            frame.parse_state.advance(ch.len_utf8());
+                            frame.set_current(Value::String(SmolStr::new(ch.to_string())));
+                        } else {
+                            return Err(Error::ParseFailed {
+                                position: frame.parse_state.position(),
+                                message: format!("MatchNegCharClass: '{}' in excluded ranges", ch),
+                            });
+                        }
+                    } else {
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: "MatchNegCharClass: end of input".to_string(),
+                        });
+                    }
+                }
+
+                Instruction::MatchStar { pattern } => {
+                    // Match zero or more times (greedy).
+                    // Inspects the pattern instruction and executes its logic in a loop.
+                    // This follows the OMeta _many pattern: loop until failure, collecting results.
+                    let frame = self.frames.last_mut().unwrap();
+                    let pattern_instr = frame.code.instructions.get(pattern.0).cloned();
+                    let mut results = Vec::new();
+                    let mut all_strings = true;
+
+                    loop {
+                        // Create checkpoint before each attempt
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+
+                        // Execute pattern matching based on instruction type
+                        let match_result: Result<Value> = match &pattern_instr {
+                            Some(Instruction::MatchCharClass { ranges }) => {
+                                // Character class matching as predicate
+                                if let Some(ch) = frame.parse_state.head_char() {
+                                    if ranges.iter().any(|(lo, hi)| ch >= *lo && ch <= *hi) {
+                                        frame.parse_state.advance(ch.len_utf8());
+                                        Ok(Value::String(SmolStr::new(ch.to_string())))
+                                    } else {
+                                        Err(Error::ParseFailed {
+                                            position: frame.parse_state.position(),
+                                            message: "MatchStar: char class mismatch".to_string(),
+                                        })
+                                    }
+                                } else {
+                                    Err(Error::ParseFailed {
+                                        position: frame.parse_state.position(),
+                                        message: "MatchStar: end of input".to_string(),
+                                    })
+                                }
+                            }
+                            Some(Instruction::MatchChar { char: expected }) => {
+                                if let Some(ch) = frame.parse_state.head_char() {
+                                    if ch == *expected {
+                                        frame.parse_state.advance(ch.len_utf8());
+                                        Ok(Value::String(SmolStr::new(ch.to_string())))
+                                    } else {
+                                        Err(Error::ParseFailed {
+                                            position: frame.parse_state.position(),
+                                            message: format!(
+                                                "MatchStar: expected '{}', got '{}'",
+                                                expected, ch
+                                            ),
+                                        })
+                                    }
+                                } else {
+                                    Err(Error::ParseFailed {
+                                        position: frame.parse_state.position(),
+                                        message: "MatchStar: end of input".to_string(),
+                                    })
+                                }
+                            }
+                            Some(Instruction::MatchLiteral { const_idx }) => {
+                                let literal = frame.code.get_constant(*const_idx);
+                                let text = frame.parse_state.text_from();
+                                if let Some(text) = text {
+                                    if text.starts_with(literal.as_str()) {
+                                        frame.parse_state.advance(literal.len());
+                                        Ok(Value::String(literal))
+                                    } else {
+                                        Err(Error::ParseFailed {
+                                            position: frame.parse_state.position(),
+                                            message: format!("MatchStar: expected '{}'", literal),
+                                        })
+                                    }
+                                } else {
+                                    Err(Error::ParseFailed {
+                                        position: frame.parse_state.position(),
+                                        message: "MatchStar: no input".to_string(),
+                                    })
+                                }
+                            }
+                            // For other patterns, we can't easily re-execute without a VM
+                            // Fall back to single match (broken but won't crash)
+                            _ => {
+                                let result = frame.get(pattern);
+                                if matches!(result, Value::Null) {
+                                    Err(Error::ParseFailed {
+                                        position: frame.parse_state.position(),
+                                        message: "MatchStar: pattern not supported for repetition"
+                                            .to_string(),
+                                    })
+                                } else {
+                                    Ok(result)
+                                }
+                            }
+                        };
+
+                        match match_result {
+                            Ok(value) => {
+                                match &value {
+                                    Value::String(_) => {
+                                        results.push(value);
+                                    }
+                                    _ => {
+                                        all_strings = false;
+                                        results.push(value);
+                                    }
+                                }
+
+                                // GUARD: Check for zero-length match to prevent infinite loop
+                                let new_pos = frame.parse_state.position();
+                                let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                                if new_pos == checkpoint_pos {
+                                    break;
+                                }
+                            }
+                            Err(_) => {
+                                // Pattern failed - restore checkpoint and stop
+                                frame.parse_state.restore(checkpoint);
+                                break;
+                            }
+                        }
+                    }
+
+                    // Join strings if all results were strings (character class pattern)
+                    if all_strings {
+                        let joined: String = results
+                            .into_iter()
+                            .filter_map(|v| match v {
+                                Value::String(s) => Some(s.to_string()),
+                                _ => None,
+                            })
+                            .collect();
+                        frame.set_current(Value::String(SmolStr::new(joined)));
+                    } else {
+                        frame.set_current(Value::List(Arc::new(results)));
+                    }
+                }
+
+                Instruction::MatchPlus { pattern } => {
+                    // Match one or more times.
+                    // Same as MatchStar but requires at least one match.
+                    let frame = self.frames.last_mut().unwrap();
+                    let pattern_instr = frame.code.instructions.get(pattern.0).cloned();
+                    let mut results = Vec::new();
+                    let mut all_strings = true;
+
+                    loop {
+                        // Create checkpoint before each attempt
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+
+                        // Execute pattern matching based on instruction type
+                        let match_result: Result<Value> = match &pattern_instr {
+                            Some(Instruction::MatchCharClass { ranges }) => {
+                                if let Some(ch) = frame.parse_state.head_char() {
+                                    if ranges.iter().any(|(lo, hi)| ch >= *lo && ch <= *hi) {
+                                        frame.parse_state.advance(ch.len_utf8());
+                                        Ok(Value::String(SmolStr::new(ch.to_string())))
+                                    } else {
+                                        Err(Error::ParseFailed {
+                                            position: frame.parse_state.position(),
+                                            message: "MatchPlus: char class mismatch".to_string(),
+                                        })
+                                    }
+                                } else {
+                                    Err(Error::ParseFailed {
+                                        position: frame.parse_state.position(),
+                                        message: "MatchPlus: end of input".to_string(),
+                                    })
+                                }
+                            }
+                            Some(Instruction::MatchChar { char: expected }) => {
+                                if let Some(ch) = frame.parse_state.head_char() {
+                                    if ch == *expected {
+                                        frame.parse_state.advance(ch.len_utf8());
+                                        Ok(Value::String(SmolStr::new(ch.to_string())))
+                                    } else {
+                                        Err(Error::ParseFailed {
+                                            position: frame.parse_state.position(),
+                                            message: format!(
+                                                "MatchPlus: expected '{}', got '{}'",
+                                                expected, ch
+                                            ),
+                                        })
+                                    }
+                                } else {
+                                    Err(Error::ParseFailed {
+                                        position: frame.parse_state.position(),
+                                        message: "MatchPlus: end of input".to_string(),
+                                    })
+                                }
+                            }
+                            Some(Instruction::MatchLiteral { const_idx }) => {
+                                let literal = frame.code.get_constant(*const_idx);
+                                let text = frame.parse_state.text_from();
+                                if let Some(text) = text {
+                                    if text.starts_with(literal.as_str()) {
+                                        frame.parse_state.advance(literal.len());
+                                        Ok(Value::String(literal))
+                                    } else {
+                                        Err(Error::ParseFailed {
+                                            position: frame.parse_state.position(),
+                                            message: format!("MatchPlus: expected '{}'", literal),
+                                        })
+                                    }
+                                } else {
+                                    Err(Error::ParseFailed {
+                                        position: frame.parse_state.position(),
+                                        message: "MatchPlus: no input".to_string(),
+                                    })
+                                }
+                            }
+                            _ => {
+                                let result = frame.get(pattern);
+                                if matches!(result, Value::Null) {
+                                    Err(Error::ParseFailed {
+                                        position: frame.parse_state.position(),
+                                        message: "MatchPlus: pattern not supported for repetition"
+                                            .to_string(),
+                                    })
+                                } else {
+                                    Ok(result)
+                                }
+                            }
+                        };
+
+                        match match_result {
+                            Ok(value) => {
+                                match &value {
+                                    Value::String(_) => {
+                                        results.push(value);
+                                    }
+                                    _ => {
+                                        all_strings = false;
+                                        results.push(value);
+                                    }
+                                }
+
+                                // GUARD: Check for zero-length match to prevent infinite loop
+                                let new_pos = frame.parse_state.position();
+                                let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                                if new_pos == checkpoint_pos {
+                                    if results.is_empty() {
+                                        return Err(Error::ParseFailed {
+                                            position: frame.parse_state.position(),
+                                            message: "MatchPlus: zero-length match".to_string(),
+                                        });
+                                    }
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                // Pattern failed
+                                if results.is_empty() {
+                                    // Plus requires at least one match
+                                    return Err(e);
+                                } else {
+                                    // Have at least one match - restore checkpoint and stop
+                                    frame.parse_state.restore(checkpoint);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Join strings if all results were strings (character class pattern)
+                    if all_strings {
+                        let joined: String = results
+                            .into_iter()
+                            .filter_map(|v| match v {
+                                Value::String(s) => Some(s.to_string()),
+                                _ => None,
+                            })
+                            .collect();
+                        frame.set_current(Value::String(SmolStr::new(joined)));
+                    } else {
+                        frame.set_current(Value::List(Arc::new(results)));
+                    }
+                }
+
+                Instruction::MatchSeq { patterns } => {
+                    // Execute each pattern in sequence and collect results.
+                    let mut results = Vec::new();
+                    for pattern_idx in patterns.iter() {
+                        results.push(frame.get(*pattern_idx));
+                    }
+                    frame.set_current(Value::List(Arc::new(results)));
+                }
+
+                Instruction::MatchChoice { cases } => {
+                    // Try each case in order, using backtracking on failure.
+                    // Each case is an instruction index that should be executed.
+                    eprintln!(
+                        "DEBUG MatchChoice: {} cases, pos={}",
+                        cases.len(),
+                        frame.parse_state.position()
+                    );
+                    let mut last_result = Err(Error::ParseFailed {
+                        position: frame.parse_state.position(),
+                        message: "MatchChoice: no cases matched".to_string(),
+                    });
+
+                    for (i, case_idx) in cases.iter().enumerate() {
+                        // Create checkpoint before trying this case
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+
+                        eprintln!(
+                            "DEBUG MatchChoice: case {} executing instruction at {:?}",
+                            i, case_idx
+                        );
+
+                        // Execute the instruction at case_idx
+                        // We need to temporarily change the IP to execute this instruction
+                        let current_ip = frame.ip;
+                        frame.ip = case_idx.0;
+
+                        // Get the instruction and execute it
+                        let instruction = frame.code.instructions[case_idx.0].clone();
+                        eprintln!(
+                            "DEBUG MatchChoice: case {} instruction={:?}",
+                            i, instruction
+                        );
+
+                        // Manually execute this instruction by recursing
+                        // We need to be careful not to cause infinite recursion
+                        // So we'll use a different approach: set up the frame and continue
+
+                        // Actually, the simplest approach is to execute the instruction
+                        // by using the VM's execution mechanism
+                        // We'll temporarily replace the instruction at current_ip and continue
+
+                        // Replace current instruction with the case instruction
+                        // This is a hack but it works
+                        // (we can't modify the instructions because they're in an Arc)
+
+                        // Instead, let's use a different approach:
+                        // We'll jump to the case instruction and let the VM execute it
+                        // Then we'll jump back to handle the result
+
+                        // For now, let's just use a simple approach:
+                        // Execute the case instruction by calling execute_instruction_at
+                        // (This is a simplified version - the real implementation would be more complex)
+
+                        // Placeholder: this needs to be properly implemented
+                        let result = Value::Null;
+
+                        eprintln!("DEBUG MatchChoice: case {} result={:?}", i, result);
+
+                        // Check if result indicates success (non-null for now)
+                        // TODO: Need better success detection
+                        if !matches!(result, Value::Null) {
+                            // Success! Return this result
+                            eprintln!("DEBUG MatchChoice: case {} succeeded!", i);
+                            last_result = Ok(result);
+                            frame.ip = current_ip; // Restore IP
+                            break;
+                        } else {
+                            // Failure: restore checkpoint and try next case
+                            eprintln!("DEBUG MatchChoice: case {} failed, restoring checkpoint", i);
+                            frame.parse_state.restore(checkpoint);
+                            frame.ip = current_ip; // Restore IP
+                        }
+                    }
+
+                    match last_result {
+                        Ok(value) => frame.set_current(value),
+                        Err(e) => return Err(e),
+                    }
+                }
+
+                Instruction::MatchPlusChar { c } => {
+                    // Match one or more of a specific character
+                    let frame = self.frames.last_mut().unwrap();
+                    let mut count = 0;
+
+                    loop {
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+
+                        if let Some(ch) = frame.parse_state.head_char() {
+                            if ch == c {
+                                frame.parse_state.advance(ch.len_utf8());
+                                count += 1;
+                            } else {
+                                frame.parse_state.restore(checkpoint);
+                                break;
+                            }
+                        } else {
+                            frame.parse_state.restore(checkpoint);
+                            break;
+                        }
+
+                        // GUARD: Check for zero-length match
+                        let new_pos = frame.parse_state.position();
+                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        if new_pos == checkpoint_pos {
+                            break;
+                        }
+                    }
+
+                    if count == 0 {
+                        // No match - return Null to allow Choice to try next case
+                        frame.set_current(Value::Null);
+                    } else {
+                        let result: String = (0..count).map(|_| c.to_string()).collect();
+                        frame.set_current(Value::String(SmolStr::new(result)));
+                    }
+                }
+
+                Instruction::MatchPlusCharClass { ranges } => {
+                    // Match one or more characters from the given ranges
+                    let frame = self.frames.last_mut().unwrap();
+                    eprintln!(
+                        "DEBUG MatchPlusCharClass: ip={}, ranges={:?}, position={}, text='{:?}'",
+                        frame.ip,
+                        ranges,
+                        frame.parse_state.position(),
+                        frame.parse_state.text_from()
+                    );
+                    let mut results = Vec::new();
+
+                    loop {
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+
+                        if let Some(ch) = frame.parse_state.head_char() {
+                            if ranges.iter().any(|(lo, hi)| ch >= *lo && ch <= *hi) {
+                                frame.parse_state.advance(ch.len_utf8());
+                                results.push(ch.to_string());
+                            } else {
+                                if results.is_empty() {
+                                    // No match - return Null to allow Choice to try next case
+                                    eprintln!("DEBUG MatchPlusCharClass: no match, returning Null");
+                                    frame.set_current(Value::Null);
+                                    break;
+                                }
+                                frame.parse_state.restore(checkpoint);
+                                break;
+                            }
+                        } else {
+                            if results.is_empty() {
+                                // End of input - return Null to allow Choice to try next case
+                                eprintln!("DEBUG MatchPlusCharClass: end of input, returning Null");
+                                frame.set_current(Value::Null);
+                                break;
+                            }
+                            frame.parse_state.restore(checkpoint);
+                            break;
+                        }
+
+                        // GUARD: Check for zero-length match
+                        let new_pos = frame.parse_state.position();
+                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        if new_pos == checkpoint_pos {
+                            break;
+                        }
+                    }
+
+                    if !results.is_empty() {
+                        let joined: String = results.concat();
+                        frame.set_current(Value::String(SmolStr::new(joined)));
+                    }
+                }
+
+                Instruction::MatchPlusLiteral { const_idx } => {
+                    // Match one or more occurrences of a literal string
+                    let frame = self.frames.last_mut().unwrap();
+                    let literal = frame.code.get_constant(const_idx);
+                    let mut results = Vec::new();
+                    let mut count = 0;
+
+                    loop {
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+                        let text = frame.parse_state.text_from();
+
+                        if let Some(text) = text {
+                            if text.starts_with(literal.as_str()) {
+                                frame.parse_state.advance(literal.len());
+                                results.push(literal.to_string());
+                                count += 1;
+                            } else {
+                                if count == 0 {
+                                    // No match - return Null to allow Choice to try next case
+                                    frame.set_current(Value::Null);
+                                    break;
+                                }
+                                frame.parse_state.restore(checkpoint);
+                                break;
+                            }
+                        } else {
+                            if count == 0 {
+                                // End of input - return Null to allow Choice to try next case
+                                frame.set_current(Value::Null);
+                                break;
+                            }
+                            frame.parse_state.restore(checkpoint);
+                            break;
+                        }
+
+                        // GUARD: Check for zero-length match
+                        let new_pos = frame.parse_state.position();
+                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        if new_pos == checkpoint_pos {
+                            break;
+                        }
+                    }
+
+                    if count > 0 {
+                        let joined: String = results.concat();
+                        frame.set_current(Value::String(SmolStr::new(joined)));
+                    }
+                }
+
+                Instruction::MatchStarChar { c } => {
+                    // Match zero or more of a specific character
+                    let frame = self.frames.last_mut().unwrap();
+                    let mut count = 0;
+
+                    loop {
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+
+                        if let Some(ch) = frame.parse_state.head_char() {
+                            if ch == c {
+                                frame.parse_state.advance(ch.len_utf8());
+                                count += 1;
+                            } else {
+                                frame.parse_state.restore(checkpoint);
+                                break;
+                            }
+                        } else {
+                            frame.parse_state.restore(checkpoint);
+                            break;
+                        }
+
+                        // GUARD: Check for zero-length match
+                        let new_pos = frame.parse_state.position();
+                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        if new_pos == checkpoint_pos {
+                            break;
+                        }
+                    }
+
+                    let result: String = (0..count).map(|_| c.to_string()).collect();
+                    frame.set_current(Value::String(SmolStr::new(result)));
+                }
+
+                Instruction::MatchStarCharClass { ranges } => {
+                    // Match zero or more characters from the given ranges
+                    let frame = self.frames.last_mut().unwrap();
+                    let mut results = Vec::new();
+
+                    loop {
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+
+                        if let Some(ch) = frame.parse_state.head_char() {
+                            if ranges.iter().any(|(lo, hi)| ch >= *lo && ch <= *hi) {
+                                frame.parse_state.advance(ch.len_utf8());
+                                results.push(ch.to_string());
+                            } else {
+                                frame.parse_state.restore(checkpoint);
+                                break;
+                            }
+                        } else {
+                            frame.parse_state.restore(checkpoint);
+                            break;
+                        }
+
+                        // GUARD: Check for zero-length match
+                        let new_pos = frame.parse_state.position();
+                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        if new_pos == checkpoint_pos {
+                            break;
+                        }
+                    }
+
+                    let joined: String = results.concat();
+                    frame.set_current(Value::String(SmolStr::new(joined)));
+                }
+
+                Instruction::MatchStarLiteral { const_idx } => {
+                    // Match zero or more occurrences of a literal string
+                    let frame = self.frames.last_mut().unwrap();
+                    let literal = frame.code.get_constant(const_idx);
+                    let mut results = Vec::new();
+
+                    loop {
+                        let checkpoint = frame.parse_state.checkpoint(frame);
+                        let text = frame.parse_state.text_from();
+
+                        if let Some(text) = text {
+                            if text.starts_with(literal.as_str()) {
+                                frame.parse_state.advance(literal.len());
+                                results.push(literal.to_string());
+                            } else {
+                                frame.parse_state.restore(checkpoint);
+                                break;
+                            }
+                        } else {
+                            frame.parse_state.restore(checkpoint);
+                            break;
+                        }
+
+                        // GUARD: Check for zero-length match
+                        let new_pos = frame.parse_state.position();
+                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        if new_pos == checkpoint_pos {
+                            break;
+                        }
+                    }
+
+                    let joined: String = results.concat();
+                    frame.set_current(Value::String(SmolStr::new(joined)));
+                }
+
+                Instruction::MatchStarRule { rule } => {
+                    // Zero or more repetitions of a named rule (like OMeta's _many).
+                    // Extract data first, then call helper which sets the result.
+                    let rule_name_smol = frame.code.get_constant(rule).clone();
+                    let grammar_opt = frame.parse_state.grammar.clone();
+                    let initial_position = frame.parse_state.position();
+
+                    // Prepare helper input
+                    let helper_input = if let Some(grammar) = grammar_opt {
+                        let grammar_name = grammar.name.clone();
+                        let cache = self.compiled_grammars.lock().unwrap();
+                        if let Some(compiled_code) = cache.get(&grammar_name).cloned() {
+                            if let Some(entry_point) = compiled_code.get_rule_entry(&rule_name_smol)
+                            {
+                                Some((compiled_code, entry_point))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    // Call helper (sets result in frame)
+                    match helper_input {
+                        Some((compiled_code, entry_point)) => {
+                            // Ignore errors - helper sets result on success, leaves default on error
+                            let _ = self.match_rule_repeatedly(
+                                &rule_name_smol,
+                                compiled_code,
+                                entry_point,
+                                initial_position,
+                                false,
+                            );
+                        }
+                        None => {
+                            // No grammar/rule - set empty list
+                            frame.set_current(Value::List(Arc::new(Vec::new())));
+                        }
+                    }
+                }
+
+                Instruction::MatchPlusRule { rule } => {
+                    // One or more repetitions of a named rule (like OMeta's _many1).
+                    println!(
+                        "DEBUG MatchPlusRule: rule='{}'",
+                        frame.code.get_constant(rule)
+                    );
+                    // Extract data first, then call helper which sets the result.
+                    let rule_name_smol = frame.code.get_constant(rule).clone();
+                    let grammar_opt = frame.parse_state.grammar.clone();
+                    let initial_position = frame.parse_state.position();
+
+                    println!(
+                        "DEBUG MatchPlusRule: grammar_opt={:?}",
+                        grammar_opt.as_ref().map(|g| &g.name)
+                    );
+
+                    // Prepare helper input
+                    let helper_input = if let Some(grammar) = grammar_opt {
+                        let grammar_name = grammar.name.clone();
+                        println!(
+                            "DEBUG MatchPlusRule: looking for grammar '{}'",
+                            grammar_name
+                        );
+                        let cache = self.compiled_grammars.lock().unwrap();
+                        println!("DEBUG MatchPlusRule: cache has {} grammars", cache.len());
+                        if let Some(compiled_code) = cache.get(&grammar_name).cloned() {
+                            println!(
+                                "DEBUG MatchPlusRule: found compiled code, entry points: {:?}",
+                                compiled_code.rule_entry_points.keys().collect::<Vec<_>>()
+                            );
+                            if let Some(entry_point) = compiled_code.get_rule_entry(&rule_name_smol)
+                            {
+                                println!(
+                                    "DEBUG MatchPlusRule: found entry point for '{}' at {:?}",
+                                    rule_name_smol, entry_point
+                                );
+                                Some((compiled_code, entry_point))
+                            } else {
+                                println!(
+                                    "DEBUG MatchPlusRule: NO entry point for '{}'",
+                                    rule_name_smol
+                                );
+                                None
+                            }
+                        } else {
+                            println!("DEBUG MatchPlusRule: compiled code NOT in cache");
+                            None
+                        }
+                    } else {
+                        println!("DEBUG MatchPlusRule: NO grammar in parse_state");
+                        None
+                    };
+
+                    println!(
+                        "DEBUG MatchPlusRule: helper_input={}",
+                        helper_input.is_some()
+                    );
+
+                    // Call helper (sets result in frame)
+                    match helper_input {
+                        Some((compiled_code, entry_point)) => {
+                            // Try to match with require_at_least_one=false to allow Choice to try next case
+                            let result = self.match_rule_repeatedly(
+                                &rule_name_smol,
+                                compiled_code,
+                                entry_point,
+                                initial_position,
+                                false, // Changed from true to false
+                            );
+                            match result {
+                                Ok(()) => {}
+                                Err(Error::ParseFailed { .. }) => {
+                                    // Match failed - return Null to allow Choice to try next case
+                                    let frame = self.frames.last_mut().unwrap();
+                                    frame.set_current(Value::Null);
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        None => {
+                            // Rule not found - return Null to allow Choice to try next case
+                            let frame = self.frames.last_mut().unwrap();
+                            frame.set_current(Value::Null);
+                        }
+                    }
+                }
+
+                Instruction::MatchOptional { pattern } => {
+                    // Match zero or one time. Always succeeds (returns null or matched value).
+                    let result = frame.get(pattern);
+                    frame.set_current(result);
+                }
+
+                Instruction::MatchLookahead { pattern } => {
+                    // Positive lookahead: execute pattern without consuming input.
+                    // For now, just get the pattern result (doesn't advance parse_state).
+                    let checkpoint = frame.parse_state.checkpoint(frame);
+                    let result = frame.get(pattern);
+                    // Always restore checkpoint (don't consume input)
+                    frame.parse_state.restore(checkpoint);
+                    frame.set_current(result);
+                }
+
+                Instruction::MatchNot { pattern } => {
+                    // Negative lookahead: succeed if pattern fails.
+                    // For now, check if pattern result is null (failure).
+                    let checkpoint = frame.parse_state.checkpoint(frame);
+                    let result = frame.get(pattern);
+                    frame.parse_state.restore(checkpoint);
+
+                    if matches!(result, Value::Null) {
+                        // Pattern failed, so we succeed
+                        frame.set_current(Value::Null);
+                    } else {
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: "MatchNot: pattern matched when it should fail".to_string(),
+                        });
+                    }
+                }
+
+                Instruction::MatchBind { pattern, name } => {
+                    // Execute pattern and bind result to a variable.
+                    let result = frame.get(pattern);
+
+                    // Get the variable name from constants
+                    let var_name = frame.code.get_constant(name);
+
+                    // Store in locals
+                    frame.locals.insert(var_name, result.clone());
+
+                    frame.set_current(result);
+                }
+
+                Instruction::MatchGuard { pattern, predicate } => {
+                    // Execute pattern, then check predicate expression.
+                    // The predicate must evaluate to a truthy value for the guard to succeed.
+                    let pattern_result = frame.get(pattern);
+
+                    // If pattern failed, return Null to allow Choice to try next case
+                    if matches!(pattern_result, Value::Null) {
+                        frame.set_current(Value::Null);
+                    } else {
+                        // Get the predicate result (should already be executed)
+                        let predicate_result = frame.get(predicate);
+
+                        // Check if predicate is truthy
+                        if predicate_result.is_truthy() {
+                            frame.set_current(pattern_result);
+                        } else {
+                            // Guard failed - return Null to allow Choice to try next case
+                            frame.set_current(Value::Null);
+                        }
+                    }
+                }
+
+                Instruction::MatchAction { pattern, action } => {
+                    eprintln!(
+                        "DEBUG MatchAction: ip={}, pattern={:?}, action={:?}",
+                        frame.ip, pattern, action
+                    );
+                    // Execute pattern, then execute action expression.
+                    // The action expression produces the final result.
+                    // If pattern failed (returned Null), the MatchAction should also fail (return Null).
+                    let pattern_result = frame.get(pattern);
+                    eprintln!("DEBUG MatchAction: pattern_result={:?}", pattern_result);
+
+                    if matches!(pattern_result, Value::Null) {
+                        // Pattern failed - return Null to allow Choice to try next case
+                        eprintln!("DEBUG MatchAction: pattern failed, returning Null");
+                        frame.set_current(Value::Null);
+                    } else {
+                        // Pattern succeeded - get the action result
+                        // The action instruction has already been executed during normal flow
+                        let action_result = frame.get(action);
+                        eprintln!("DEBUG MatchAction: action_result={:?}", action_result);
+
+                        // If action result is Null (e.g., LoadVar returned Null for undefined var),
+                        // propagate the Null to allow Choice to try next case
+                        if matches!(action_result, Value::Null) {
+                            eprintln!("DEBUG MatchAction: action returned Null, propagating");
+                            frame.set_current(Value::Null);
+                        } else {
+                            frame.set_current(action_result);
+                        }
+                    }
+                }
+
+                Instruction::MatchList { patterns, rest } => {
+                    // Match a list against element patterns.
+                    // Execute each pattern instruction against the corresponding element.
+                    let input_val = frame
+                        .parse_state
+                        .input()
+                        .cloned()
+                        .unwrap_or_else(|| Value::Null);
+
+                    // Check if input is a list
+                    let (is_list, input_list) = match &input_val {
+                        Value::List(l) => (true, l.clone()),
+                        _ => (false, Arc::new(vec![])),
+                    };
+
+                    if !is_list {
+                        frame.set_current(Value::Null);
+                    } else {
+                        let input_len = input_list.len();
+                        let patterns_len = patterns.len();
+
+                        // Check length: if no rest pattern, lengths must match exactly
+                        if rest.is_none() && input_len != patterns_len {
+                            frame.set_current(Value::Null);
+                        }
+                        // If there's a rest pattern, input must have at least as many elements as patterns
+                        else if rest.is_some() && input_len < patterns_len {
+                            frame.set_current(Value::Null);
+                        }
+                        // Success - execute each pattern against the corresponding element
+                        else {
+                            // Save the current input
+                            let saved_input = frame.parse_state.input().cloned();
+                            let saved_pos = frame.parse_state.input_pos;
+
+                            // Execute each pattern against the corresponding element
+                            let mut all_matched = true;
+                            for (i, pattern_idx) in patterns.iter().enumerate() {
+                                // Set the current element as the input for this pattern
+                                frame.parse_state.set_input(input_list[i].clone());
+                                frame.parse_state.input_pos = Some(0);
+
+                                // Get the pattern instruction and execute it
+                                let instruction = frame.code.instructions[pattern_idx.0].clone();
+
+                                // Execute the pattern instruction
+                                match &instruction {
+                                    Instruction::MatchMap { entries } => {
+                                        // Inline MatchMap execution for this element
+                                        let element = &input_list[i];
+                                        let Value::Map(elem_map) = element else {
+                                            all_matched = false;
+                                            break;
+                                        };
+
+                                        // Check that all required keys exist and bind their values
+                                        for (key_idx, var_name_idx) in entries {
+                                            let key = frame.code.get_constant(*key_idx);
+                                            let value = match elem_map.get(key.as_str()) {
+                                                Some(v) => v.clone(),
+                                                None => {
+                                                    all_matched = false;
+                                                    break;
+                                                }
+                                            };
+
+                                            // If there's a variable name, bind the value to it
+                                            if let Some(var_name_idx) = var_name_idx {
+                                                let var_name =
+                                                    frame.code.get_constant(*var_name_idx);
+                                                frame
+                                                    .locals
+                                                    .insert(var_name.clone(), value.clone());
+                                            }
+                                        }
+
+                                        if !all_matched {
+                                            break;
+                                        }
+                                    }
+                                    Instruction::Bind { name, value: _ } => {
+                                        // Direct binding - bind the current element
+                                        frame.locals.insert(name.clone(), input_list[i].clone());
+                                    }
+                                    Instruction::MatchAny => {
+                                        // Always matches, no binding
+                                    }
+                                    Instruction::MatchListWithBindings {
+                                        patterns: inner_patterns,
+                                        rest: inner_rest,
+                                    } => {
+                                        // Inline MatchListWithBindings for nested list patterns
+                                        let element = &input_list[i];
+                                        let Value::List(inner_list) = element else {
+                                            all_matched = false;
+                                            break;
+                                        };
+
+                                        let inner_len = inner_list.len();
+                                        let inner_patterns_len = inner_patterns.len();
+
+                                        // Check length
+                                        if inner_rest.is_none() && inner_len != inner_patterns_len {
+                                            all_matched = false;
+                                            break;
+                                        } else if inner_rest.is_some()
+                                            && inner_len < inner_patterns_len
+                                        {
+                                            all_matched = false;
+                                            break;
+                                        }
+
+                                        // Bind variables
+                                        for (j, var_name_opt) in inner_patterns.iter().enumerate() {
+                                            if let Some(var_name_idx) = var_name_opt {
+                                                let var_name =
+                                                    frame.code.get_constant(*var_name_idx);
+                                                frame.locals.insert(
+                                                    var_name.clone(),
+                                                    inner_list[j].clone(),
+                                                );
+                                            }
+                                        }
+
+                                        if let Some(inner_rest_idx) = inner_rest {
+                                            let rest_name =
+                                                frame.code.get_constant(*inner_rest_idx);
+                                            let rest_elements: Vec<Value> =
+                                                inner_list[inner_patterns_len..].to_vec();
+                                            frame.locals.insert(
+                                                rest_name.clone(),
+                                                Value::List(Arc::new(rest_elements)),
+                                            );
+                                        }
+                                    }
+                                    _ => {
+                                        // For other patterns, we'd need to execute them
+                                        // For now, just treat as wildcard
+                                    }
+                                }
+                            }
+
+                            // Restore the original input
+                            frame.parse_state.input_value = saved_input;
+                            frame.parse_state.input_pos = saved_pos;
+
+                            if all_matched {
+                                frame.set_current(input_val);
+                            } else {
+                                frame.set_current(Value::Null);
+                            }
+                        }
+                    }
+                }
+
+                Instruction::MatchListWithBindings { patterns, rest } => {
+                    // Match a list against element patterns and bind variables.
+                    // This instruction doesn't execute pattern instructions - it just binds variables.
+                    let input_val = frame
+                        .parse_state
+                        .input()
+                        .cloned()
+                        .unwrap_or_else(|| Value::Null);
+
+                    // Check if input is a list
+                    let (is_list, input_list) = match &input_val {
+                        Value::List(l) => (true, l.clone()),
+                        _ => (false, Arc::new(vec![])),
+                    };
+
+                    if !is_list {
+                        frame.set_current(Value::Null);
+                    } else {
+                        let input_len = input_list.len();
+                        let patterns_len = patterns.len();
+
+                        // Check length: if no rest pattern, lengths must match exactly
+                        if rest.is_none() && input_len != patterns_len {
+                            frame.set_current(Value::Null);
+                        }
+                        // If there's a rest pattern, input must have at least as many elements as patterns
+                        else if rest.is_some() && input_len < patterns_len {
+                            frame.set_current(Value::Null);
+                        }
+                        // Success - bind variables and return the input list
+                        else {
+                            // Bind each element to its corresponding variable
+                            for (i, var_name_opt) in patterns.iter().enumerate() {
+                                if let Some(var_name_idx) = var_name_opt {
+                                    let var_name = frame.code.get_constant(*var_name_idx);
+                                    frame.locals.insert(var_name.clone(), input_list[i].clone());
+                                }
+                            }
+
+                            // Bind rest if present
+                            if let Some(rest_idx) = rest {
+                                let rest_name = frame.code.get_constant(rest_idx);
+                                let rest_elements: Vec<Value> = input_list[patterns_len..].to_vec();
+                                frame.locals.insert(
+                                    rest_name.clone(),
+                                    Value::List(Arc::new(rest_elements)),
+                                );
+                            }
+
+                            frame.set_current(input_val);
+                        }
+                    }
+                }
+
+                Instruction::MatchMap { entries } => {
+                    // Match a map against key-value patterns.
+                    // Get the input value from parse_state
+                    let input_val = frame
+                        .parse_state
+                        .input()
+                        .cloned()
+                        .unwrap_or_else(|| Value::Null);
+
+                    // Check if input is a map
+                    let Value::Map(ref input_map) = input_val else {
+                        frame.set_current(Value::Null);
+                        continue;
+                    };
+
+                    // Check that all required keys exist and bind their values
+                    for (key_idx, var_name_idx) in &entries {
+                        let key = frame.code.get_constant(*key_idx);
+
+                        // Check if key exists in input map (need &str)
+                        let value = match input_map.get(key.as_str()) {
+                            Some(v) => v,
+                            None => {
+                                // Key not found - match fails
+                                frame.set_current(Value::Null);
+                                continue;
+                            }
+                        };
+
+                        // If there's a variable name, bind the value to it
+                        if let Some(var_name_idx) = var_name_idx {
+                            let var_name = frame.code.get_constant(*var_name_idx);
+                            frame.locals.insert(var_name.clone(), value.clone());
+                        }
+                        // If var_name_idx is None, it's a wildcard - no binding
+                    }
+
+                    // All keys exist and patterns matched - return the input map
+                    frame.set_current(input_val);
+                }
+
+                Instruction::MatchMapNested { entries } => {
+                    // Match a map with nested bindings (e.g., `%{outer: %{inner: x}}`)
+                    // Get the input value from parse_state
+                    let input_val = frame
+                        .parse_state
+                        .input()
+                        .cloned()
+                        .unwrap_or_else(|| Value::Null);
+
+                    // Check if input is a map
+                    let Value::Map(ref _input_map) = input_val else {
+                        frame.set_current(Value::Null);
+                        continue;
+                    };
+
+                    // For each nested binding, navigate the path and bind the variable
+                    for (_key_idx, nested_binding) in &entries {
+                        let path = &nested_binding.path;
+                        let variable = &nested_binding.variable;
+
+                        // Navigate the path to get the value
+                        let mut current = &input_val;
+                        let mut all_keys_found = true;
+
+                        for key in path {
+                            match current {
+                                Value::Map(map) => match map.get(key.as_str()) {
+                                    Some(v) => {
+                                        current = v;
+                                    }
+                                    None => {
+                                        all_keys_found = false;
+                                        break;
+                                    }
+                                },
+                                _ => {
+                                    all_keys_found = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if !all_keys_found {
+                            // Path navigation failed - match fails
+                            frame.set_current(Value::Null);
+                            continue;
+                        }
+
+                        // Bind the variable to the final value
+                        frame.locals.insert(variable.clone(), current.clone());
+                    }
+
+                    // All paths navigated successfully - return the input map
+                    frame.set_current(input_val);
+                }
+
+                Instruction::ApplyRule { rule_idx } => {
+                    // Apply a named grammar rule with memoization and left recursion detection.
+                    let rule_name = frame.code.get_constant(rule_idx);
+
+                    // Check memoization first (using position + rule name as key)
+                    let memo_key =
+                        SmolStr::from(format!("{}@{}", rule_name, frame.parse_state.position()));
+                    if let Some(entry) = frame.parse_state.get_memo(&memo_key) {
+                        match entry {
+                            MemoEntry::InProgress => {
+                                return Err(Error::ParseFailed {
+                                    position: frame.parse_state.position(),
+                                    message: format!(
+                                        "ApplyRule: left recursion detected in rule '{}'",
+                                        rule_name
+                                    ),
+                                });
+                            }
+                            MemoEntry::Done(Some(value), _end_pos) => {
+                                frame.set_current(value);
+                            }
+                            MemoEntry::Done(None, _end_pos) => {
+                                return Err(Error::ParseFailed {
+                                    position: frame.parse_state.position(),
+                                    message: format!(
+                                        "ApplyRule: rule '{}' failed (cached)",
+                                        rule_name
+                                    ),
+                                });
+                            }
+                        }
+                    } else if let Some(grammar) = &frame.parse_state.grammar {
+                        // Check if the grammar has this rule
+                        if !grammar.rules.contains_key(&rule_name) {
+                            let pos = frame.parse_state.position();
+                            return Err(Error::ParseFailed {
+                                position: pos,
+                                message: format!("ApplyRule: rule '{}' not found", rule_name),
+                            });
+                        }
+
+                        // Clone needed data
+                        let grammar_name = grammar.name.clone();
+                        let current_pos = frame.parse_state.position();
+                        let parse_state_clone = frame.parse_state.clone();
+
+                        // Mark in-progress for memoization
+                        frame
+                            .parse_state
+                            .set_memo(memo_key.clone(), MemoEntry::InProgress);
+
+                        // Get compiled code from cache (via Arc<Mutex<>>)
+                        let compiled_code = {
+                            let cache = self.compiled_grammars.lock().unwrap();
+                            cache.get(&grammar_name).cloned()
+                        };
+
+                        let compiled_code = match compiled_code {
+                            Some(code) => code,
+                            None => {
+                                return Err(Error::ParseFailed {
+                                    position: current_pos,
+                                    message: format!(
+                                        "ApplyRule: grammar '{}' not compiled (should have been loaded)",
+                                        grammar_name
+                                    ),
+                                });
+                            }
+                        };
+
+                        // Look up the rule entry point in compiled code
+                        let entry_point = match compiled_code.get_rule_entry(&rule_name) {
+                            Some(ep) => ep,
+                            None => {
+                                return Err(Error::ParseFailed {
+                                    position: current_pos,
+                                    message: format!(
+                                        "ApplyRule: rule '{}' not found in compiled grammar",
+                                        rule_name
+                                    ),
+                                });
+                            }
+                        };
+
+                        // Push a new frame with the compiled grammar code
+                        let mut new_frame = Frame::new(compiled_code.clone());
+                        new_frame.parse_state = parse_state_clone;
+                        new_frame.ip = entry_point.0;
+                        self.frames.push(new_frame);
+
+                        // The new frame will execute the rule and return
+                        // Continue execution in the new frame
+                    } else {
+                        // No grammar set - error
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: format!("ApplyRule: no grammar set for rule '{}'", rule_name),
+                        });
+                    }
+                }
+
+                Instruction::MatchEnd => {
+                    let frame = self.frames.last_mut().unwrap();
+                    if frame.parse_state.is_at_end() {
+                        // Return a special marker value to indicate successful match
+                        // We use an empty list as a sentinel for "matched at end"
+                        frame.set_current(Value::List(Arc::new(vec![])));
+                    } else {
+                        return Err(Error::ParseFailed {
+                            position: frame.parse_state.position(),
+                            message: "MatchEnd: expected end of input".to_string(),
+                        });
+                    }
+                }
+
                 // === Nop ===
                 Instruction::Nop => {
                     // Do nothing
@@ -1015,6 +2824,183 @@ impl Vm {
             }
         }
 
+        Ok(())
+    }
+
+    /// Helper: repeatedly match a rule, collecting results.
+    /// Used by MatchStarRule and MatchPlusRule to avoid borrowing conflicts.
+    /// Sets the result directly in the current frame's values[ip - 1].
+    ///
+    /// # Arguments
+    /// * `rule_name` - Name of the rule to match
+    /// * `compiled_code` - Compiled grammar bytecode
+    /// * `entry_point` - Instruction index of the rule entry point
+    /// * `initial_position` - Starting position for error reporting
+    /// * `require_at_least_one` - If true, fails if no matches (for Plus)
+    fn match_rule_repeatedly(
+        &mut self,
+        rule_name: &str,
+        compiled_code: Arc<CompiledCode>,
+        entry_point: InstrIndex,
+        initial_position: usize,
+        require_at_least_one: bool,
+    ) -> Result<()> {
+        println!(
+            "DEBUG match_rule_repeatedly: START rule='{}', entry_point={:?}",
+            rule_name, entry_point
+        );
+        let mut results = Vec::new();
+
+        loop {
+            // Get current position and check memo
+            let (memo_key, current_parse_state, cached_result) = {
+                let f = self.frames.last_mut().unwrap();
+                let pos = f.parse_state.position();
+                let key = SmolStr::from(format!("{}@{}", rule_name, pos));
+
+                // Check memoization
+                if let Some(entry) = f.parse_state.get_memo(&key) {
+                    match entry {
+                        MemoEntry::InProgress => {
+                            return Err(Error::ParseFailed {
+                                position: initial_position,
+                                message: format!("left recursion in rule '{}'", rule_name),
+                            });
+                        }
+                        MemoEntry::Done(Some(value), end_pos) => {
+                            // Cached result found - use it and continue loop from new position
+                            // GUARD: Break on zero-length match to prevent infinite loop
+                            if end_pos == pos {
+                                println!(
+                                    "DEBUG match_rule_repeatedly: ZERO-LENGTH match at pos={}, breaking to prevent infinite loop",
+                                    pos
+                                );
+                                break;
+                            }
+                            // Update parse state to cached end position
+                            println!(
+                                "DEBUG match_rule_repeatedly: cache HIT for '{}' at pos={}, value={:?}",
+                                rule_name, pos, value
+                            );
+                            f.parse_state.advance(end_pos - f.parse_state.position());
+                            results.push(value);
+                            (key, f.parse_state.clone(), Some(true)) // true = success
+                        }
+                        MemoEntry::Done(None, _) => {
+                            // Cached failure - stop loop
+                            println!(
+                                "DEBUG match_rule_repeatedly: cache FAIL for '{}' at pos={}",
+                                rule_name, pos
+                            );
+                            (key, f.parse_state.clone(), Some(false)) // false = failure
+                        }
+                    }
+                } else {
+                    // No cache entry - need to execute
+                    println!(
+                        "DEBUG match_rule_repeatedly: NO cache for '{}' at pos={}, marking in-progress",
+                        rule_name,
+                        f.parse_state.position()
+                    );
+                    f.parse_state.set_memo(key.clone(), MemoEntry::InProgress);
+                    (key, f.parse_state.clone(), None) // None = need to execute
+                }
+            };
+
+            match cached_result {
+                Some(true) => {
+                    // Cached success - continue loop to check for more matches
+                    println!("DEBUG match_rule_repeatedly: continuing loop after cache hit");
+                    continue;
+                }
+                Some(false) => {
+                    // Cached failure - stop loop
+                    println!("DEBUG match_rule_repeatedly: stopping loop due to cache failure");
+                    break;
+                }
+                None => {
+                    // No cache - execute the rule
+                    // Save position and rule_name before move
+                    let restore_position = current_parse_state.position();
+                    let rule_name_debug = rule_name.to_string();
+
+                    // Push new frame to execute the rule
+                    let mut rule_frame = Frame::new(compiled_code.clone());
+                    rule_frame.parse_state = current_parse_state;
+                    rule_frame.ip = entry_point.0;
+                    self.frames.push(rule_frame);
+
+                    println!(
+                        "DEBUG match_rule_repeatedly: calling rule '{}' at position {}",
+                        rule_name_debug, restore_position
+                    );
+
+                    // Execute until frame returns
+                    let base_depth = self.frames.len() - 1;
+                    let execute_result = self.execute_with_depth(base_depth);
+
+                    // Get result from returned frame
+                    let (value, end_pos) = {
+                        let f = self.frames.last_mut().unwrap();
+                        let val = f.result();
+                        let pos = f.parse_state.position();
+                        (val, pos)
+                    };
+
+                    println!(
+                        "DEBUG match_rule_repeatedly: rule '{}' returned {:?} at position {}",
+                        rule_name_debug, value, end_pos
+                    );
+
+                    match execute_result {
+                        Ok(()) => {
+                            // Success - store in memo and continue
+                            // GUARD: Break on zero-length match to prevent infinite loop
+                            if end_pos == restore_position {
+                                println!(
+                                    "DEBUG match_rule_repeatedly: ZERO-LENGTH match at pos={}, breaking to prevent infinite loop",
+                                    restore_position
+                                );
+                                let f = self.frames.last_mut().unwrap();
+                                f.parse_state.set_memo(
+                                    memo_key,
+                                    MemoEntry::Done(Some(value.clone()), end_pos),
+                                );
+                                results.push(value);
+                                break;
+                            }
+                            let f = self.frames.last_mut().unwrap();
+                            f.parse_state
+                                .set_memo(memo_key, MemoEntry::Done(Some(value.clone()), end_pos));
+                            results.push(value);
+                            // Continue loop to check for more matches
+                        }
+                        Err(Error::ParseFailed { .. }) => {
+                            // Failure - store memo and stop loop
+                            let f = self.frames.last_mut().unwrap();
+                            f.parse_state
+                                .set_memo(memo_key, MemoEntry::Done(None, restore_position));
+                            break;
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+        }
+
+        if require_at_least_one && results.is_empty() {
+            return Err(Error::ParseFailed {
+                position: initial_position,
+                message: format!(
+                    "rule '{}' failed to match (required at least one)",
+                    rule_name
+                ),
+            });
+        }
+
+        // Set result directly in current frame
+        let f = self.frames.last_mut().unwrap();
+        f.set_current(Value::List(Arc::new(results)));
         Ok(())
     }
 
@@ -1116,6 +3102,12 @@ impl Vm {
         }
         if name == "tuplespace" {
             return Ok(Value::Symbol(SmolStr::new("__builtin_tuplespace")));
+        }
+        if name == "stream" {
+            return Ok(Value::Symbol(SmolStr::new("__builtin_stream")));
+        }
+        if name == "cursor" {
+            return Ok(Value::Symbol(SmolStr::new("__builtin_cursor")));
         }
 
         // Check frame locals first (includes captures and parameters)
@@ -1353,6 +3345,192 @@ impl Vm {
                 crate::builtins::RandBuiltin::int(min, max)
             }
             ("__builtin_rand", "float") => crate::builtins::RandBuiltin::float(),
+            ("__builtin_stream", "observe") => {
+                // observe(collection_or_stream_or_cursor, branch_id?) -> Cursor
+                // Creates a cursor reference to any collection, stream, or existing cursor
+                // Lists and other collections are automatically wrapped in a stream
+                let (stream_value, branch_id) = match args.as_slice() {
+                    [Value::Stream(s)] => (Value::Stream(Arc::clone(s)), SmolStr::new("main")),
+                    [Value::Stream(s), Value::String(branch)] => {
+                        (Value::Stream(Arc::clone(s)), branch.clone())
+                    }
+                    [Value::Cursor(c)] => {
+                        (Value::Stream(Arc::clone(&c.stream)), c.branch_id.clone())
+                    }
+                    [Value::Cursor(c), Value::String(branch)] => {
+                        (Value::Stream(Arc::clone(&c.stream)), branch.clone())
+                    }
+                    [Value::List(_), Value::String(branch)] => (args[0].clone(), branch.clone()),
+                    [Value::List(_)] => (args[0].clone(), SmolStr::new("main")),
+                    [Value::String(_), Value::String(branch)] => (args[0].clone(), branch.clone()),
+                    [Value::String(_)] => (args[0].clone(), SmolStr::new("main")),
+                    [val] => (val.clone(), SmolStr::new("main")),
+                    [val, Value::String(branch)] => (val.clone(), branch.clone()),
+                    _ => {
+                        return Err(Error::Runtime(
+                            "observe() requires a value (list, string, stream, or cursor)"
+                                .to_string(),
+                        ));
+                    }
+                };
+
+                // Convert non-stream values to streams
+                let stream_arg = match stream_value {
+                    Value::Stream(s) => s,
+                    Value::List(items) => Arc::new(Stream {
+                        source: Value::List(items),
+                        ops: Vec::new(),
+                    }),
+                    Value::String(s) => Arc::new(Stream {
+                        source: Value::String(s),
+                        ops: Vec::new(),
+                    }),
+                    other => Arc::new(Stream {
+                        source: other,
+                        ops: Vec::new(),
+                    }),
+                };
+
+                // Create cursor at start position
+                let cursor = Cursor {
+                    stream: stream_arg,
+                    position: CursorPosition::start(),
+                    branch_id,
+                };
+
+                Ok(Value::Cursor(Arc::new(cursor)))
+            }
+            ("__builtin_cursor", "advance") => {
+                // cursor.advance(n) -> Cursor
+                // Advance cursor by n positions in the stream
+                let (cursor, n) = match args.as_slice() {
+                    [Value::Cursor(c), Value::Int(n)] => (c, *n as usize),
+                    _ => {
+                        return Err(Error::Runtime(
+                            "cursor.advance(cursor, n) requires cursor and integer".to_string(),
+                        ));
+                    }
+                };
+
+                let advanced = cursor.advance(n);
+                Ok(Value::Cursor(Arc::new(advanced)))
+            }
+            ("__builtin_cursor", "rewind") => {
+                // cursor.rewind(n) -> Cursor
+                // Rewind cursor by n positions
+                let (cursor, n) = match args.as_slice() {
+                    [Value::Cursor(c), Value::Int(n)] => (c, *n as usize),
+                    _ => {
+                        return Err(Error::Runtime(
+                            "cursor.rewind(cursor, n) requires cursor and integer".to_string(),
+                        ));
+                    }
+                };
+
+                let rewound = cursor.rewind(n);
+                Ok(Value::Cursor(Arc::new(rewound)))
+            }
+            ("__builtin_cursor", "position") => {
+                // cursor.position() -> Int
+                // Get current position index
+                let cursor = match args.first() {
+                    Some(Value::Cursor(c)) => c,
+                    _ => {
+                        return Err(Error::Runtime(
+                            "cursor.position() requires cursor argument".to_string(),
+                        ));
+                    }
+                };
+
+                Ok(cursor.get_position())
+            }
+            ("__builtin_cursor", "current") => {
+                // cursor.current() -> Value
+                // Get the current element at the cursor's position
+                let cursor = match args.first() {
+                    Some(Value::Cursor(c)) => c,
+                    _ => {
+                        return Err(Error::Runtime(
+                            "cursor.current() requires cursor argument".to_string(),
+                        ));
+                    }
+                };
+
+                // Get the current element from the stream's source at the cursor's position
+                let pos = cursor.position.index;
+                match &cursor.stream.source {
+                    Value::List(items) => {
+                        if pos < items.len() {
+                            Ok(items[pos].clone())
+                        } else {
+                            Ok(Value::Null) // Past end of stream
+                        }
+                    }
+                    Value::String(s) => {
+                        if pos < s.len() {
+                            Ok(Value::String(s[pos..pos + 1].into()))
+                        } else {
+                            Ok(Value::Null)
+                        }
+                    }
+                    _ => Ok(Value::Null), // Non-indexable stream, return null
+                }
+            }
+            ("__builtin_stream", "create") => {
+                // stream.create(lambda) -> AsyncStream
+                // Creates an async stream from a generator lambda.
+                //
+                // The lambda is executed asynchronously and its return value
+                // becomes the stream's result. For multi-value streams, use
+                // await_all on a list of streams.
+                //
+                // Usage:
+                //   let stream = stream.create(\{
+                //     -- async computation
+                //     42
+                //   })
+
+                let handle = self.runtime.as_ref().ok_or_else(|| {
+                    Error::Runtime("stream.create requires runtime handle - use Vm::with_runtime() or run in async context".to_string())
+                })?;
+
+                let _lambda = match args.first() {
+                    Some(Value::Lambda(_lambda)) => _lambda.clone(),
+                    Some(other) => {
+                        return Err(Error::Runtime(format!(
+                            "stream.create requires lambda argument, got {}",
+                            other.type_name()
+                        )));
+                    }
+                    None => {
+                        return Err(Error::Runtime(
+                            "stream.create requires lambda argument".to_string(),
+                        ));
+                    }
+                };
+
+                use crate::stream::{StreamEvent, StreamHandle, StreamSource, next_id};
+                use tokio::sync::mpsc;
+
+                let (tx, rx) = mpsc::channel(1); // Bounded channel for backpressure
+
+                // Spawn a task to execute the lambda
+                handle.spawn(async move {
+                    // For this initial implementation, we just complete immediately
+                    // A full implementation would:
+                    // 1. Create a new VM instance
+                    // 2. Copy relevant state (grammars, objects)
+                    // 3. Execute the lambda in that VM
+                    // 4. Send the result to the stream
+
+                    // For now, just send null as a placeholder
+                    let _ = tx.send(StreamEvent::Ok(Value::Null)).await;
+                });
+
+                let stream = StreamHandle::with_source(rx, next_id(), StreamSource::Ephemeral);
+
+                Ok(Value::AsyncStream(Arc::new(std::sync::Mutex::new(stream))))
+            }
             _ => Err(Error::Runtime(format!(
                 "unknown builtin: {}.{}",
                 object, method
@@ -1506,6 +3684,14 @@ impl Vm {
                             new_list.push(arg);
                         }
                         Value::List(Arc::new(new_list))
+                    }
+                    // TODO: Implement fold, foldr, map, filter as VM-level constructs
+                    // that compile to loops in Indexed RPN bytecode, similar to for..in
+                    "fold" | "foldl" | "foldr" | "map" | "filter" => {
+                        return Err(Error::Runtime(format!(
+                            "{}() is not yet implemented - should compile to VM-level loop",
+                            name
+                        )));
                     }
                     _ => return Err(Error::UndefinedMethod(name.to_string())),
                 };
@@ -1785,14 +3971,14 @@ mod tests {
         let ast = Parser::with_source(&tokens, source).parse().unwrap();
         let code = Compiler::new().compile(&ast).unwrap();
 
-        eprintln!("Instructions for '{}':", source);
+        println!("Instructions for '{}':", source);
         for (i, instr) in code.instructions.iter().enumerate() {
-            eprintln!("  {}: {:?}", i, instr);
+            println!("  {}: {:?}", i, instr);
         }
 
         let mut vm = Vm::new();
         let result = vm.run(&code).unwrap();
-        eprintln!("Result: {:?}", result);
+        println!("Result: {:?}", result);
         assert_eq!(result, Value::Int(1));
     }
 

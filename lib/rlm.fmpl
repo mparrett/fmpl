@@ -1,0 +1,304 @@
+-- Recursive Language Model (RLM) Primitives
+--
+-- Based on "Recursive Language Models" (arXiv:2512.24601)
+-- RLMs treat long prompts as external environment and allow LLMs to
+-- programmatically examine, decompose, and recursively call themselves
+-- on snippets of the prompt.
+--
+-- This enables processing inputs 100x beyond model context windows while
+-- maintaining or improving quality compared to full-context processing.
+--
+-- Usage:
+--   rlm.process(stream, grammar, prompt_fn, aggregate_fn)
+--
+-- Where:
+--   stream: The input stream (text, objects, commands, etc.)
+--   grammar: Pattern to decompose stream into processable snippets
+--   prompt_fn: Function to call LLM on each snippet
+--   aggregate_fn: Function to combine results
+
+-- ============================================================================
+-- Core RLM Processing
+-- ============================================================================
+
+-- Process a stream recursively by decomposing it with a grammar
+--
+-- stream: Input stream to process
+-- grammar: Pattern to match snippets
+-- prompt_fn: (snippet) -> llm_result
+-- aggregate_fn: (result, rest) -> combined
+rlm.process = \stream grammar prompt_fn aggregate_fn
+  -- Create initial cursor on stream
+  let cursor = observe(stream)
+
+  -- Recursive processing function
+  let recurse = \cursor
+    -- Extract current snippet using grammar
+    let snippet = cursor @ grammar
+
+    @ snippet {
+      -- Base case: no more matches
+      null => null,
+
+      -- Recursive case: process snippet and continue
+      match => {
+        -- Call LLM on just this snippet (not full context!)
+        let result = prompt_fn(match)
+
+        -- Advance cursor to next position
+        let next_cursor = cursor.advance(1)
+
+        -- Recursively process rest of stream
+        let rest = recurse(next_cursor)
+
+        -- Aggregate results
+        aggregate_fn(result, rest)
+      }
+    }
+
+  -- Start recursive processing
+  recurse(cursor)
+
+-- ============================================================================
+-- Common Aggregation Functions
+-- ============================================================================
+
+-- Aggregate results into a list (preserves order)
+rlm.aggregate_list = \result rest
+  @ rest {
+    null => [result],
+    list => [result, ...list]
+  }
+
+-- Aggregate results into a string (concatenates)
+rlm.aggregate_string = \result rest
+  @ rest {
+    null => result,
+    str => result + str
+  }
+
+-- Aggregate results by taking first (early termination)
+rlm.aggregate_first = \result rest
+  result  -- Ignore rest, return first result
+
+-- Aggregate results by taking last (overrides previous)
+rlm.aggregate_last = \result rest
+  @ rest {
+    null => result,
+    _ => rest  -- Return last result
+  }
+
+-- Aggregate by counting matches
+rlm.aggregate_count = \result rest
+  @ rest {
+    null => 1,
+    count => 1 + count
+  }
+
+-- ============================================================================
+-- List Operations for RLM Patterns
+-- ============================================================================
+
+-- Partition a list into chunks of size n
+--
+-- list: Input list to partition
+-- n: Size of each chunk (must be > 0)
+--
+-- Returns: List of chunks, where each chunk is a list of up to n elements
+-- Example: chunk([1, 2, 3, 4, 5], 2) => [[1, 2], [3, 4], [5]]
+chunk = \list n
+  -- Helper function that carries the current chunk and accumulated result
+  let recurse = \rest current_chunk acc
+    rest @ {
+      [] => {
+        -- Base case: no more elements, add final chunk if non-empty
+        current_chunk @ {
+          [] => acc,  -- Empty current chunk, just return accumulated
+          _ => [...acc, [current_chunk]]  -- Add final chunk
+        }
+      }
+      [first, ...rest] => {
+        -- Add first element to current chunk
+        let new_chunk = [first, ...current_chunk]
+
+        -- Count elements in new chunk
+        let count = fold (\c _ c + 1, 0, new_chunk)
+
+        count @ {
+          n => {
+            -- Chunk is full, add it to accumulator and start new chunk
+            recurse(rest, [], [...acc, [new_chunk]])
+          }
+          _ => {
+            -- Chunk not full yet, continue building
+            recurse(rest, new_chunk, acc)
+          }
+        }
+      }
+    }
+
+  -- Start recursion with empty current chunk and accumulator
+  recurse(list, [], [])
+
+-- ============================================================================
+-- Async Stream Operations
+-- ============================================================================
+
+-- Wait for all async streams to complete and collect their results
+--
+-- This is a placeholder for the VM builtin await_all.
+-- The actual implementation will be added as a VM instruction.
+--
+-- streams: List of AsyncStream values
+--
+-- Returns: List of results from each stream in order
+-- Example: await_all([<- http.get(url1), <- http.get(url2)]) => [result1, result2]
+--
+-- NOTE: For now, this must be implemented as a VM builtin because:
+-- 1. It needs to poll multiple async streams concurrently
+-- 2. It needs to handle the AsyncStream type directly
+-- 3. It requires runtime integration with the async executor
+--
+-- TODO: Implement as VM builtin Instruction::AwaitAll { streams: Vec<InstrIndex> }
+
+-- ============================================================================
+-- Common RLM Patterns
+-- ============================================================================
+
+-- Summarize a long text by processing it in chunks
+--
+-- text_stream: Long text to summarize
+-- chunk_grammar: Pattern to extract chunks
+-- summary_prompt: Template for summarization prompt
+rlm.summarize_long = \text_stream chunk_grammar summary_prompt
+  rlm.process(
+    text_stream,
+    chunk_grammar,
+    \chunk llm.chat(summary_prompt % chunk),
+    rlm.aggregate_string
+  )
+
+-- Extract structured data from long text
+--
+-- text_stream: Long text containing data
+-- item_grammar: Pattern to extract items
+-- extract_prompt: Template for extraction prompt
+rlm.extract_items = \text_stream item_grammar extract_prompt
+  rlm.process(
+    text_stream,
+    item_grammar,
+    \item llm.chat(extract_prompt % item),
+    rlm.aggregate_list
+  )
+
+-- Process command stream with human oversight
+--
+-- commands: Stream of commands to process
+-- command_grammar: Pattern to match individual commands
+-- approve_prompt: Template for approval prompt
+rlm.process_commands = \commands command_grammar approve_prompt
+  rlm.process(
+    commands,
+    command_grammar,
+    \cmd llm.chat(approve_prompt % cmd),
+    rlm.aggregate_list
+  )
+
+-- ============================================================================
+-- Cursor Primitives (Now implemented as VM builtins)
+-- ============================================================================
+
+-- observe(stream_or_cursor, branch_id?) -> Cursor
+-- Creates a cursor reference to a stream or forks an existing cursor
+-- This is now a VM builtin: stream.observe(cursor) or stream.observe(stream)
+
+-- cursor.advance(n) -> Cursor
+-- Move cursor forward n positions in the stream
+-- VM builtin: cursor.advance(cursor, n)
+
+-- cursor.rewind(n) -> Cursor
+-- Move cursor backward n positions in the stream
+-- VM builtin: cursor.rewind(cursor, n)
+
+-- cursor.position() -> Int
+-- Get current position index
+-- VM builtin: cursor.position(cursor)
+
+-- ============================================================================
+-- Stream Navigation Helpers (built on cursor primitives)
+-- ============================================================================
+
+-- Get the head value at current cursor position
+cursor.head = \cursor
+  -- TODO: Implement when streams support indexed access
+  cursor
+
+-- Get all values from current cursor to end
+cursor.collect = \cursor
+  -- TODO: Implement when streams support indexed access
+  cursor
+
+-- Navigate to parent stream stage (for transformation lineage)
+cursor.upstream = \cursor
+  -- TODO: Implement when transformation lineage is tracked
+  cursor
+
+-- Get full transformation history of cursor's stream
+cursor.trace = \cursor
+  -- TODO: Implement when transformation lineage is tracked
+  cursor
+
+-- ============================================================================
+-- Examples
+-- ============================================================================
+
+-- Example 1: Summarize research notes in chunks
+--
+-- let research_stream = stream.from_file(".agent/research.md")
+-- let summary = rlm.summarize_long(
+--   research_stream,
+--   grammar.paragraph,  -- Extract one paragraph at a time
+--   "Summarize this text: %"
+-- )
+-- print(summary)
+
+-- Example 2: Process planning tasks recursively
+--
+-- let tasks_stream = stream.from_file(".agent/tasks.md")
+-- let processed = rlm.process(
+--   tasks_stream,
+--   grammar.task_item,  -- Extract individual tasks
+--   \task llm.chat("Analyze this task: %" % task),
+--   rlm.aggregate_list
+-- )
+
+-- Example 3: Extract tool calls from LLM output
+--
+-- let llm_output = "<- llm.generate(plan)"
+-- let tool_calls = rlm.extract_items(
+--   llm_output,
+--   grammar.tool_call_pattern,
+--   "Extract tool call from: %"
+-- )
+
+-- ============================================================================
+-- Notes
+-- ============================================================================
+--
+-- Key principles from RLM paper:
+-- 1. Decomposition: Break long inputs into snippets via grammars
+-- 2. Recursion: Process each snippet independently
+-- 3. Aggregation: Combine results in a principled way
+-- 4. Programmability: LLM controls decomposition via prompts
+--
+-- Benefits:
+-- - Handles inputs 100x beyond context window
+-- - Better quality than full-context (less distraction)
+-- - Cheaper per query (smaller prompts)
+-- - More interpretable (clear decomposition)
+--
+-- FMPL advantages:
+-- - Grammars are first-class (powerful decomposition)
+-- - Streams are immutable (safe recursion/branching)
+-- - Cursors enable observation without copying
+-- - Pattern matching unifies parsing and control flow

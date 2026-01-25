@@ -643,6 +643,11 @@ impl<'a> Parser<'a> {
             Token::If => self.parse_if(),
             Token::While => self.parse_while(),
             Token::Do => self.parse_do_while(),
+            Token::For => self.parse_for(),
+            Token::Fold => self.parse_fold(),
+            Token::Foldr => self.parse_foldr(),
+            Token::Map => self.parse_map_each(),
+            Token::Filter => self.parse_filter(),
             Token::Let => self.parse_let(),
             Token::Lambda => self.parse_lambda(),
             Token::Backslash => self.parse_short_lambda(),
@@ -651,8 +656,44 @@ impl<'a> Parser<'a> {
             Token::Match => self.parse_match(),
             Token::Try => self.parse_try_catch(),
             Token::Throw => self.parse_throw(),
-            Token::Stream => self.parse_stream_literal(),
-            Token::Grammar => self.parse_grammar_literal(),
+            Token::Stream => {
+                // Check if this is stream::... (module access)
+                if self.peek_ahead_is_coloncolon() {
+                    self.advance();
+                    let mut parts = vec![SmolStr::new("stream")];
+                    while self.check(&Token::ColonColon) {
+                        self.advance();
+                        parts.push(self.expect_ident()?);
+                    }
+                    Ok(Expr::Qualified(QualifiedName { parts }))
+                } else if self.peek_ahead(1).map(|t| &t.token) == Some(&Token::LBrace) {
+                    // stream { expr } - stream literal
+                    self.parse_stream_literal()
+                } else {
+                    // stream as a bare identifier - refers to the stream builtin
+                    self.advance();
+                    Ok(Expr::Ident(SmolStr::new("stream")))
+                }
+            }
+            Token::Grammar => {
+                // Check if this is grammar::... (module access)
+                if self.peek_ahead_is_coloncolon() {
+                    self.advance();
+                    let mut parts = vec![SmolStr::new("grammar")];
+                    while self.check(&Token::ColonColon) {
+                        self.advance();
+                        parts.push(self.expect_ident()?);
+                    }
+                    Ok(Expr::Qualified(QualifiedName { parts }))
+                } else if self.peek_ahead(1).map(|t| &t.token) == Some(&Token::LBrace) {
+                    // grammar { rules } - grammar literal
+                    self.parse_grammar_literal()
+                } else {
+                    // grammar as a bare identifier - refers to the grammar builtin
+                    self.advance();
+                    Ok(Expr::Ident(SmolStr::new("grammar")))
+                }
+            }
             Token::ColonColon => {
                 // Global qualified name: ::foo::bar
                 self.advance();
@@ -802,7 +843,9 @@ impl<'a> Parser<'a> {
         grammar_parser.parse_match_block()
     }
 
-    /// Parse list literal.
+    /// Parse list literal or list comprehension.
+    /// List literal: [expr1, expr2, ...]
+    /// List comprehension: [expr for var in iterable if condition]
     fn parse_list(&mut self) -> Result<Expr> {
         self.expect(&Token::LBracket)?;
 
@@ -821,6 +864,84 @@ impl<'a> Parser<'a> {
             return Ok(Expr::ListCons(Box::new(first), Box::new(tail)));
         }
 
+        // Check for list comprehension: [expr for var in iterable if condition]
+        if self.check(&Token::For) {
+            self.advance();
+            // Parse variable name
+            let elem_var = self.expect_ident()?;
+            self.expect(&Token::In)?;
+            // Parse iterable
+            let iterable = self.parse_expr()?;
+
+            // Optional filter condition
+            let filter_condition = if self.check(&Token::If) {
+                self.advance();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+
+            self.expect(&Token::RBracket)?;
+
+            // Return MapEach or Filter based on whether there's a condition
+            return match filter_condition {
+                Some(condition) => {
+                    // [expr for x in iterable if condition] is a filter
+                    // But we need to transform the element, not just filter
+                    // So this is actually: map expr, then filter
+                    // For now, let's implement it as: filter with transformation
+                    // We'll need to handle both transformation and filtering
+                    // The simplest approach: map the transformation, then filter
+                    // But that requires two passes. Let's think...
+
+                    // Actually, the syntax [x for x in list if pred] means:
+                    // "give me x where x is in list and pred(x) is true"
+                    // So first_expr is the value to output, elem_var is the loop variable
+                    // If there's a condition, filter by it
+
+                    // For [x * 2 for x in [1,2,3] if x % 2 == 0]:
+                    // - We want to transform (x * 2) and filter (x % 2 == 0)
+                    // - This is map + filter combined
+
+                    // For now, let's implement simple cases:
+                    // [x for x in list] -> map
+                    // [x for x in list if pred] -> filter (no transformation)
+                    // [expr for x in list if pred] -> not yet supported
+
+                    // Check if first expression is just the variable reference
+                    if let Expr::Ident(ref name) = first {
+                        if name == &elem_var {
+                            // Simple filter: [x for x in list if pred]
+                            return Ok(Expr::Filter {
+                                elem_var,
+                                iterable: Box::new(iterable),
+                                body: Box::new(condition),
+                            });
+                        }
+                    }
+
+                    // For [expr for x in list if pred], we need to combine map and filter
+                    // This requires either:
+                    // 1. Two passes (map then filter)
+                    // 2. Inline the transformation and filtering in one loop
+                    // For now, return an error
+                    return Err(Error::Parser {
+                        token: 0,
+                        message: "map + filter comprehensions not yet supported, use map then filter separately".to_string(),
+                    });
+                }
+                None => {
+                    // [expr for x in iterable] is a map
+                    Ok(Expr::MapEach {
+                        elem_var,
+                        iterable: Box::new(iterable),
+                        body: Box::new(first),
+                    })
+                }
+            };
+        }
+
+        // Regular list literal
         let mut items = vec![first];
         while self.check(&Token::Comma) {
             self.advance();
@@ -1025,6 +1146,147 @@ impl<'a> Parser<'a> {
         Ok(Expr::DoWhile(Box::new(body), Box::new(cond)))
     }
 
+    /// Parse for loop: for pattern in iterable { body }
+    fn parse_for(&mut self) -> Result<Expr> {
+        self.expect(&Token::For)?;
+
+        // Parse the pattern (left side of 'in')
+        let pattern = self.parse_pattern()?;
+
+        self.expect(&Token::In)?;
+
+        // Parse the iterable
+        let iterable = self.parse_expr()?;
+
+        // Expect body: either { body } or just body
+        // This matches the grammar: for x in expr { body } or for x in expr body
+        let body = if self.check(&Token::LBrace) {
+            self.advance();
+            let body_expr = self.parse_expr()?;
+            self.expect(&Token::RBrace)?;
+            body_expr
+        } else {
+            self.parse_expr()?
+        };
+
+        Ok(Expr::For(pattern, Box::new(iterable), Box::new(body)))
+    }
+
+    /// Parse fold left: fold func, initial, iterable
+    /// Syntax: fold (\acc \elem acc + elem), 0, [1, 2, 3]
+    fn parse_fold(&mut self) -> Result<Expr> {
+        self.expect(&Token::Fold)?;
+
+        // Parse the function (lambda or function reference)
+        let func = self.parse_expr()?;
+
+        // Expect comma
+        self.expect(&Token::Comma)?;
+
+        // Parse initial value
+        let initial = self.parse_expr()?;
+
+        // Expect comma
+        self.expect(&Token::Comma)?;
+
+        // Parse the iterable
+        let iterable = self.parse_expr()?;
+
+        // We'll store the function and let the compiler handle calling it
+        // The accumulator variable name will be internal (_acc)
+        Ok(Expr::Fold {
+            initial: Box::new(initial),
+            acc_var: SmolStr::new("_acc"),
+            iterable: Box::new(iterable),
+            body: Box::new(func),
+        })
+    }
+
+    /// Parse fold right: foldr func, initial, iterable
+    /// Syntax: foldr (\acc \elem elem * acc), 1, [1, 2, 3]
+    fn parse_foldr(&mut self) -> Result<Expr> {
+        self.expect(&Token::Foldr)?;
+
+        // Parse the function (lambda or function reference)
+        let func = self.parse_expr()?;
+
+        // Expect comma
+        self.expect(&Token::Comma)?;
+
+        // Parse initial value
+        let initial = self.parse_expr()?;
+
+        // Expect comma
+        self.expect(&Token::Comma)?;
+
+        // Parse the iterable
+        let iterable = self.parse_expr()?;
+
+        // We'll store the function and let the compiler handle calling it
+        // The accumulator variable name will be internal (_acc)
+        Ok(Expr::Foldr {
+            initial: Box::new(initial),
+            acc_var: SmolStr::new("_acc"),
+            iterable: Box::new(iterable),
+            body: Box::new(func),
+        })
+    }
+
+    /// Parse map: map <function> <iterable>
+    /// Syntax: map \x x * 2, [1, 2, 3]
+    /// Or: map \x x * 2 in [1, 2, 3]
+    fn parse_map_each(&mut self) -> Result<Expr> {
+        self.expect(&Token::Map)?;
+
+        // Parse the function (lambda or function reference)
+        let func = self.parse_expr()?;
+
+        // Parse separator: comma or 'in'
+        if !self.check(&Token::Comma) && !self.check(&Token::In) {
+            return Err(Error::Parser {
+                token: 0, // position doesn't matter much here
+                message: "expected ',' or 'in' after function in map".to_string(),
+            });
+        }
+        self.advance();
+
+        // Parse the iterable
+        let iterable = self.parse_expr()?;
+
+        Ok(Expr::MapEach {
+            elem_var: SmolStr::new("_elem"), // Will be bound internally
+            iterable: Box::new(iterable),
+            body: Box::new(func), // The function becomes the body
+        })
+    }
+
+    /// Parse filter: filter <predicate> <iterable>
+    /// Syntax: filter \x x % 2 == 0, [1, 2, 3, 4, 5]
+    fn parse_filter(&mut self) -> Result<Expr> {
+        self.expect(&Token::Filter)?;
+
+        // Parse the predicate (lambda or function reference)
+        let pred = self.parse_expr()?;
+
+        // Parse separator: comma or 'in'
+        if !self.check(&Token::Comma) && !self.check(&Token::In) {
+            return Err(Error::Parser {
+                token: 0,
+                message: "expected ',' or 'in' after predicate in filter".to_string(),
+            });
+        }
+        self.advance();
+
+        // Parse the iterable
+        let iterable = self.parse_expr()?;
+
+        Ok(Expr::Filter {
+            elem_var: SmolStr::new("_elem"), // Will be bound internally
+            iterable: Box::new(iterable),
+            body: Box::new(pred), // The predicate becomes the body
+        })
+    }
+
     /// Parse let expression.
     fn parse_let(&mut self) -> Result<Expr> {
         self.expect(&Token::Let)?;
@@ -1088,7 +1350,7 @@ impl<'a> Parser<'a> {
     /// Parse short lambda (\x expr).
     fn parse_short_lambda(&mut self) -> Result<Expr> {
         self.expect(&Token::Backslash)?;
-        let param = self.expect_ident()?;
+        let param = self.expect_ident_or_underscore()?;
         let body = self.parse_expr()?;
         Ok(Expr::ShortLambda(param, Box::new(body)))
     }
@@ -1340,6 +1602,11 @@ impl<'a> Parser<'a> {
         matches!(self.peek_token(), Some(Token::Ident(s)) if s == name)
     }
 
+    /// Check if the next token is ColonColon (for module qualification like stream::foo)
+    fn peek_ahead_is_coloncolon(&self) -> bool {
+        self.peek_ahead(1).map(|t| &t.token) == Some(&Token::ColonColon)
+    }
+
     /// Check if current position is a symbol key (Symbol followed by Colon)
     fn check_symbol_key(&self) -> bool {
         matches!(self.peek_token(), Some(Token::Symbol(_)))
@@ -1363,6 +1630,22 @@ impl<'a> Parser<'a> {
                 Ok(s)
             }
             _ => Err(self.error("expected identifier")),
+        }
+    }
+
+    /// Expect an identifier or underscore (for lambda parameters that can use _ as wildcard)
+    fn expect_ident_or_underscore(&mut self) -> Result<SmolStr> {
+        match self.peek_token() {
+            Some(Token::Ident(s)) => {
+                let s = s.clone();
+                self.advance();
+                Ok(s)
+            }
+            Some(Token::Underscore) => {
+                self.advance();
+                Ok(SmolStr::new("_"))
+            }
+            _ => Err(self.error("expected identifier or underscore")),
         }
     }
 
@@ -1543,6 +1826,89 @@ mod tests {
             assert!(matches!(bindings[0], LetBinding::Destructure(_, _)));
         } else {
             panic!("expected Let");
+        }
+    }
+
+    #[test]
+    fn test_nested_short_lambda() {
+        let expr = parse(r#"\x \y x + y"#).unwrap();
+        if let Expr::ShortLambda(_, body) = expr {
+            if let Expr::ShortLambda(_, inner_body) = *body {
+                assert!(matches!(*inner_body, Expr::Binary(_, _, _)));
+            } else {
+                panic!("expected inner ShortLambda");
+            }
+        } else {
+            panic!("expected ShortLambda");
+        }
+    }
+
+    #[test]
+    fn test_parenthesized_nested_short_lambda() {
+        let expr = parse(r#"(\x \y x + y)"#).unwrap();
+        // Should be the same as unparsed version
+        if let Expr::ShortLambda(_, body) = expr {
+            if let Expr::ShortLambda(_, inner_body) = *body {
+                assert!(matches!(*inner_body, Expr::Binary(_, _, _)));
+            } else {
+                panic!("expected inner ShortLambda");
+            }
+        } else {
+            panic!("expected ShortLambda");
+        }
+    }
+
+    #[test]
+    fn test_lambda_followed_by_number() {
+        let expr = parse(r#"(\x x + 1) 0"#).unwrap();
+        // Lambda followed by a number - should parse as sequence
+        if let Expr::Sequence(exprs) = expr {
+            assert_eq!(exprs.len(), 2);
+        } else {
+            panic!("expected Sequence");
+        }
+    }
+
+    #[test]
+    fn test_fold_with_curried_lambda() {
+        let expr = parse(r#"fold (\acc \elem acc + elem), 0, [1, 2, 3]"#).unwrap();
+        if let Expr::Fold {
+            initial,
+            acc_var,
+            iterable,
+            body,
+        } = expr
+        {
+            assert!(matches!(*initial, Expr::Int(0)));
+            assert_eq!(acc_var, "_acc");
+            assert!(matches!(*iterable, Expr::List(_)));
+            // Body should be a nested ShortLambda
+            if let Expr::ShortLambda(_, inner_body) = *body {
+                if let Expr::ShortLambda(_, innermost_body) = *inner_body {
+                    assert!(matches!(*innermost_body, Expr::Binary(_, _, _)));
+                } else {
+                    panic!("expected inner ShortLambda in fold body");
+                }
+            } else {
+                panic!("expected ShortLambda as fold body");
+            }
+        } else {
+            panic!("expected Fold");
+        }
+    }
+
+    #[test]
+    fn test_curried_lambda_syntax() {
+        // Verify that curried lambdas parse correctly
+        let expr = parse(r#"\acc \elem acc + elem"#).unwrap();
+        if let Expr::ShortLambda(_, body) = expr {
+            if let Expr::ShortLambda(_, inner_body) = *body {
+                assert!(matches!(*inner_body, Expr::Binary(_, _, _)));
+            } else {
+                panic!("expected inner ShortLambda");
+            }
+        } else {
+            panic!("expected ShortLambda");
         }
     }
 }

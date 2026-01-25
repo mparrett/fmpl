@@ -189,6 +189,38 @@ pub enum Expr {
     While(Box<Expr>, Box<Expr>),
     /// Do-while loop.
     DoWhile(Box<Expr>, Box<Expr>),
+    /// For loop: for pattern in iterable { body }
+    For(Pattern, Box<Expr>, Box<Expr>),
+    /// Fold left: fold initial, acc in iterable { body }
+    /// Accumulates left-to-right: fold 0, acc in [1,2,3] { acc + x }
+    Fold {
+        initial: Box<Expr>,
+        acc_var: SmolStr,
+        iterable: Box<Expr>,
+        body: Box<Expr>,
+    },
+    /// Fold right: foldr initial, acc in iterable { body }
+    /// Accumulates right-to-left: foldr 1, acc in [1,2,3] { x * acc }
+    Foldr {
+        initial: Box<Expr>,
+        acc_var: SmolStr,
+        iterable: Box<Expr>,
+        body: Box<Expr>,
+    },
+    /// Map each element: map x in iterable { body }
+    /// Transforms each element
+    MapEach {
+        elem_var: SmolStr,
+        iterable: Box<Expr>,
+        body: Box<Expr>,
+    },
+    /// Filter elements: filter x in iterable { body }
+    /// Keeps elements where body is truthy
+    Filter {
+        elem_var: SmolStr,
+        iterable: Box<Expr>,
+        body: Box<Expr>,
+    },
     /// Return statement.
     Return(Option<Box<Expr>>),
 

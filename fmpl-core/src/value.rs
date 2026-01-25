@@ -52,6 +52,105 @@ pub enum Value {
     /// Facet-restricted tuple space with capability security.
     #[serde(skip)]
     TupleSpaceFacet(Arc<std::sync::Mutex<crate::tuplespace::facet::TupleSpaceFacet>>),
+    /// Cursor into a stream - CoW reference for RLM-style observation.
+    #[serde(skip)]
+    Cursor(Arc<Cursor>),
+}
+
+/// A cursor into a stream - lightweight CoW reference.
+///
+/// Cursors provide observable access to streams without copying the underlying data.
+/// Multiple cursors can observe the same stream independently, enabling:
+/// - RLM-style recursive processing
+/// - Multi-agent coordination through shared observation
+/// - Time travel debugging (immutable history)
+/// - Forking without copying
+#[derive(Debug, Clone)]
+pub struct Cursor {
+    /// The stream being observed (Arc for cheap sharing)
+    pub stream: Arc<Stream>,
+    /// Current position in the stream
+    pub position: CursorPosition,
+    /// Branch identifier (for tracking fork history)
+    pub branch_id: SmolStr,
+}
+
+/// Position within a stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CursorPosition {
+    /// Index in the stream's value sequence
+    pub index: usize,
+    /// Generation counter (for tracking stream mutations)
+    pub generation: u64,
+}
+
+impl CursorPosition {
+    /// Create a new position at the start of a stream.
+    pub fn start() -> Self {
+        Self {
+            index: 0,
+            generation: 0,
+        }
+    }
+
+    /// Advance position by n steps.
+    pub fn advance(&self, n: usize) -> Self {
+        Self {
+            index: self.index + n,
+            generation: self.generation,
+        }
+    }
+
+    /// Rewind position by n steps.
+    pub fn rewind(&self, n: usize) -> Self {
+        Self {
+            index: self.index.saturating_sub(n),
+            generation: self.generation,
+        }
+    }
+}
+
+impl Cursor {
+    /// Create a new cursor observing a stream.
+    pub fn new(stream: Arc<Stream>) -> Self {
+        Self {
+            stream,
+            position: CursorPosition::start(),
+            branch_id: SmolStr::new("main"),
+        }
+    }
+
+    /// Fork this cursor at the current position, creating a new branch.
+    pub fn fork(&self, new_branch_id: SmolStr) -> Self {
+        Self {
+            stream: Arc::clone(&self.stream),
+            position: self.position,
+            branch_id: new_branch_id,
+        }
+    }
+
+    /// Advance this cursor by n positions.
+    pub fn advance(&self, n: usize) -> Self {
+        Self {
+            stream: Arc::clone(&self.stream),
+            position: self.position.advance(n),
+            branch_id: self.branch_id.clone(),
+        }
+    }
+
+    /// Rewind this cursor by n positions.
+    pub fn rewind(&self, n: usize) -> Self {
+        Self {
+            stream: Arc::clone(&self.stream),
+            position: self.position.rewind(n),
+            branch_id: self.branch_id.clone(),
+        }
+    }
+
+    /// Get the current position as a value.
+    pub fn get_position(&self) -> Value {
+        Value::Int(self.position.index as i64)
+    }
 }
 
 /// Serialize AsyncStream by extracting its source metadata.
@@ -92,6 +191,13 @@ pub enum StreamOp {
     Filter(Value),
     FlatMap(Value),
     Reduce(Value),
+    Collect,
+    Take {
+        n: Value,
+    },
+    Drop {
+        n: Value,
+    },
     Parse {
         grammar: Value,
         rule: SmolStr,
@@ -161,6 +267,15 @@ impl Value {
             Value::SuspendedSink(_) => "suspended_sink",
             Value::TupleSpace(_) => "tuplespace",
             Value::TupleSpaceFacet(_) => "tuplespace_facet",
+            Value::Cursor(_) => "cursor",
+        }
+    }
+
+    /// Check if value is a stream or cursor.
+    pub fn is_stream_like(&self) -> bool {
+        match self {
+            Value::Stream(_) | Value::AsyncStream(_) | Value::Cursor(_) => true,
+            _ => false,
         }
     }
 
@@ -492,6 +607,11 @@ impl fmt::Display for Value {
             Value::SuspendedSink(source) => write!(f, "<suspended_sink {:?}>", source),
             Value::TupleSpace(_) => write!(f, "<tuplespace>"),
             Value::TupleSpaceFacet(_) => write!(f, "<tuplespace_facet>"),
+            Value::Cursor(c) => write!(
+                f,
+                "<cursor branch:{} pos:{}>",
+                c.branch_id, c.position.index
+            ),
         }
     }
 }

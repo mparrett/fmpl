@@ -52,3 +52,16 @@ let (base = grammar { letter = [a-z] }) let (ext = base <: { digit = [0-9] }) "5
 
 -- Type checking
 42 @ base::tree.string           -- Should FAIL (type mismatch)
+
+-- =============================================================================
+-- Pattern binding: pattern:name => action can reference 'name'
+-- =============================================================================
+
+-- Bind matched digits to variable 'digits' and return it
+"42" @ { [0-9]+:digits => digits }      -- Should return "42"
+
+-- Bind and use in map construction
+"hello" @ { [a-z]+:text => %{type: :string, value: text} }  -- Should return %{type: :string, value: "hello"}
+
+-- Multiple bindings - use inline anonymous grammar
+"42,100" @ { [0-9]+:d "," _ [0-9]+ => d }  -- Should return "42"

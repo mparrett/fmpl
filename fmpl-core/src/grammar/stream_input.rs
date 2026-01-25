@@ -407,6 +407,7 @@ impl StreamPosition {
             StreamEvent::Data(v) => Some(v),
             StreamEvent::Ok(v) => Some(v),
             StreamEvent::Err(_) => None, // Error terminates stream
+            StreamEvent::Done => None,   // Done terminates stream with no value
         }
     }
 

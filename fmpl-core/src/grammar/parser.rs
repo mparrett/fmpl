@@ -152,9 +152,20 @@ impl<'a> GrammarParser<'a> {
         let main_pattern = if cases.len() == 1 {
             cases.into_iter().next().unwrap()
         } else {
+            eprintln!(
+                "DEBUG parse_match_block: creating Choice with {} cases",
+                cases.len()
+            );
+            for (i, case) in cases.iter().enumerate() {
+                eprintln!("DEBUG parse_match_block: case {}: {:?}", i, case);
+            }
             Pattern::Choice(cases)
         };
         grammar.add_rule(SmolStr::new("main"), Rule::new(main_pattern));
+        eprintln!(
+            "DEBUG parse_match_block: grammar has {} rules",
+            grammar.rules.len()
+        );
         Ok(grammar)
     }
 

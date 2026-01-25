@@ -23,6 +23,8 @@ pub enum StreamEvent {
     Ok(Value),
     /// Terminal failure with error.
     Err(Value),
+    /// Stream completed successfully (no value).
+    Done,
 }
 
 /// Reference to a persisted stream buffer in Fjall storage.

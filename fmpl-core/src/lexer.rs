@@ -32,6 +32,18 @@ pub enum Token {
     While,
     #[token("do")]
     Do,
+    #[token("for")]
+    For,
+    #[token("in")]
+    In,
+    #[token("fold")]
+    Fold,
+    #[token("foldr")]
+    Foldr,
+    #[token("map")]
+    Map,
+    #[token("filter")]
+    Filter,
     #[token("lambda")]
     Lambda,
     #[token("return")]

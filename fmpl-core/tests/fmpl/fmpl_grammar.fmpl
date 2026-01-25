@@ -1,34 +1,183 @@
--- FMPL grammar written in FMPL (metacircular parser)
--- This demonstrates self-hosting capability
+-- FMPL Scannerless Grammar with AST value capture
+--
+-- This grammar parses FMPL source code and produces executable AST nodes.
+-- Uses pattern binding (pattern:name) to capture matched values.
+--
+-- Pattern binding syntax (following OMeta convention):
+--   pattern:name  - binds result of 'pattern' to variable 'name'
+--   => expr       - semantic action can reference bound variables
+--
+-- Examples:
+--   int = value:digit+ _ => %{type: :int, value: value}
+--   ident = name:ident => %{type: :ident, name: name}
+--
+-- For parameterized rules, FMPL currently uses the @ operator:
+--   "hello" @ grammar.rule  - Apply grammar rule to input
+--
+-- OMeta-style parameterized rules (future work):
+--   grammar {
+--     rule(arg) = head_of_input arg rest_of_pattern
+--   }
+--   rule("value")  - Prepends "value" to input, then matches
 
--- Token-level grammar (lexical analysis)
-let (tokens = grammar {
+grammar fmpl {
+    -- ============================================================
+    -- CHARACTER CLASSES
+    -- ============================================================
+
+    space = [ \t\n\r];
+    alpha = [a-zA-Z];
     digit = [0-9];
-    letter = [a-zA-Z];
-    alpha_num = letter | digit | [_];
-    ws = [ \t\n\r]*;
+    alnum = alpha | digit;
+    ident_char = alnum | [_];
+    hex_digit = digit | [a-fA-F];
+    escape_char = [nrt"\\];
 
-    int = digit+;
-    ident = letter alpha_num*;
+    -- ============================================================
+    -- WHITESPACE (explicit)
+    -- ============================================================
 
-    string_char = [^"\\] | "\\" .;
-    string = "\"" string_char* "\"";
+    _ = space*;
 
-    symbol = ":" ident
-}) let (expr_grammar = tokens <: {
-    atom = int | string | symbol | ident | "(" ws expr ws ")" | "[" ws list_items? ws "]";
-    list_items = expr (ws "," ws expr)*;
+    -- ============================================================
+    -- IDENTIFIERS
+    -- ============================================================
 
-    primary = atom (ws "." ws ident (ws "(" ws args? ws ")")?)*;
-    args = expr (ws "," ws expr)*;
+    ident = (alpha | _) ident_char* _;
 
-    unary = ("-" | "!")? ws primary;
+    -- ============================================================
+    -- LITERALS (with value capture)
+    -- ============================================================
 
-    mul = unary (ws ("*" | "/" | "%") ws unary)*;
-    add = mul (ws ("+" | "-") ws mul)*;
-    cmp = add (ws ("==" | "!=" | "<=" | ">=" | "<" | ">") ws add)?;
-    and_expr = cmp (ws "&&" ws cmp)*;
-    or_expr = and_expr (ws "||" ws and_expr)*;
+    int = value:digit+ _ => %{type: :int, value: value};
+    hex_int = "0" [xX] hex_digit+ _ => %{type: :hex};
+    float = digit+ "." digit* ([eE] [+-]? digit+)? _
+          | digit+ [eE] [+-]? digit+ _ => %{type: :float};
+    string = "\"" string_char* "\"" _ => %{type: :string};
 
-    expr = or_expr
-}) "42" @ expr_grammar.int
+    string_char = escape | [^"\\];
+    escape = "\\" escape_char;
+
+    literal = int | hex_int | float | string;
+
+    -- ============================================================
+    -- IDENTIFIERS (with name capture)
+    -- ============================================================
+
+    simple_ident = name:ident => %{type: :ident, name: name};
+    qualified_name = first:ident rest:("::" _ ident)* => %{type: :qname};
+
+    -- ============================================================
+    -- EXPRESSIONS (with AST construction)
+    -- ============================================================
+
+    primary = literal
+            | simple_ident
+            | qualified_name
+            | paren_expr
+            | list_expr
+            | map_expr
+            | match_expr;
+
+    paren_expr = "(" _ expr ")" _;
+
+    list_expr = "[" _ list_contents "]" _ => %{type: :list};
+    list_contents = expr ("," _ expr)*;
+
+    map_expr = "%" "{" _ map_contents "}" _ => %{type: :map};
+    map_contents = map_item ("," _ map_item)*;
+    map_item = ident ":" _ expr | expr "=>" _ expr;
+
+    unary = ("-" _ | "!" _ | "~" _) postfix => %{type: :unary}
+          | postfix;
+
+    mult = unary (("*" _ | "/" _ | "%" _) unary)* => %{type: :binary};
+    add = mult (("+" _ | "-" _) mult)* => %{type: :binary};
+    cmp = add (("==" _ | "!=" _ | "<" _ | ">" _ | "<=" _ | ">=" _) add)? => %{type: :binary};
+    and_expr = cmp ("&&" _ cmp)* => %{type: :binary};
+    or_expr = and_expr ("||" _ and_expr)* => %{type: :binary};
+    pipe = or_expr ("|>" _ or_expr)* => %{type: :binary};
+    compose = pipe ("++" _ pipe)? => %{type: :binary};
+
+    context = compose (":" _ ident)?;
+
+    postfix = primary ("." _ ident ("(" _ args? ")" _)?) _;
+
+    args = expr ("," _ expr)*;
+
+    expr = context;
+
+    -- ============================================================
+    -- PUNCTUATION
+    -- ============================================================
+
+    comma = "," _;
+    semicolon = ";" _;
+    dot = "." _;
+    arrow = "=>" _;
+
+    -- ============================================================
+    -- STATEMENTS (with AST construction)
+    -- ============================================================
+
+    lambda = "\\" _ ident_list "=>" _ expr => %{type: :lambda};
+    ident_list = "(" _ ident ("," _ ident)* ")" _;
+    param_list = "(" _ ident ("," _ ident)* comma? ")" _;
+
+    let_binding = "let" _ ident_list "=" _ expr => %{type: :let};
+
+    if_expr = "if" _ expr "then" _ expr "else" _ expr => %{type: :if}
+            | "if" _ expr "then" _ expr => %{type: :if};
+
+    while_expr = "while" _ expr "do" _ expr => %{type: :while};
+    do_while = "do" _ expr "while" _ expr => %{type: :do_while};
+
+    return_stmt = "return" _ expr? => %{type: :return};
+
+    object_def = "object" _ qualified_name "{" _ object_body? "}" _ => %{type: :object};
+    object_body = binding (";" _ binding)*;
+    binding = ident param_list? ":" _ expr;
+
+    grammar_def = "grammar" _ qualified_name ("<:" _ qualified_name)? _
+                 "{" _ grammar_body "}" _ => %{type: :grammar};
+    grammar_body = grammar_rule (";" _ grammar_rule)*;
+    grammar_rule = ident "=" _ peg_expr;
+
+    peg_expr = peg_seq ("|" _ peg_seq)*;
+    peg_seq = peg_term+;
+    peg_term = peg_primary ("*" _ | "+" _ | "?" _)?;
+    peg_primary = literal
+               | ident
+               | "." _
+               | "[" _ peg_char_class "]" _
+               | "(" _ peg_expr ")" _
+               | "!" _ peg_primary
+               | "&" _ peg_primary;
+    peg_char_class = peg_range ("|" _ peg_range)*;
+    peg_range = ident ".." _ ident | ident;
+
+    match_expr = "match" _ expr "{" _ match_cases "}" _ => %{type: :match};
+    match_cases = match_case (";" _ match_case)*;
+    match_case = pattern "=>" _ expr
+              | pattern "when" _ expr "=>" _ expr;
+
+    pattern = "_" _ => %{type: :wildcard}
+            | name:ident => %{type: :var, name: name}
+            | literal => %{type: :literal}
+            | "[" _ pattern_list "]" _ => %{type: :list}
+            | "%" "{" _ pattern_map "}" _ => %{type: :map}
+            | ident "(" _ pattern_list ")" _ => %{type: :ctor};
+
+    pattern_list = pattern ("," _ pattern)*;
+    pattern_map = ident ":" _ pattern ("," _ ident ":" _ pattern)*;
+
+    stmt = expr;
+
+    -- ============================================================
+    -- ENTRY POINTS
+    -- ============================================================
+
+    code = space* stmt (";" _ stmt)* space*;
+    expr_entry = space* expr space*;
+    pattern_entry = space* pattern space*;
+}

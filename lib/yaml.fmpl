@@ -1,0 +1,134 @@
+-- YAML Parser Grammar
+--
+-- A PEG grammar for parsing and stringifying YAML
+--
+-- Usage:
+--   'name: Alice\nage: 30' @ yaml.document
+--   '- item1\n- item2' @ yaml.document
+--   %{name: "Bob", tags: ["dev"]} @ yaml.stringify
+
+grammar yaml {
+  -- Main entry point for parsing
+  document = node
+
+  -- Stringify helper - pattern match on values and produce YAML string
+  stringify = \value
+    value @ {
+      -- Map
+      %{...} => {
+        let pairs = value.keys()
+        let stringify_pair = \k
+          let v = value[k]
+          k + ": " + (v @ stringify)
+
+        let pairs_yaml = pairs.map(stringify_pair)
+        pairs_yaml.join("\n")
+      }
+
+      -- List
+      [...] => {
+        let elements = value.map(\e "- " + (e @ stringify))
+        elements.join("\n")
+      }
+
+      -- String (quote if needed)
+      s if s.is_string() =>
+        s @ {
+          n if n.is_number() => s,
+          true_false_null => s,
+          _ => "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        }
+
+      -- Number
+      n if n.is_number() => n.to_string()
+
+      -- Boolean
+      true => "true"
+      false => "false"
+      null => "null"
+
+      -- Fallback
+      _ => "null"
+    }
+
+  -- YAML node types
+  node = mapping | sequence | scalar
+
+  -- Mapping (key-value pairs)
+  mapping = pair (indent pair)* -> build_map($1, $2)
+
+  pair = key ':' ws value
+
+  key = scalar
+
+  -- Sequence (array with dash prefix)
+  sequence = '-' ws value (indent '-' ws value)* -> build_list($1, $2)
+
+  -- Scalar values
+  scalar = plain_scalar | quoted_string | block_scalar
+
+  plain_scalar = [^\n# \t,:{}[\]]+
+
+  quoted_string = '"' chars '"' -> build_string($1)
+                | "'" chars "'" -> build_string($1)
+
+  chars = char*
+
+  char = [^"\\']
+        | '\\' escape
+
+  escape = '"' | '\'' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't'
+         | 'u' [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
+
+  -- Block scalars (literal or folded)
+  block_scalar = ('|' | '>') ws newline lines -> build_block_string($4)
+
+  lines = line (newline line)*
+
+  line = [^\n]*
+
+  -- Number
+  number = '-'? int ('.' digit+)? -> to_number($0)
+
+  int = '0' | [1-9] digit*
+
+  digit = [0-9]
+
+  -- Literals
+  true = 'true' -> true
+  false = 'false' -> null
+  null = 'null' -> null
+  yes = 'yes' -> true
+  no = 'no' -> false
+  ~ = null
+
+  -- Whitespace
+  ws = ' ' | '\t'+
+
+  newline = '\n'
+
+  -- Indentation
+  indent = ' '+ | '\t'+
+
+  -- Semantic actions
+  build_map = \first rest
+    rest @ {
+      [] => %{first},
+      [kv, ...more] => build_map(%{first}, kv, more)
+    }
+
+  build_list = \first rest
+    rest @ {
+      [] => [first],
+      [elem, ...more] => [first, ...more]
+    }
+
+  build_string = \chars
+    chars.join("")
+
+  build_block_string = \lines
+    lines.join("\n")
+
+  to_number = \parts
+    parts.join("").to_int()
+}

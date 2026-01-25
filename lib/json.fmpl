@@ -1,0 +1,107 @@
+-- JSON Parser Grammar
+--
+-- A complete PEG grammar for parsing and stringifying JSON
+--
+-- Usage:
+--   '{"name": "Alice", "age": 30}' @ json.value
+--   %{name: "Bob", age: 25} @ json.stringify
+
+grammar json {
+  -- Main entry point for parsing
+  value = object | array | string | number | true | false | null
+
+  -- Stringify helper - pattern match on values and produce JSON string
+  stringify = \value
+    value @ {
+      -- Object
+      %{...} => {
+        let pairs = value.keys()
+        let stringify_pair = \k
+          let v = value[k]
+          "\"" + k + "\": " + (v @ stringify)
+
+        let pairs_json = pairs.map(stringify_pair)
+        "{" + pairs_json.join(", ") + "}"
+      }
+
+      -- List
+      [...] => {
+        let elements = value.map(\e e @ stringify)
+        "[" + elements.join(", ") + "]"
+      }
+
+      -- String
+      s if s.is_string() =>
+        "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+      -- Number
+      n if n.is_number() => n.to_string()
+
+      -- Boolean
+      true => "true"
+      false => "false"
+
+      -- Null
+      null => "null"
+
+      -- Fallback
+      _ => "null"
+    }
+
+  -- Whitespace (skipped)
+  ws = ' ' | '\t' | '\n' | '\r'
+
+  -- Object: { string : value (, string : value)* }
+  object = '{' ws* '}' -> %{}
+         | '{' ws* pair (',' ws* pair)* ws* '}' -> build_object($1, $2)
+
+  pair = string ws* ':' ws* value
+
+  -- Array: [ value (, value)* ]
+  array = '[' ws* ']' -> []
+        | '[' ws* elem (',' ws* elem)* ws* ']' -> build_array($1, $2)
+
+  elem = value
+
+  -- String: "characters"
+  string = '"' chars '"' -> build_string($1)
+
+  chars = char*
+
+  char = [^"\\]
+        | '\' escape
+
+  escape = '"' | '\' | '/' | 'b' | 'f' | 'n' | 'r' | 't'
+         | 'u' [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]
+
+  -- Number: int or float
+  number = '-'? int ('.' digit+)? ([eE] [+-]? digit+)? -> to_number($0)
+
+  int = '0' | [1-9] digit*
+
+  digit = [0-9]
+
+  -- Literals
+  true = 'true' -> true
+  false = 'false' -> false
+  null = 'null' -> null
+
+  -- Semantic actions
+  build_object = \first rest
+    rest @ {
+      [] => %{first},
+      [pair, ...more] => build_object(%{first}, pair, more)
+    }
+
+  build_array = \first rest
+    rest @ {
+      [] => [first],
+      [elem, ...more] => [first, ...more]
+    }
+
+  build_string = \chars
+    chars.join("")
+
+  to_number = \parts
+    parts.join("").to_int()
+}

@@ -94,6 +94,9 @@ impl ParseDriver {
                         StreamEvent::Err(_) => {
                             break; // Terminal error
                         }
+                        StreamEvent::Done => {
+                            break; // Stream completed
+                        }
                     }
                 }
                 Ok(None) => {

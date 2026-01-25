@@ -174,6 +174,55 @@ struct ToolResult {
     duration_ms: u64,
 }
 
+// ============================================================================
+// Command Stream - Code panel as command stream viewer/editor
+// ============================================================================
+
+/// Unique identifier for a command
+type CommandId = usize;
+
+/// Unique identifier for a stream branch
+type BranchId = String;
+
+/// State of a command in the stream
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+enum CommandState {
+    Pending,  // Awaiting user decision
+    Approved, // Approved for execution
+    Denied,   // Denied/skipped by user
+    Executed, // Successfully executed
+    Failed,   // Execution failed
+}
+
+/// A tool invocation within a command
+#[derive(Clone, Debug)]
+struct ToolInvocation {
+    tool_name: String,
+    args: Vec<String>,
+}
+
+/// A grammar/policy rule match for a command
+#[derive(Clone, Debug)]
+struct RuleMatch {
+    rule_name: String,
+    matched: bool,
+    message: String,
+}
+
+/// A command in the command stream
+#[derive(Clone, Debug)]
+struct CodeCommand {
+    id: CommandId,
+    parent_id: Option<CommandId>,     // Parent in command DAG
+    linked_task_id: Option<usize>,    // Links to planning task
+    description: String,              // Human-readable description
+    tool_call: ToolInvocation,        // The tool to invoke
+    grammar_checks: Vec<RuleMatch>,   // Policy/grammar validation
+    state: CommandState,              // Current state
+    timestamp: String,                // ISO timestamp
+    execution_result: Option<String>, // Result if executed
+}
+
 struct App {
     code_lines: Vec<String>,
     cursor_row: usize,
@@ -211,6 +260,19 @@ struct App {
     selected_tool_index: usize, // Currently selected tool in tools panel
     // Phase 8 Task 8.4: LLM generation status
     llm_generation_status: Option<String>, // Current LLM operation ("Generating research summary...", etc.)
+    // Command Stream: Code panel as command stream viewer/editor
+    command_stream: Option<Value>, // The active async stream handle
+    arrived_commands: Vec<CodeCommand>, // Commands that have arrived on current branch
+    command_cursor: usize,         // Current position in command stream
+    selected_command_index: usize, // Currently selected command (for UI)
+    command_counter: CommandId,    // For generating command IDs
+    stream_complete: bool,         // Has the stream terminated?
+    stream_branches: HashMap<BranchId, Vec<CodeCommand>>, // All stream branches
+    current_branch: BranchId,      // Which branch we're viewing
+    branch_point: Option<usize>,   // Where current branch forked from parent
+    command_edit_mode: bool,       // When true, editing selected command
+    expanded_command: Option<CommandId>, // Command to show details for
+    command_stream_mode: bool,     // When true, show command stream instead of code editor
 }
 
 impl App {
@@ -264,6 +326,23 @@ impl App {
             selected_tool_index: 0,
             // Phase 8 Task 8.4: Initialize LLM generation status
             llm_generation_status: None,
+            // Command Stream: Initialize empty command stream
+            command_stream: None,
+            arrived_commands: Vec::new(),
+            command_cursor: 0,
+            selected_command_index: 0,
+            command_counter: 0,
+            stream_complete: false,
+            stream_branches: {
+                let mut map = HashMap::new();
+                map.insert("main".to_string(), Vec::new());
+                map
+            },
+            current_branch: "main".to_string(),
+            branch_point: None,
+            command_edit_mode: false,
+            expanded_command: None,
+            command_stream_mode: false,
         }
     }
 
@@ -292,6 +371,107 @@ impl App {
         } else {
             results.join("\n")
         }
+    }
+
+    // Populate sample commands for testing
+    fn populate_sample_commands(&mut self) {
+        let now = chrono::Utc::now().to_rfc3339();
+
+        self.arrived_commands = vec![
+            CodeCommand {
+                id: 0,
+                parent_id: None,
+                linked_task_id: Some(1),
+                description: "Fetch user profile data".to_string(),
+                tool_call: ToolInvocation {
+                    tool_name: "curl.get".to_string(),
+                    args: vec!["https://api.example.com/users/123".to_string()],
+                },
+                grammar_checks: vec![
+                    RuleMatch {
+                        rule_name: "url_validation".to_string(),
+                        matched: true,
+                        message: "URL format is valid".to_string(),
+                    },
+                    RuleMatch {
+                        rule_name: "rate_limit_check".to_string(),
+                        matched: true,
+                        message: "Rate limit OK".to_string(),
+                    },
+                ],
+                state: CommandState::Approved,
+                timestamp: now.clone(),
+                execution_result: Some("Success: User data retrieved".to_string()),
+            },
+            CodeCommand {
+                id: 1,
+                parent_id: Some(0),
+                linked_task_id: Some(1),
+                description: "Parse user JSON response".to_string(),
+                tool_call: ToolInvocation {
+                    tool_name: "json.parse".to_string(),
+                    args: vec!["{...response data...}".to_string()],
+                },
+                grammar_checks: vec![],
+                state: CommandState::Executed,
+                timestamp: now.clone(),
+                execution_result: Some("Parsed: User{name: \"Alice\", age: 30}".to_string()),
+            },
+            CodeCommand {
+                id: 2,
+                parent_id: Some(1),
+                linked_task_id: Some(2),
+                description: "Update user record in database".to_string(),
+                tool_call: ToolInvocation {
+                    tool_name: "db.update".to_string(),
+                    args: vec![
+                        "users".to_string(),
+                        "123".to_string(),
+                        "{age: 31}".to_string(),
+                    ],
+                },
+                grammar_checks: vec![RuleMatch {
+                    rule_name: "write_permission".to_string(),
+                    matched: true,
+                    message: "User has write access".to_string(),
+                }],
+                state: CommandState::Pending,
+                timestamp: now.clone(),
+                execution_result: None,
+            },
+            CodeCommand {
+                id: 3,
+                parent_id: Some(1),
+                linked_task_id: Some(3),
+                description: "Send confirmation email".to_string(),
+                tool_call: ToolInvocation {
+                    tool_name: "email.send".to_string(),
+                    args: vec![
+                        "alice@example.com".to_string(),
+                        "Your profile was updated".to_string(),
+                    ],
+                },
+                grammar_checks: vec![
+                    RuleMatch {
+                        rule_name: "email_validation".to_string(),
+                        matched: true,
+                        message: "Email format valid".to_string(),
+                    },
+                    RuleMatch {
+                        rule_name: "content_policy".to_string(),
+                        matched: false,
+                        message: "Warning: Email contains sensitive keyword".to_string(),
+                    },
+                ],
+                state: CommandState::Denied,
+                timestamp: now,
+                execution_result: None,
+            },
+        ];
+
+        self.command_counter = 4;
+        self.selected_command_index = 0;
+        self.stream_complete = true;
     }
 
     // Phase 6 Task 6.2: Research panel persistence
@@ -984,6 +1164,15 @@ impl App {
                 self.llm_mode = !self.llm_mode;
                 self.update_mode_indicator();
             }
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Toggle command stream mode
+                self.command_stream_mode = !self.command_stream_mode;
+                self.output = if self.command_stream_mode {
+                    "Command Stream Mode: ON".to_string()
+                } else {
+                    "Command Stream Mode: OFF".to_string()
+                };
+            }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Switch LLM provider
                 self.llm_provider = match self.llm_provider {
@@ -1025,6 +1214,30 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Rewind upstream in command stream (navigate to parent command)
+                if self.command_stream_mode && !self.arrived_commands.is_empty() {
+                    let idx = self
+                        .selected_command_index
+                        .min(self.arrived_commands.len() - 1);
+                    if let Some(parent_id) = self.arrived_commands[idx].parent_id {
+                        // Find parent command
+                        if let Some(parent_idx) =
+                            self.arrived_commands.iter().position(|c| c.id == parent_id)
+                        {
+                            self.selected_command_index = parent_idx;
+                            self.output = format!("Rewound to parent command {}", parent_id);
+                        } else {
+                            self.output =
+                                format!("Parent command {} not found in stream", parent_id);
+                        }
+                    } else {
+                        self.output = "Selected command has no parent".to_string();
+                    }
+                } else {
+                    self.output = "Rewind only available in command stream mode".to_string();
+                }
+            }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Create a new branch at current point
                 let branch_name = format!("branch-{}", self.node_counter);
@@ -1038,8 +1251,22 @@ impl App {
                 }
             }
             KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                // List all branches
-                self.output = self.list_branches();
+                // Command stream mode: create branch at current position
+                // Otherwise: list all branches
+                if self.command_stream_mode && !self.arrived_commands.is_empty() {
+                    let new_branch = format!("cmd-branch-{}", self.stream_branches.len());
+                    // Clone current commands to new branch
+                    let current_commands = self.arrived_commands.clone();
+                    self.stream_branches
+                        .insert(new_branch.clone(), current_commands);
+                    self.branch_point = Some(self.selected_command_index);
+                    self.output = format!(
+                        "Created command branch '{}' at position {}",
+                        new_branch, self.selected_command_index
+                    );
+                } else {
+                    self.output = self.list_branches();
+                }
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Phase 5: Compact conversation if warning is present
@@ -1150,6 +1377,12 @@ impl App {
                         "Planning tasks saved to .agent/tasks.md\n\nUse Ctrl+P to focus planning panel.",
                     );
                 }
+            }
+            // Shift+S: Populate sample commands (for testing)
+            KeyCode::Char('S') => {
+                self.populate_sample_commands();
+                self.output =
+                    String::from("Populated sample commands. Press Ctrl+T to view command stream.");
             }
             // Phase 8 Task 8.2 & 8.3: Ctrl+G to generate AI assistance
             KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1386,6 +1619,19 @@ impl App {
                     self.cursor_row = 0;
                     self.cursor_col = 0;
                     self.output = String::from("Edit mode cancelled");
+                }
+                // Command stream mode: deny selected command
+                else if self.command_stream_mode && self.focused_panel == PanelType::CodeEditor {
+                    if !self.arrived_commands.is_empty() {
+                        let idx = self
+                            .selected_command_index
+                            .min(self.arrived_commands.len() - 1);
+                        self.arrived_commands[idx].state = CommandState::Denied;
+                        self.output = format!(
+                            "Denied command {}: {}",
+                            self.arrived_commands[idx].id, self.arrived_commands[idx].description
+                        );
+                    }
                 } else {
                     self.execute_mode = !self.execute_mode;
                 }
@@ -1426,12 +1672,107 @@ impl App {
                     }
                 }
             }
+            KeyCode::Char(' ') => {
+                // Space bar: expand/collapse command details in command stream mode
+                if self.command_stream_mode && self.focused_panel == PanelType::CodeEditor {
+                    if !self.arrived_commands.is_empty() {
+                        let idx = self
+                            .selected_command_index
+                            .min(self.arrived_commands.len() - 1);
+                        let cmd_id = self.arrived_commands[idx].id;
+                        // Toggle expansion
+                        if self.expanded_command == Some(cmd_id) {
+                            self.expanded_command = None;
+                        } else {
+                            self.expanded_command = Some(cmd_id);
+                        }
+                    }
+                } else {
+                    // Regular space handling in code editor
+                    match self.focused_panel {
+                        PanelType::Research => self.research_insert_char(' '),
+                        PanelType::CodeEditor => self.insert_char(' '),
+                        _ => {}
+                    }
+                }
+            }
             KeyCode::Char(c) => {
-                // Phase 6 Task 6.2: Route to focused panel
-                match self.focused_panel {
-                    PanelType::Research => self.research_insert_char(c),
-                    PanelType::CodeEditor => self.insert_char(c),
-                    _ => {}
+                // Command stream mode: check for special keys first
+                if self.command_stream_mode && self.focused_panel == PanelType::CodeEditor {
+                    match c {
+                        'e' | 'E' => {
+                            // Edit selected command description
+                            if !self.arrived_commands.is_empty() {
+                                let idx = self
+                                    .selected_command_index
+                                    .min(self.arrived_commands.len() - 1);
+                                self.command_edit_mode = true;
+                                self.output = format!(
+                                    "Editing command {}: {}",
+                                    self.arrived_commands[idx].id,
+                                    self.arrived_commands[idx].description
+                                );
+                                // TODO: Enter actual edit mode for description
+                            }
+                        }
+                        'i' | 'I' => {
+                            // Insert new command at current position
+                            let new_id = self.command_counter;
+                            self.command_counter += 1;
+                            let new_cmd = CodeCommand {
+                                id: new_id,
+                                parent_id: if self.arrived_commands.is_empty() {
+                                    None
+                                } else {
+                                    Some(
+                                        self.arrived_commands[self
+                                            .selected_command_index
+                                            .min(self.arrived_commands.len() - 1)]
+                                        .id,
+                                    )
+                                },
+                                linked_task_id: None,
+                                description: "New command".to_string(),
+                                tool_call: ToolInvocation {
+                                    tool_name: "placeholder".to_string(),
+                                    args: vec![],
+                                },
+                                grammar_checks: vec![],
+                                state: CommandState::Pending,
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                execution_result: None,
+                            };
+                            self.arrived_commands
+                                .insert(self.selected_command_index, new_cmd);
+                            self.output = format!("Inserted new command {}", new_id);
+                        }
+                        'd' | 'D' => {
+                            // Delete selected command
+                            if !self.arrived_commands.is_empty() {
+                                let idx = self
+                                    .selected_command_index
+                                    .min(self.arrived_commands.len() - 1);
+                                let cmd_id = self.arrived_commands[idx].id;
+                                self.arrived_commands.remove(idx);
+                                if !self.arrived_commands.is_empty()
+                                    && self.selected_command_index >= self.arrived_commands.len()
+                                {
+                                    self.selected_command_index = self.arrived_commands.len() - 1;
+                                }
+                                self.output = format!("Deleted command {}", cmd_id);
+                            }
+                        }
+                        _ => {
+                            // Other chars - ignore in command stream mode
+                        }
+                    }
+                } else {
+                    // Phase 6 Task 6.2: Route to focused panel
+                    match self.focused_panel {
+                        PanelType::Research => self.research_insert_char(c),
+                        PanelType::CodeEditor => self.insert_char(c),
+                        _ => {}
+                    }
                 }
             }
             KeyCode::Backspace => {
@@ -1457,23 +1798,39 @@ impl App {
                         self.research_insert_newline();
                     }
                     PanelType::CodeEditor => {
-                        // Check for Ctrl+Enter to save edited message
-                        if key.modifiers.contains(KeyModifiers::CONTROL) {
-                            if self.edit_mode {
-                                match self.save_edited_message() {
-                                    Ok(()) => {
-                                        self.update_mode_indicator();
-                                    }
-                                    Err(e) => {
-                                        self.output = format!("Save failed: {}", e);
+                        if self.command_stream_mode {
+                            // Approve selected command
+                            if !self.arrived_commands.is_empty() {
+                                let idx = self
+                                    .selected_command_index
+                                    .min(self.arrived_commands.len() - 1);
+                                self.arrived_commands[idx].state = CommandState::Approved;
+                                self.output = format!(
+                                    "Approved command {}: {}",
+                                    self.arrived_commands[idx].id,
+                                    self.arrived_commands[idx].description
+                                );
+                                // TODO: Actually execute the command
+                            }
+                        } else {
+                            // Check for Ctrl+Enter to save edited message
+                            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                if self.edit_mode {
+                                    match self.save_edited_message() {
+                                        Ok(()) => {
+                                            self.update_mode_indicator();
+                                        }
+                                        Err(e) => {
+                                            self.output = format!("Save failed: {}", e);
+                                        }
                                     }
                                 }
+                            } else if self.execute_mode {
+                                self.execute_code();
+                                self.execute_mode = false;
+                            } else {
+                                self.insert_newline();
                             }
-                        } else if self.execute_mode {
-                            self.execute_code();
-                            self.execute_mode = false;
-                        } else {
-                            self.insert_newline();
                         }
                     }
                     _ => {}
@@ -1511,11 +1868,19 @@ impl App {
                         self.research_cursor_up();
                     }
                     PanelType::CodeEditor => {
-                        if self.cursor_row > 0 {
-                            self.cursor_row -= 1;
-                            let line_len = self.code_lines[self.cursor_row].len();
-                            self.cursor_col = self.cursor_col.min(line_len);
-                            self.adjust_scroll();
+                        if self.command_stream_mode {
+                            // Navigate command stream
+                            if self.selected_command_index > 0 {
+                                self.selected_command_index -= 1;
+                            }
+                        } else {
+                            // Original code editor navigation
+                            if self.cursor_row > 0 {
+                                self.cursor_row -= 1;
+                                let line_len = self.code_lines[self.cursor_row].len();
+                                self.cursor_col = self.cursor_col.min(line_len);
+                                self.adjust_scroll();
+                            }
                         }
                     }
                     _ => {}
@@ -1528,11 +1893,21 @@ impl App {
                         self.research_cursor_down();
                     }
                     PanelType::CodeEditor => {
-                        if self.cursor_row < self.code_lines.len() - 1 {
-                            self.cursor_row += 1;
-                            let line_len = self.code_lines[self.cursor_row].len();
-                            self.cursor_col = self.cursor_col.min(line_len);
-                            self.adjust_scroll();
+                        if self.command_stream_mode {
+                            // Navigate command stream
+                            if !self.arrived_commands.is_empty()
+                                && self.selected_command_index < self.arrived_commands.len() - 1
+                            {
+                                self.selected_command_index += 1;
+                            }
+                        } else {
+                            // Original code editor navigation
+                            if self.cursor_row < self.code_lines.len() - 1 {
+                                self.cursor_row += 1;
+                                let line_len = self.code_lines[self.cursor_row].len();
+                                self.cursor_col = self.cursor_col.min(line_len);
+                                self.adjust_scroll();
+                            }
                         }
                     }
                     _ => {}
@@ -2694,6 +3069,155 @@ fn get_panel_help(panel: PanelType, app: &App) -> String {
     }
 }
 
+// ============================================================================
+// Command Stream Rendering
+// ============================================================================
+
+impl App {
+    /// Format command state as a single character indicator
+    fn format_command_state(state: CommandState) -> &'static str {
+        match state {
+            CommandState::Pending => "○",  // Awaiting decision
+            CommandState::Approved => "✓", // Approved
+            CommandState::Denied => "✗",   // Denied
+            CommandState::Executed => "✔", // Executed successfully
+            CommandState::Failed => "✖",   // Failed
+        }
+    }
+
+    /// Get color for command state
+    fn command_state_color(state: CommandState) -> Color {
+        match state {
+            CommandState::Pending => Color::Yellow,
+            CommandState::Approved => Color::Green,
+            CommandState::Denied => Color::Red,
+            CommandState::Executed => Color::Cyan,
+            CommandState::Failed => Color::Magenta,
+        }
+    }
+
+    /// Format the command stream as text lines for rendering
+    fn format_command_stream(&self) -> Vec<Line> {
+        let mut lines = Vec::new();
+
+        // Header
+        lines.push(Line::from(vec![
+            Span::styled("ID", Style::default().fg(Color::DarkGray)),
+            Span::raw("  "),
+            Span::styled("State", Style::default().fg(Color::DarkGray)),
+            Span::raw("  "),
+            Span::styled("Description", Style::default().fg(Color::DarkGray)),
+            Span::raw("  "),
+            Span::styled("Tool", Style::default().fg(Color::DarkGray)),
+        ]));
+        lines.push(Line::from(""));
+
+        if self.arrived_commands.is_empty() {
+            lines.push(Line::from(
+                "No commands yet. Generate commands from planning panel.",
+            ));
+            return lines;
+        }
+
+        // Render each command
+        for (idx, cmd) in self.arrived_commands.iter().enumerate() {
+            let is_selected = idx == self.selected_command_index;
+            let is_expanded = self.expanded_command == Some(cmd.id);
+
+            // State indicator with color
+            let state_str = Self::format_command_state(cmd.state);
+            let state_color = Self::command_state_color(cmd.state);
+
+            // Selection indicator
+            let cursor = if is_selected { "►" } else { " " };
+
+            // Build line
+            lines.push(Line::from(vec![
+                Span::styled(
+                    cursor,
+                    Style::default().fg(if is_selected {
+                        Color::Yellow
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+                Span::raw(format!("{:2} ", cmd.id)),
+                Span::styled(state_str, Style::default().fg(state_color)),
+                Span::raw("  "),
+                Span::raw(&cmd.description),
+                Span::raw(" "),
+                Span::styled(&cmd.tool_call.tool_name, Style::default().fg(Color::Cyan)),
+            ]));
+
+            // Show expanded details if selected
+            if is_expanded {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled("  Tool: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(&cmd.tool_call.tool_name, Style::default().fg(Color::Cyan)),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled("  Args: ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(format!("{:?}", cmd.tool_call.args)),
+                ]));
+
+                // Show grammar checks if any
+                if !cmd.grammar_checks.is_empty() {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![Span::styled(
+                        "  Grammar Checks:",
+                        Style::default().fg(Color::DarkGray),
+                    )]));
+                    for check in &cmd.grammar_checks {
+                        let check_color = if check.matched {
+                            Color::Green
+                        } else {
+                            Color::Red
+                        };
+                        lines.push(Line::from(vec![
+                            Span::raw("    "),
+                            Span::styled(&check.rule_name, Style::default().fg(check_color)),
+                            Span::raw(": "),
+                            Span::raw(&check.message),
+                        ]));
+                    }
+                }
+
+                // Show execution result if available
+                if let Some(ref result) = cmd.execution_result {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("  Result: ", Style::default().fg(Color::DarkGray)),
+                        Span::raw(result),
+                    ]));
+                }
+
+                lines.push(Line::from(""));
+            }
+        }
+
+        // Show stream status at bottom
+        if self.stream_complete {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("Stream complete. ", Style::default().fg(Color::Green)),
+                Span::styled(
+                    format!("Branch: {}", self.current_branch),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        } else if self.command_stream.is_some() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![Span::styled(
+                "Receiving commands...",
+                Style::default().fg(Color::Yellow),
+            )]));
+        }
+
+        lines
+    }
+}
+
 fn draw_ui(f: &mut Frame, app: &App) {
     // Main layout: split into horizontal sections
     let chunks = Layout::default()
@@ -3023,65 +3547,93 @@ fn draw_ui(f: &mut Frame, app: &App) {
         String::new()
     };
 
-    let visible_lines: Vec<String> = app
-        .code_lines
-        .iter()
-        .skip(app.scroll_offset)
-        .take(20) // Show max 20 lines
-        .cloned()
-        .collect();
-
-    let mut code_spans: Vec<Line> = vec![Line::from(format!(
-        "FMPL Code{} (q to quit):",
-        mode_indicator
-    ))];
-
-    for (i, line) in visible_lines.iter().enumerate() {
-        let actual_row = app.scroll_offset + i;
-        let is_cursor_row = actual_row == app.cursor_row;
-
-        if is_cursor_row {
-            // Show cursor position
-            let before = &line[..app.cursor_col.min(line.len())];
-            let after = &line[app.cursor_col.min(line.len())..];
-
-            code_spans.push(Line::from(vec![
-                Span::raw(format!("{:2} ", actual_row + 1)),
-                Span::raw(before),
-                Span::styled(
-                    if app.cursor_col < line.len() {
-                        &line[app.cursor_col..app.cursor_col + 1]
-                    } else {
-                        " "
-                    },
-                    Style::default().fg(Color::Yellow).bg(Color::DarkGray),
-                ),
-                Span::raw(after),
-            ]));
-        } else {
-            code_spans.push(Line::from(vec![
-                Span::raw(format!("{:2} ", actual_row + 1)),
-                Span::raw(line.as_str()),
-            ]));
-        }
-    }
-
-    // Phase 6 Task 6.4: Add help text when focused
     let code_focused = app.focused_panel == PanelType::CodeEditor;
-    if code_focused {
-        let code_help = get_panel_help(PanelType::CodeEditor, app);
-        if !code_help.is_empty() {
-            code_spans.push(Line::from(""));
-            code_spans.push(Line::from(vec![
+
+    // Render either command stream or code editor
+    let (code_text, code_title) = if app.command_stream_mode {
+        // Command stream mode
+        let mut command_lines = app.format_command_stream();
+
+        // Add help text when focused
+        if code_focused {
+            command_lines.push(Line::from(""));
+            command_lines.push(Line::from(vec![
                 Span::styled("─ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(code_help, Style::default().fg(Color::Cyan)),
+                Span::styled("↑↓:nav Enter:approve Esc:deny Space:expand E:edit I:ins D:del Ctrl+U:rewind Ctrl+T:toggle", Style::default().fg(Color::Cyan)),
                 Span::styled(" ─", Style::default().fg(Color::DarkGray)),
             ]));
         }
-    }
 
-    let code_text = Text::from(code_spans);
-    let code_title = get_panel_title("Code Editor", code_focused);
+        let title = format!("Command Stream [Branch: {}]", app.current_branch);
+        (
+            Text::from(command_lines),
+            get_panel_title(&title, code_focused),
+        )
+    } else {
+        // Original code editor mode
+        let visible_lines: Vec<String> = app
+            .code_lines
+            .iter()
+            .skip(app.scroll_offset)
+            .take(20) // Show max 20 lines
+            .cloned()
+            .collect();
+
+        let mut code_spans: Vec<Line> = vec![Line::from(format!(
+            "FMPL Code{} (q to quit):",
+            mode_indicator
+        ))];
+
+        for (i, line) in visible_lines.iter().enumerate() {
+            let actual_row = app.scroll_offset + i;
+            let is_cursor_row = actual_row == app.cursor_row;
+
+            if is_cursor_row {
+                // Show cursor position
+                let cursor_col = app.cursor_col.min(line.len());
+                let before = line[..cursor_col].to_string();
+                let cursor_char = if cursor_col < line.len() {
+                    line[cursor_col..cursor_col + 1].to_string()
+                } else {
+                    " ".to_string()
+                };
+                let after = line[cursor_col..].to_string();
+
+                code_spans.push(Line::from(vec![
+                    Span::raw(format!("{:2} ", actual_row + 1)),
+                    Span::raw(before),
+                    Span::styled(
+                        cursor_char,
+                        Style::default().fg(Color::Yellow).bg(Color::DarkGray),
+                    ),
+                    Span::raw(after),
+                ]));
+            } else {
+                code_spans.push(Line::from(vec![
+                    Span::raw(format!("{:2} ", actual_row + 1)),
+                    Span::raw(line.clone()),
+                ]));
+            }
+        }
+
+        // Phase 6 Task 6.4: Add help text when focused
+        if code_focused {
+            let code_help = get_panel_help(PanelType::CodeEditor, app);
+            if !code_help.is_empty() {
+                code_spans.push(Line::from(""));
+                code_spans.push(Line::from(vec![
+                    Span::styled("─ ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(code_help, Style::default().fg(Color::Cyan)),
+                    Span::styled(" ─", Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+        }
+
+        (
+            Text::from(code_spans),
+            get_panel_title("Code Editor", code_focused),
+        )
+    };
 
     let code_panel = Paragraph::new(code_text)
         .block(
