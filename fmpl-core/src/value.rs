@@ -28,6 +28,8 @@ pub enum Value {
     Partial(Arc<Partial>),
     /// First-class grammar.
     Grammar(Arc<Grammar>),
+    /// Tagged/constructor value with symbol name and children.
+    Tagged(SmolStr, Arc<Vec<Value>>),
     /// Stream value with lazy operations.
     Stream(Arc<Stream>),
     /// Async stream handle (source) - live connection.
@@ -236,6 +238,7 @@ impl Value {
             Value::String(s) => !s.is_empty(),
             Value::List(l) => !l.is_empty(),
             Value::Map(m) => !m.is_empty(),
+            Value::Tagged(_, _) => true,
             _ => true,
         }
     }
@@ -260,6 +263,7 @@ impl Value {
             Value::Lambda(_) => "lambda",
             Value::Partial(_) => "partial",
             Value::Grammar(_) => "grammar",
+            Value::Tagged(_, _) => "tagged",
             Value::Stream(_) => "stream",
             Value::AsyncStream(_) => "async_stream",
             Value::Sink(_) => "sink",
@@ -600,6 +604,20 @@ impl fmt::Display for Value {
             Value::Lambda(_) => write!(f, "<lambda>"),
             Value::Partial(_) => write!(f, "<partial>"),
             Value::Grammar(g) => write!(f, "<grammar {}>", g.name),
+            Value::Tagged(tag, children) => {
+                write!(f, ":{}", tag)?;
+                if !children.is_empty() {
+                    write!(f, "(")?;
+                    for (i, child) in children.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{}", child)?;
+                    }
+                    write!(f, ")")?;
+                }
+                Ok(())
+            }
             Value::Stream(_) => write!(f, "<stream>"),
             Value::AsyncStream(s) => write!(f, "<async_stream #{}>", s.lock().unwrap().id()),
             Value::Sink(s) => write!(f, "<sink #{}>", s.id()),
@@ -646,5 +664,44 @@ mod tests {
         let grammar = Grammar::new(SmolStr::new("test"));
         let val = Value::Grammar(Arc::new(grammar));
         assert!(val.is_truthy());
+    }
+
+    #[test]
+    fn test_tagged_value_type_name() {
+        let val = Value::Tagged(
+            SmolStr::new("Binary"),
+            Arc::new(vec![
+                Value::Symbol(SmolStr::new("+")),
+                Value::Int(1),
+                Value::Int(2),
+            ]),
+        );
+        assert_eq!(val.type_name(), "tagged");
+    }
+
+    #[test]
+    fn test_tagged_value_display() {
+        let val = Value::Tagged(SmolStr::new("Int"), Arc::new(vec![Value::Int(42)]));
+        assert_eq!(format!("{}", val), ":Int(42)");
+    }
+
+    #[test]
+    fn test_tagged_value_is_truthy() {
+        let val = Value::Tagged(SmolStr::new("Foo"), Arc::new(vec![]));
+        assert!(val.is_truthy());
+    }
+
+    #[test]
+    fn test_tagged_value_nested() {
+        let inner = Value::Tagged(SmolStr::new("Int"), Arc::new(vec![Value::Int(1)]));
+        let outer = Value::Tagged(
+            SmolStr::new("Binary"),
+            Arc::new(vec![
+                Value::Symbol(SmolStr::new("+")),
+                inner,
+                Value::Tagged(SmolStr::new("Int"), Arc::new(vec![Value::Int(2)])),
+            ]),
+        );
+        assert_eq!(format!("{}", outer), ":Binary(:+, :Int(1), :Int(2))");
     }
 }

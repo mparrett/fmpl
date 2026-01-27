@@ -458,7 +458,7 @@ impl<'a> Display for GrammarPatternRepr<'a> {
         match self.0 {
             GrammarPattern::Empty => Ok(()),
             GrammarPattern::Any => write!(f, "."),
-            GrammarPattern::Char(c) => write!(f, "'{}'", c),
+            GrammarPattern::Char(c) => write!(f, "'{}'", escape_char(*c)),
             GrammarPattern::Literal(s) => write!(f, "\"{}\"", escape_string(s)),
             GrammarPattern::CharClass(ranges) => {
                 write!(f, "[")?;
@@ -596,6 +596,20 @@ impl SourceRepr for Value {
             Value::Lambda(lambda) => lambda.source_repr(),
             Value::Partial(partial) => partial.source_repr(),
             Value::Grammar(g) => format!("{}", GrammarRepr(g)),
+            Value::Tagged(tag, children) => {
+                let mut result = format!(":{}", tag);
+                if !children.is_empty() {
+                    result.push('(');
+                    for (i, child) in children.iter().enumerate() {
+                        if i > 0 {
+                            result.push_str(", ");
+                        }
+                        result.push_str(&child.source_repr());
+                    }
+                    result.push(')');
+                }
+                result
+            }
             Value::Stream(s) => s.source_repr(),
             // Objects require ObjectDb access - return a placeholder that can be filled in
             Value::Object(id) => format!("<object #{}>", id),
@@ -751,16 +765,22 @@ fn find_object_name(db: &ObjectDb, id: u64) -> Option<SmolStr> {
 fn escape_string(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
-        match c {
-            '"' => result.push_str("\\\""),
-            '\\' => result.push_str("\\\\"),
-            '\n' => result.push_str("\\n"),
-            '\r' => result.push_str("\\r"),
-            '\t' => result.push_str("\\t"),
-            c => result.push(c),
-        }
+        result.push_str(&escape_char(c));
     }
     result
+}
+
+/// Escape a single character for FMPL source output.
+fn escape_char(c: char) -> String {
+    match c {
+        '"' => "\\\"".to_string(),
+        '\'' => "\\'".to_string(),
+        '\\' => "\\\\".to_string(),
+        '\n' => "\\n".to_string(),
+        '\r' => "\\r".to_string(),
+        '\t' => "\\t".to_string(),
+        c => c.to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -862,5 +882,373 @@ mod tests {
         );
         assert!(repr.contains("foo:"), "should have property: {}", repr);
         assert!(repr.contains("bar("), "should have method: {}", repr);
+    }
+
+    // =========================================================================
+    // Grammar unparsing tests
+    // =========================================================================
+
+    #[test]
+    fn test_grammar_pattern_any() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::Any));
+        assert_eq!(repr, ".");
+    }
+
+    #[test]
+    fn test_grammar_pattern_char() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::Char('x')));
+        assert_eq!(repr, "'x'");
+    }
+
+    #[test]
+    fn test_grammar_pattern_literal() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::Literal("hello".into())));
+        assert_eq!(repr, "\"hello\"");
+    }
+
+    #[test]
+    fn test_grammar_pattern_literal_escaping() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Literal("hello\nworld".into()))
+        );
+        assert_eq!(repr, "\"hello\\nworld\"");
+    }
+
+    #[test]
+    fn test_grammar_pattern_char_class() {
+        use crate::grammar::{CharRange, Pattern as GP};
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::CharClass(vec![
+                CharRange::Range('a', 'z'),
+                CharRange::Char('_'),
+            ]))
+        );
+        assert_eq!(repr, "[a-z_]");
+    }
+
+    #[test]
+    fn test_grammar_pattern_neg_char_class() {
+        use crate::grammar::{CharRange, Pattern as GP};
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::NegCharClass(vec![CharRange::Range('0', '9'),]))
+        );
+        assert_eq!(repr, "[^0-9]");
+    }
+
+    #[test]
+    fn test_grammar_pattern_rule() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::Rule("digit".into())));
+        assert_eq!(repr, "digit");
+    }
+
+    #[test]
+    fn test_grammar_pattern_super() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::Super("expr".into())));
+        assert_eq!(repr, "^expr");
+    }
+
+    #[test]
+    fn test_grammar_pattern_seq() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Seq(vec![
+                GP::Literal("hello".into()),
+                GP::Any,
+                GP::Literal("world".into()),
+            ]))
+        );
+        assert_eq!(repr, "\"hello\" . \"world\"");
+    }
+
+    #[test]
+    fn test_grammar_pattern_choice() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Choice(vec![
+                GP::Char('a'),
+                GP::Char('b'),
+                GP::Char('c'),
+            ]))
+        );
+        assert_eq!(repr, "'a' | 'b' | 'c'");
+    }
+
+    #[test]
+    fn test_grammar_pattern_star() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Star(Box::new(GP::Rule("digit".into()))))
+        );
+        assert_eq!(repr, "digit*");
+    }
+
+    #[test]
+    fn test_grammar_pattern_plus() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Plus(Box::new(GP::Rule("digit".into()))))
+        );
+        assert_eq!(repr, "digit+");
+    }
+
+    #[test]
+    fn test_grammar_pattern_optional() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Optional(Box::new(GP::Char('-'))))
+        );
+        assert_eq!(repr, "'-'?");
+    }
+
+    #[test]
+    fn test_grammar_pattern_lookahead() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Lookahead(Box::new(GP::Rule("eof".into()))))
+        );
+        assert_eq!(repr, "&eof");
+    }
+
+    #[test]
+    fn test_grammar_pattern_not() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::Not(Box::new(GP::Char('\n')))));
+        assert_eq!(repr, "!'\\n'");
+    }
+
+    #[test]
+    fn test_grammar_pattern_bind() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Bind(Box::new(GP::Rule("digit".into())), "d".into()))
+        );
+        assert_eq!(repr, "digit:d");
+    }
+
+    #[test]
+    fn test_grammar_pattern_predicate() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Predicate(Expr::Binary(
+                Box::new(Expr::Ident("x".into())),
+                BinOp::Gt,
+                Box::new(Expr::Int(0)),
+            )))
+        );
+        assert_eq!(repr, "&{ (x > 0) }");
+    }
+
+    #[test]
+    fn test_grammar_pattern_guard() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Guard(
+                Box::new(GP::Rule("digit".into())),
+                Expr::Binary(
+                    Box::new(Expr::Ident("d".into())),
+                    BinOp::Lt,
+                    Box::new(Expr::Int(5)),
+                )
+            ))
+        );
+        assert_eq!(repr, "digit when (d < 5)");
+    }
+
+    #[test]
+    fn test_grammar_pattern_action() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Action(
+                Box::new(GP::Bind(Box::new(GP::Rule("digit".into())), "d".into())),
+                Expr::Ident("d".into()),
+            ))
+        );
+        assert_eq!(repr, "digit:d => d");
+    }
+
+    #[test]
+    fn test_grammar_pattern_list_match() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::ListMatch(
+                vec![GP::Rule("head".into()), GP::Rule("second".into())],
+                Some(Box::new(GP::Rule("tail".into()))),
+            ))
+        );
+        assert_eq!(repr, "[head, second | tail]");
+    }
+
+    #[test]
+    fn test_grammar_pattern_list_match_no_tail() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::ListMatch(
+                vec![GP::Literal("add".into()), GP::Any, GP::Any],
+                None,
+            ))
+        );
+        assert_eq!(repr, "[\"add\", ., .]");
+    }
+
+    #[test]
+    fn test_grammar_pattern_map_match() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::MapMatch(vec![
+                ("type".into(), GP::Literal("node".into())),
+                ("value".into(), GP::Rule("expr".into())),
+            ]))
+        );
+        assert_eq!(repr, "%{type: \"node\", value: expr}");
+    }
+
+    #[test]
+    fn test_grammar_pattern_symbol_match() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::SymbolMatch("foo".into())));
+        assert_eq!(repr, ":foo");
+    }
+
+    #[test]
+    fn test_grammar_pattern_end() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::End));
+        assert_eq!(repr, "end");
+    }
+
+    #[test]
+    fn test_grammar_pattern_apply() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!(
+            "{}",
+            GrammarPatternRepr(&GP::Apply(Box::new(GP::Rule("expr".into()))))
+        );
+        assert_eq!(repr, "~expr");
+    }
+
+    #[test]
+    fn test_grammar_pattern_match_value() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::MatchValue(Value::Int(42))));
+        assert_eq!(repr, "42");
+    }
+
+    #[test]
+    fn test_grammar_pattern_match_type() {
+        use crate::grammar::Pattern as GP;
+        let repr = format!("{}", GrammarPatternRepr(&GP::MatchType("string".into())));
+        assert_eq!(repr, "<string>");
+    }
+
+    #[test]
+    fn test_grammar_pattern_binary() {
+        use crate::grammar::Pattern as GP;
+        // Test various binary patterns
+        assert_eq!(format!("{}", GrammarPatternRepr(&GP::Byte(0x89))), "0x89");
+        assert_eq!(
+            format!("{}", GrammarPatternRepr(&GP::ByteRange(0x00, 0x7f))),
+            "0x00..0x7f"
+        );
+        assert_eq!(format!("{}", GrammarPatternRepr(&GP::Bytes(4))), "bytes(4)");
+        assert_eq!(format!("{}", GrammarPatternRepr(&GP::UInt8)), "uint8");
+        assert_eq!(format!("{}", GrammarPatternRepr(&GP::UInt16BE)), "uint16be");
+        assert_eq!(format!("{}", GrammarPatternRepr(&GP::UInt32LE)), "uint32le");
+        assert_eq!(format!("{}", GrammarPatternRepr(&GP::Int8)), "int8");
+        assert_eq!(format!("{}", GrammarPatternRepr(&GP::Int16LE)), "int16le");
+        assert_eq!(format!("{}", GrammarPatternRepr(&GP::Int32BE)), "int32be");
+    }
+
+    #[test]
+    fn test_grammar_full_repr() {
+        use crate::grammar::{Grammar, Pattern as GP, Rule};
+        use std::collections::HashMap;
+
+        let mut rules = HashMap::new();
+        rules.insert(
+            "digit".into(),
+            Rule {
+                pattern: GP::CharClass(vec![crate::grammar::CharRange::Range('0', '9')]),
+                action: None,
+            },
+        );
+        rules.insert(
+            "number".into(),
+            Rule {
+                pattern: GP::Plus(Box::new(GP::Rule("digit".into()))),
+                action: Some(Expr::Ident("digits".into())),
+            },
+        );
+
+        let grammar = Grammar {
+            name: "calc".into(),
+            parent: None,
+            parent_grammar: None,
+            rules,
+        };
+
+        let repr = format!("{}", GrammarRepr(&grammar));
+        assert!(
+            repr.contains("grammar calc"),
+            "should have grammar name: {}",
+            repr
+        );
+        assert!(repr.contains("digit ="), "should have digit rule: {}", repr);
+        assert!(
+            repr.contains("number ="),
+            "should have number rule: {}",
+            repr
+        );
+        assert!(repr.contains("[0-9]"), "should have char class: {}", repr);
+        assert!(repr.contains("digit+"), "should have plus: {}", repr);
+        assert!(repr.contains("=> digits"), "should have action: {}", repr);
+    }
+
+    #[test]
+    fn test_grammar_value_repr() {
+        use crate::grammar::{Grammar, Pattern as GP, Rule};
+        use std::collections::HashMap;
+
+        let mut rules = HashMap::new();
+        rules.insert(
+            "main".into(),
+            Rule {
+                pattern: GP::Any,
+                action: None,
+            },
+        );
+
+        let grammar = Grammar {
+            name: "test".into(),
+            parent: None,
+            parent_grammar: None,
+            rules,
+        };
+
+        let val = Value::Grammar(Arc::new(grammar));
+        let repr = val.source_repr();
+        assert!(repr.contains("grammar test"), "got: {}", repr);
+        assert!(repr.contains("main = ."), "got: {}", repr);
     }
 }

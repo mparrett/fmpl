@@ -302,6 +302,36 @@ pub enum Instruction {
     // === Grammar Pattern Instructions (for PEG pattern matching) ===
     // These instructions implement PEG pattern matching directly in the VM
 
+    // Backtracking support (for lowering Star/Plus/Choice to base IR)
+    ParseCheckpoint, // Create checkpoint for backtracking, store in values[ip]
+    ParseRestore {
+        checkpoint: InstrIndex,
+    }, // Restore from checkpoint value
+
+    // Input stack management (for OMeta-style tree descent)
+    ParsePush {
+        value: InstrIndex,
+    }, // Push value as new input stream (for tree descent)
+    ParsePop,      // Pop to previous input stream (for tree ascent)
+    ParsePosition, // Get current position as Int (for zero-length guard)
+
+    // List building (for collecting Star/Plus results)
+    ListAppend {
+        list: InstrIndex,
+        item: InstrIndex,
+    }, // Append item to list, return new list
+
+    // Type checking (for OMeta-style tree matching)
+    IsList {
+        value: InstrIndex,
+    }, // Check if value is a list, return Bool
+    IsMap {
+        value: InstrIndex,
+    }, // Check if value is a map, return Bool
+    IsString {
+        value: InstrIndex,
+    }, // Check if value is a string, return Bool
+
     // Leaf patterns (write value to values[ip])
     MatchAny, // Match any item from input, write to values[ip]
     MatchChar {
@@ -342,18 +372,11 @@ pub enum Instruction {
     }, // Match zero or more of literal
 
     // Combinators (reference pattern instructions by index)
+    // Note: MatchStar, MatchPlus, MatchChoice have been removed - they are now
+    // lowered to base IR (loops + jumps) by the compiler. See compile_grammar_pattern.
     MatchSeq {
         patterns: Vec<InstrIndex>,
     }, // Sequence: match all in order
-    MatchChoice {
-        cases: Vec<InstrIndex>,
-    }, // Ordered choice: try each
-    MatchStar {
-        pattern: InstrIndex,
-    }, // Zero or more (greedy)
-    MatchPlus {
-        pattern: InstrIndex,
-    }, // One or more (greedy)
     MatchStarRule {
         rule: ConstIndex,
     }, // Zero or more of a rule (by symbol name)
@@ -528,6 +551,7 @@ impl CompiledCode {
             Instruction::Jump { target: t } => *t = target,
             Instruction::JumpIfFalse { target: t, .. } => *t = target,
             Instruction::JumpIfTrue { target: t, .. } => *t = target,
+            Instruction::JumpIfNull { target: t, .. } => *t = target,
             Instruction::MatchPattern { fail_target: t, .. } => *t = target,
             Instruction::PushHandler { catch_target: t } => *t = target,
             _ => panic!("not a jump instruction at index {}", idx.0),
@@ -2403,9 +2427,6 @@ impl Compiler {
             let entry_point = self.code.next_index();
             self.code.add_rule_entry(rule_name.clone(), entry_point);
 
-            // Check if the pattern is a Choice - if so, it handles its own Returns
-            let is_choice = matches!(rule.pattern, crate::grammar::Pattern::Choice(_));
-
             // Compile the rule's pattern
             let pattern_idx = self.compile_grammar_pattern(&rule.pattern)?;
 
@@ -2424,10 +2445,7 @@ impl Compiler {
             };
 
             // Each rule should end with a Return instruction to return to the caller
-            // EXCEPT if the pattern was a Choice (which handles its own Returns)
-            if !is_choice {
-                self.code.emit(Instruction::Return { value: result_idx });
-            }
+            self.code.emit(Instruction::Return { value: result_idx });
         }
 
         Ok(())
@@ -2577,158 +2595,327 @@ impl Compiler {
             }
 
             GP::Choice(patterns) => {
-                eprintln!(
-                    "DEBUG compile_grammar_pattern: compiling Choice with {} patterns",
-                    patterns.len()
-                );
+                // Choice lowered to IR with proper backtracking:
+                //
+                //   result_var = null
+                //   checkpoint = ParseCheckpoint
+                //
+                //   case1_result = <compile pattern 1>
+                //   JumpIfNull case1_result, try_case2
+                //   StoreVar result_var, case1_result
+                //   Jump done
+                //
+                // try_case2:
+                //   ParseRestore checkpoint
+                //   case2_result = <compile pattern 2>
+                //   JumpIfNull case2_result, try_case3
+                //   StoreVar result_var, case2_result
+                //   Jump done
+                //
+                // try_case3:
+                //   ParseRestore checkpoint
+                //   case3_result = <compile pattern 3>
+                //   StoreVar result_var, case3_result  // Last case, no jump needed
+                //
+                // done:
+                //   LoadVar result_var
 
                 if patterns.is_empty() {
-                    // Empty choice - always fail
-                    let const_idx = self.code.add_constant(SmolStr::new(""));
-                    return Ok(self.code.emit(Instruction::MatchLiteral { const_idx }));
+                    // Empty choice - always fail (return Null)
+                    return Ok(self.code.emit(Instruction::LoadNull));
                 }
 
-                // Compile Choice using conditional jumps for flow control
-                // Each case is compiled with JumpIfNull and Return immediately after
+                if patterns.len() == 1 {
+                    // Single pattern - no choice needed
+                    return self.compile_grammar_pattern(&patterns[0]);
+                }
+
+                // Generate unique var name for result
+                let result_var =
+                    SmolStr::new(format!("__choice_result_{}", self.code.next_index().0));
+
+                // Initialize result to null
+                let null_idx = self.code.emit(Instruction::LoadNull);
+                self.code.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: null_idx,
+                });
+
+                // Create checkpoint for backtracking
+                let checkpoint_idx = self.code.emit(Instruction::ParseCheckpoint);
 
                 let patterns_len = patterns.len();
-                let mut case_pattern_indices = Vec::new(); // Pattern indices for jumping
-                let mut case_match_action_indices = Vec::new(); // MatchAction indices for Return
-                let mut jump_indices = Vec::new();
+                let mut jump_to_done: Vec<InstrIndex> = Vec::new();
 
                 for (i, pattern) in patterns.iter().enumerate() {
-                    // Compile this case - this returns the MatchAction index for Action patterns
-                    let case_idx = self.compile_grammar_pattern(pattern)?;
+                    let is_last = i == patterns_len - 1;
 
-                    // For Action patterns, case_idx is the MatchAction index
-                    // We need to find the pattern index by looking at the MatchAction instruction
-                    let pattern_idx = if let Instruction::MatchAction { pattern, .. } =
-                        &self.code.instructions[case_idx.0]
-                    {
-                        *pattern
-                    } else {
-                        case_idx // Not an Action pattern, use case_idx directly
-                    };
+                    // Compile this case
+                    let case_result_idx = self.compile_grammar_pattern(pattern)?;
 
-                    case_pattern_indices.push(pattern_idx);
-                    case_match_action_indices.push(case_idx);
-
-                    if i < patterns_len - 1 {
-                        // Not the last case - emit JumpIfNull to jump to next case's PATTERN
-                        let _jump_idx = self.code.emit(Instruction::JumpIfNull {
-                            cond: case_idx,        // Check if MatchAction failed
-                            target: InstrIndex(0), // Placeholder
+                    if !is_last {
+                        // Not the last case - check for failure and jump to next
+                        let jump_to_next = self.code.emit(Instruction::JumpIfNull {
+                            cond: case_result_idx,
+                            target: InstrIndex(0), // placeholder
                         });
-                        jump_indices.push((_jump_idx, i));
 
-                        // Emit Return for successful case
-                        self.code.emit(Instruction::Return { value: case_idx });
+                        // Store successful result
+                        self.code.emit(Instruction::StoreVar {
+                            name: result_var.clone(),
+                            value: case_result_idx,
+                        });
+
+                        // Jump to done
+                        let jump_done = self.code.emit(Instruction::Jump {
+                            target: InstrIndex(0), // placeholder
+                        });
+                        jump_to_done.push(jump_done);
+
+                        // Next case label - restore checkpoint first
+                        let next_case_label = self.code.next_index();
+                        self.code.patch_jump_target(jump_to_next, next_case_label);
+
+                        // Restore position before trying next case
+                        self.code.emit(Instruction::ParseRestore {
+                            checkpoint: checkpoint_idx,
+                        });
                     } else {
-                        // Last case - just emit Return
-                        self.code.emit(Instruction::Return { value: case_idx });
+                        // Last case - just store result (may be null if failed)
+                        self.code.emit(Instruction::StoreVar {
+                            name: result_var.clone(),
+                            value: case_result_idx,
+                        });
                     }
                 }
 
-                // Fix up JumpIfNull targets to jump to the next case's PATTERN
-                for (jump_idx, case_i) in &jump_indices {
-                    let next_pattern_idx = case_pattern_indices[case_i + 1];
-                    if let Instruction::JumpIfNull { cond: _, target } =
-                        &mut self.code.instructions[jump_idx.0]
-                    {
-                        *target = next_pattern_idx;
-                    }
+                // Done label - patch all jumps
+                let done_label = self.code.next_index();
+                for jump_idx in jump_to_done {
+                    self.code.patch_jump_target(jump_idx, done_label);
                 }
 
-                eprintln!(
-                    "DEBUG compile_grammar_pattern: Choice compiled with {} cases, {} jumps",
-                    case_pattern_indices.len(),
-                    jump_indices.len()
-                );
-
-                // Return the first case's MatchAction index
-                case_match_action_indices[0]
+                // Return the result
+                self.code.emit(Instruction::LoadVar(result_var))
             }
 
             GP::Star(p) => {
                 // Star(p) compiles differently based on pattern type:
-                // - If p is Rule(name): use MatchStarRule (can call rule repeatedly)
-                // - Otherwise: emit specialized instruction that stores pattern data directly
+                // - Char-based patterns (Char, CharClass, Literal): use specialized instructions
+                //   that join results into a string (for backward compatibility)
+                // - Rule patterns: use MatchStarRule
+                // - Other patterns: lower to IR loop
 
-                if let GP::Rule(name) = p.as_ref() {
-                    // Rule reference - use rule-based repetition
-                    let const_idx = self.code.add_constant(name.clone());
-                    self.code
-                        .emit(Instruction::MatchStarRule { rule: const_idx })
-                } else {
-                    // Inline pattern - emit specialized instruction that avoids double-execution
-                    match p.as_ref() {
-                        GP::Char(c) => self.code.emit(Instruction::MatchStarChar { c: *c }),
-                        GP::CharClass(ranges) => {
-                            use crate::grammar::CharRange;
-                            let range_tuples: Vec<(char, char)> = ranges
-                                .iter()
-                                .map(|r| match r {
-                                    CharRange::Char(c) => (*c, *c),
-                                    CharRange::Range(lo, hi) => (*lo, *hi),
-                                })
-                                .collect();
-                            self.code.emit(Instruction::MatchStarCharClass {
-                                ranges: range_tuples,
+                match p.as_ref() {
+                    GP::Rule(name) => {
+                        // Rule reference - use rule-based repetition
+                        let const_idx = self.code.add_constant(name.clone());
+                        self.code
+                            .emit(Instruction::MatchStarRule { rule: const_idx })
+                    }
+                    GP::Char(c) => self.code.emit(Instruction::MatchStarChar { c: *c }),
+                    GP::CharClass(ranges) => {
+                        use crate::grammar::CharRange;
+                        let range_tuples: Vec<(char, char)> = ranges
+                            .iter()
+                            .map(|r| match r {
+                                CharRange::Char(c) => (*c, *c),
+                                CharRange::Range(lo, hi) => (*lo, *hi),
                             })
-                        }
-                        GP::Literal(s) => {
-                            let const_idx = self.code.add_constant(s.clone());
-                            self.code.emit(Instruction::MatchStarLiteral { const_idx })
-                        }
-                        _ => {
-                            // Other patterns - use generic MatchStar (broken but won't crash)
-                            let pattern_idx = self.compile_grammar_pattern(p)?;
-                            self.code.emit(Instruction::MatchStar {
-                                pattern: pattern_idx,
-                            })
-                        }
+                            .collect();
+                        self.code.emit(Instruction::MatchStarCharClass {
+                            ranges: range_tuples,
+                        })
+                    }
+                    GP::Literal(s) => {
+                        let const_idx = self.code.add_constant(s.clone());
+                        self.code.emit(Instruction::MatchStarLiteral { const_idx })
+                    }
+                    _ => {
+                        // Other patterns - lower to IR loop
+                        // Uses a local variable to accumulate results across loop iterations.
+                        let var_name =
+                            SmolStr::new(format!("__star_results_{}", self.code.next_index().0));
+
+                        // Create empty results list and store in variable
+                        let empty_list_idx =
+                            self.code.emit(Instruction::MakeList { elements: vec![] });
+                        self.code.emit(Instruction::StoreVar {
+                            name: var_name.clone(),
+                            value: empty_list_idx,
+                        });
+
+                        // Loop start label
+                        let loop_start = self.code.next_index();
+
+                        // Record start position for zero-length guard
+                        let start_pos_idx = self.code.emit(Instruction::ParsePosition);
+
+                        // Compile the inner pattern
+                        let result_idx = self.compile_grammar_pattern(p)?;
+
+                        // If pattern failed (null), exit loop
+                        let jump_if_null = self.code.emit(Instruction::JumpIfNull {
+                            cond: result_idx,
+                            target: InstrIndex(0), // placeholder, will patch
+                        });
+
+                        // Load current results, append, and store back
+                        let current_results_idx =
+                            self.code.emit(Instruction::LoadVar(var_name.clone()));
+                        let new_results_idx = self.code.emit(Instruction::ListAppend {
+                            list: current_results_idx,
+                            item: result_idx,
+                        });
+                        self.code.emit(Instruction::StoreVar {
+                            name: var_name.clone(),
+                            value: new_results_idx,
+                        });
+
+                        // Record end position for zero-length guard
+                        let end_pos_idx = self.code.emit(Instruction::ParsePosition);
+
+                        // Zero-length guard
+                        let cmp_idx = self.code.emit(Instruction::Eq {
+                            lhs: start_pos_idx,
+                            rhs: end_pos_idx,
+                        });
+                        let jump_if_zero_length = self.code.emit(Instruction::JumpIfTrue {
+                            cond: cmp_idx,
+                            target: InstrIndex(0), // placeholder, will patch
+                        });
+
+                        // Jump back to loop start
+                        self.code.emit(Instruction::Jump { target: loop_start });
+
+                        // Loop end - patch forward jumps
+                        let loop_end = self.code.next_index();
+                        self.code.patch_jump_target(jump_if_null, loop_end);
+                        self.code.patch_jump_target(jump_if_zero_length, loop_end);
+
+                        // Return the accumulated results
+                        self.code.emit(Instruction::LoadVar(var_name))
                     }
                 }
             }
 
             GP::Plus(p) => {
                 // Plus(p) compiles differently based on pattern type:
-                // - If p is Rule(name): use MatchPlusRule
-                // - Otherwise: emit specialized instruction that stores pattern data directly
+                // - Char-based patterns: use specialized instructions that join into string
+                // - Rule patterns: use MatchPlusRule
+                // - Other patterns: lower to IR loop
 
-                if let GP::Rule(name) = p.as_ref() {
-                    eprintln!("DEBUG compile: Plus({:?}) -> MatchPlusRule({})", name, name);
-                    let const_idx = self.code.add_constant(name.clone());
-                    self.code
-                        .emit(Instruction::MatchPlusRule { rule: const_idx })
-                } else {
-                    // Inline pattern - emit specialized instruction that avoids double-execution
-                    match p.as_ref() {
-                        GP::Char(c) => self.code.emit(Instruction::MatchPlusChar { c: *c }),
-                        GP::CharClass(ranges) => {
-                            use crate::grammar::CharRange;
-                            let range_tuples: Vec<(char, char)> = ranges
-                                .iter()
-                                .map(|r| match r {
-                                    CharRange::Char(c) => (*c, *c),
-                                    CharRange::Range(lo, hi) => (*lo, *hi),
-                                })
-                                .collect();
-                            self.code.emit(Instruction::MatchPlusCharClass {
-                                ranges: range_tuples,
+                match p.as_ref() {
+                    GP::Rule(name) => {
+                        let const_idx = self.code.add_constant(name.clone());
+                        self.code
+                            .emit(Instruction::MatchPlusRule { rule: const_idx })
+                    }
+                    GP::Char(c) => self.code.emit(Instruction::MatchPlusChar { c: *c }),
+                    GP::CharClass(ranges) => {
+                        use crate::grammar::CharRange;
+                        let range_tuples: Vec<(char, char)> = ranges
+                            .iter()
+                            .map(|r| match r {
+                                CharRange::Char(c) => (*c, *c),
+                                CharRange::Range(lo, hi) => (*lo, *hi),
                             })
-                        }
-                        GP::Literal(s) => {
-                            let const_idx = self.code.add_constant(s.clone());
-                            self.code.emit(Instruction::MatchPlusLiteral { const_idx })
-                        }
-                        _ => {
-                            // Other patterns - use generic MatchPlus (broken but won't crash)
-                            let pattern_idx = self.compile_grammar_pattern(p)?;
-                            self.code.emit(Instruction::MatchPlus {
-                                pattern: pattern_idx,
-                            })
-                        }
+                            .collect();
+                        self.code.emit(Instruction::MatchPlusCharClass {
+                            ranges: range_tuples,
+                        })
+                    }
+                    GP::Literal(s) => {
+                        let const_idx = self.code.add_constant(s.clone());
+                        self.code.emit(Instruction::MatchPlusLiteral { const_idx })
+                    }
+                    _ => {
+                        // Other patterns - lower to IR loop
+                        // Same as Star but requires at least one match.
+                        let var_name =
+                            SmolStr::new(format!("__plus_results_{}", self.code.next_index().0));
+
+                        // First match - must succeed
+                        let first_result_idx = self.compile_grammar_pattern(p)?;
+                        let jump_if_first_null = self.code.emit(Instruction::JumpIfNull {
+                            cond: first_result_idx,
+                            target: InstrIndex(0), // placeholder: will patch to fail label
+                        });
+
+                        // Create results list with first match and store in variable
+                        let initial_list_idx = self.code.emit(Instruction::MakeList {
+                            elements: vec![first_result_idx],
+                        });
+                        self.code.emit(Instruction::StoreVar {
+                            name: var_name.clone(),
+                            value: initial_list_idx,
+                        });
+
+                        // Loop start label
+                        let loop_start = self.code.next_index();
+
+                        // Record start position for zero-length guard
+                        let start_pos_idx = self.code.emit(Instruction::ParsePosition);
+
+                        // Compile the inner pattern again (for subsequent matches)
+                        let result_idx = self.compile_grammar_pattern(p)?;
+
+                        // If pattern failed (null), exit loop
+                        let jump_if_null = self.code.emit(Instruction::JumpIfNull {
+                            cond: result_idx,
+                            target: InstrIndex(0), // placeholder, will patch
+                        });
+
+                        // Load current results, append, and store back
+                        let current_results_idx =
+                            self.code.emit(Instruction::LoadVar(var_name.clone()));
+                        let new_results_idx = self.code.emit(Instruction::ListAppend {
+                            list: current_results_idx,
+                            item: result_idx,
+                        });
+                        self.code.emit(Instruction::StoreVar {
+                            name: var_name.clone(),
+                            value: new_results_idx,
+                        });
+
+                        // Record end position for zero-length guard
+                        let end_pos_idx = self.code.emit(Instruction::ParsePosition);
+
+                        // Zero-length guard
+                        let cmp_idx = self.code.emit(Instruction::Eq {
+                            lhs: start_pos_idx,
+                            rhs: end_pos_idx,
+                        });
+                        let jump_if_zero_length = self.code.emit(Instruction::JumpIfTrue {
+                            cond: cmp_idx,
+                            target: InstrIndex(0), // placeholder, will patch
+                        });
+
+                        // Jump back to loop start
+                        self.code.emit(Instruction::Jump { target: loop_start });
+
+                        // Fail label - no matches (should return Null)
+                        let fail_label = self.code.next_index();
+                        self.code.patch_jump_target(jump_if_first_null, fail_label);
+                        let _null_idx = self.code.emit(Instruction::LoadNull);
+                        let jump_to_done = self.code.emit(Instruction::Jump {
+                            target: InstrIndex(0),
+                        }); // placeholder
+
+                        // Loop end - patch forward jumps
+                        let loop_end = self.code.next_index();
+                        self.code.patch_jump_target(jump_if_null, loop_end);
+                        self.code.patch_jump_target(jump_if_zero_length, loop_end);
+                        let final_result_idx = self.code.emit(Instruction::LoadVar(var_name));
+
+                        // Done label - patch jump from fail path
+                        let done_label = self.code.next_index();
+                        self.code.patch_jump_target(jump_to_done, done_label);
+
+                        // Copy the appropriate result
+                        self.code.emit(Instruction::Copy {
+                            source: final_result_idx,
+                        })
                     }
                 }
             }
@@ -2837,10 +3024,37 @@ impl Compiler {
                 self.code.emit(Instruction::MatchAny)
             }
 
-            GP::Predicate(_) => {
-                // Semantic predicate - need expression compilation
-                // Placeholder: match any
-                self.code.emit(Instruction::MatchAny)
+            GP::Predicate(expr) => {
+                // Semantic predicate: evaluate expression, succeed if truthy
+                // Lowered to IR:
+                //   expr_result = compile(expr)
+                //   if !truthy(expr_result) -> return Null (fail)
+                //   else -> return true (success, don't consume input)
+                //
+                // Compile the predicate expression
+                let expr_idx = self.compile_expr(expr)?;
+
+                // Check if truthy - JumpIfFalse to failure case
+                let jump_to_fail = self.code.emit(Instruction::JumpIfFalse {
+                    cond: expr_idx,
+                    target: InstrIndex(0), // placeholder
+                });
+
+                // Success case: return true (predicates succeed without producing meaningful value)
+                let _success_idx = self.code.emit(Instruction::LoadBool(true));
+                let jump_to_end = self.code.emit(Instruction::Jump {
+                    target: InstrIndex(0), // placeholder
+                });
+
+                // Failure case: return Null to signal pattern failure
+                let fail_idx = self.code.next_index();
+                self.code.patch_jump_target(jump_to_fail, fail_idx);
+                let _fail_null = self.code.emit(Instruction::LoadNull);
+
+                let end_idx = self.code.next_index();
+                self.code.patch_jump_target(jump_to_end, end_idx);
+
+                end_idx
             }
 
             // Binary patterns
@@ -2860,14 +3074,10 @@ impl Compiler {
                 self.code.emit(Instruction::MatchAny)
             }
 
-            // Object/value patterns
+            // Object/value patterns - For simple patterns use MatchListWithBindings,
+            // for complex patterns use OMeta-style tree descent
             GP::ListMatch(patterns, rest) => {
-                // For list patterns with nested patterns (like maps), we need to execute them
-                // We can't just extract variable names - we need to compile the patterns
-                // But we also need to avoid executing them before MatchList
-                // This is a complex case that requires a different approach
-
-                // For now, check if any pattern is complex (not just Bind or Any)
+                // Check if any pattern is complex (not just Bind or Any)
                 let has_complex_patterns = patterns
                     .iter()
                     .any(|p| !matches!(p, GP::Bind(_, _) | GP::Any))
@@ -2876,8 +3086,22 @@ impl Compiler {
                         .map_or(false, |r| !matches!(r.as_ref(), GP::Bind(_, _) | GP::Any));
 
                 if has_complex_patterns {
-                    // Fall back to instruction-based pattern execution
-                    // This will have the position advancement issue, but at least it works
+                    // OMeta-style list matching with tree descent for complex patterns:
+                    // For patterns like [%{x: a}, %{x: b}] or ['add' expr:x expr:y]
+                    // 1. Get current input value (it IS the list, not from a stream)
+                    // 2. Check if it's a list
+                    // 3. Push the list as new input stream (ParsePush)
+                    // 4. Match each element pattern in sequence
+                    // 5. Check MatchEnd (unless rest pattern)
+                    // 6. Pop back (ParsePop)
+
+                    // 1. Get current input value using GetInput instruction
+                    // We need to add this instruction - for now use MatchAny with special handling
+                    // Actually, let's use the existing MatchList instruction for the IsList check
+                    // and then push/descend
+
+                    // For now, emit MatchList which handles the whole thing
+                    // This will be refactored when we implement full OMeta tree descent
                     let compiled_patterns: Vec<InstrIndex> = patterns
                         .iter()
                         .map(|p| self.compile_grammar_pattern(p))

@@ -1204,6 +1204,104 @@ impl Vm {
                 // - Current: GrammarApply delegates to PegRuntime
                 // - Future: ApplyRule executes compiled patterns directly in VM
                 // - Benefit: No context switch, direct values[] access
+                Instruction::ParseCheckpoint => {
+                    let frame = self.frames.last_mut().unwrap();
+                    // Create a checkpoint capturing stack depth and position
+                    // Store as a list [stack_depth, position] for later restoration
+                    let checkpoint = frame.parse_state.checkpoint(frame);
+                    let checkpoint_value = Value::List(Arc::new(vec![
+                        Value::Int(checkpoint.stack_depth as i64),
+                        Value::Int(checkpoint.position as i64),
+                    ]));
+                    frame.set_current(checkpoint_value);
+                }
+
+                Instruction::ParseRestore { checkpoint } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    // Get the checkpoint value (list [stack_depth, position])
+                    let checkpoint_value = frame.get(checkpoint);
+                    match checkpoint_value {
+                        Value::List(items) if items.len() == 2 => {
+                            if let (Value::Int(depth), Value::Int(pos)) = (&items[0], &items[1]) {
+                                let cp = ParseCheckpoint {
+                                    stack_depth: *depth as usize,
+                                    position: *pos as usize,
+                                };
+                                frame.parse_state.restore(cp);
+                                frame.set_current(Value::Null);
+                            } else {
+                                return Err(Error::Runtime(
+                                    "invalid checkpoint format".to_string(),
+                                ));
+                            }
+                        }
+                        Value::Int(pos) => {
+                            // Legacy: simple position-only checkpoint
+                            frame.parse_state.set_input_pos(Some(pos as usize));
+                            frame.set_current(Value::Null);
+                        }
+                        _ => {
+                            return Err(Error::Runtime("invalid checkpoint value".to_string()));
+                        }
+                    }
+                }
+
+                Instruction::ParsePush { value } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let val = frame.get(value);
+                    frame.parse_state.push_input(val);
+                    frame.set_current(Value::Null);
+                }
+
+                Instruction::ParsePop => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let popped = frame.parse_state.pop_input();
+                    frame.set_current(Value::Bool(popped));
+                }
+
+                Instruction::ParsePosition => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let pos = frame.parse_state.position();
+                    frame.set_current(Value::Int(pos as i64));
+                }
+
+                Instruction::ListAppend { list, item } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let list_val = frame.get(list);
+                    let item_val = frame.get(item);
+                    match list_val {
+                        Value::List(items) => {
+                            let mut new_items = (*items).clone();
+                            new_items.push(item_val);
+                            frame.set_current(Value::List(Arc::new(new_items)));
+                        }
+                        _ => {
+                            return Err(Error::Runtime("ListAppend: expected list".to_string()));
+                        }
+                    }
+                }
+
+                Instruction::IsList { value } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let val = frame.get(value);
+                    let is_list = matches!(val, Value::List(_));
+                    frame.set_current(Value::Bool(is_list));
+                }
+
+                Instruction::IsMap { value } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let val = frame.get(value);
+                    let is_map = matches!(val, Value::Map(_));
+                    frame.set_current(Value::Bool(is_map));
+                }
+
+                Instruction::IsString { value } => {
+                    let frame = self.frames.last_mut().unwrap();
+                    let val = frame.get(value);
+                    let is_string = matches!(val, Value::String(_));
+                    frame.set_current(Value::Bool(is_string));
+                }
+
                 Instruction::MatchAny => {
                     let frame = self.frames.last_mut().unwrap();
                     if let Some(ch) = frame.parse_state.head_char() {
@@ -1213,10 +1311,9 @@ impl Vm {
                         frame.parse_state.advance(1);
                         frame.set_current(value);
                     } else {
-                        return Err(Error::ParseFailed {
-                            position: frame.parse_state.position(),
-                            message: "MatchAny: end of input".to_string(),
-                        });
+                        // At end of input - return Null to signal pattern failure
+                        // This enables proper backtracking in Choice and ListMatch patterns
+                        frame.set_current(Value::Null);
                     }
                 }
 
@@ -1285,6 +1382,7 @@ impl Vm {
                 }
 
                 Instruction::MatchCharClass { ranges } => {
+                    // Returns matched char on success, Null on failure (for OMeta-style lowering)
                     let frame = self.frames.last_mut().unwrap();
                     if let Some(ch) = frame.parse_state.head_char() {
                         // Check if character matches any range
@@ -1293,16 +1391,12 @@ impl Vm {
                             frame.parse_state.advance(ch.len_utf8());
                             frame.set_current(Value::String(SmolStr::new(ch.to_string())));
                         } else {
-                            return Err(Error::ParseFailed {
-                                position: frame.parse_state.position(),
-                                message: format!("MatchCharClass: '{}' not in ranges", ch),
-                            });
+                            // Pattern failed - return Null instead of error
+                            frame.set_current(Value::Null);
                         }
                     } else {
-                        return Err(Error::ParseFailed {
-                            position: frame.parse_state.position(),
-                            message: "MatchCharClass: end of input".to_string(),
-                        });
+                        // End of input - return Null
+                        frame.set_current(Value::Null);
                     }
                 }
 
@@ -1328,280 +1422,9 @@ impl Vm {
                     }
                 }
 
-                Instruction::MatchStar { pattern } => {
-                    // Match zero or more times (greedy).
-                    // Inspects the pattern instruction and executes its logic in a loop.
-                    // This follows the OMeta _many pattern: loop until failure, collecting results.
-                    let frame = self.frames.last_mut().unwrap();
-                    let pattern_instr = frame.code.instructions.get(pattern.0).cloned();
-                    let mut results = Vec::new();
-                    let mut all_strings = true;
-
-                    loop {
-                        // Create checkpoint before each attempt
-                        let checkpoint = frame.parse_state.checkpoint(frame);
-
-                        // Execute pattern matching based on instruction type
-                        let match_result: Result<Value> = match &pattern_instr {
-                            Some(Instruction::MatchCharClass { ranges }) => {
-                                // Character class matching as predicate
-                                if let Some(ch) = frame.parse_state.head_char() {
-                                    if ranges.iter().any(|(lo, hi)| ch >= *lo && ch <= *hi) {
-                                        frame.parse_state.advance(ch.len_utf8());
-                                        Ok(Value::String(SmolStr::new(ch.to_string())))
-                                    } else {
-                                        Err(Error::ParseFailed {
-                                            position: frame.parse_state.position(),
-                                            message: "MatchStar: char class mismatch".to_string(),
-                                        })
-                                    }
-                                } else {
-                                    Err(Error::ParseFailed {
-                                        position: frame.parse_state.position(),
-                                        message: "MatchStar: end of input".to_string(),
-                                    })
-                                }
-                            }
-                            Some(Instruction::MatchChar { char: expected }) => {
-                                if let Some(ch) = frame.parse_state.head_char() {
-                                    if ch == *expected {
-                                        frame.parse_state.advance(ch.len_utf8());
-                                        Ok(Value::String(SmolStr::new(ch.to_string())))
-                                    } else {
-                                        Err(Error::ParseFailed {
-                                            position: frame.parse_state.position(),
-                                            message: format!(
-                                                "MatchStar: expected '{}', got '{}'",
-                                                expected, ch
-                                            ),
-                                        })
-                                    }
-                                } else {
-                                    Err(Error::ParseFailed {
-                                        position: frame.parse_state.position(),
-                                        message: "MatchStar: end of input".to_string(),
-                                    })
-                                }
-                            }
-                            Some(Instruction::MatchLiteral { const_idx }) => {
-                                let literal = frame.code.get_constant(*const_idx);
-                                let text = frame.parse_state.text_from();
-                                if let Some(text) = text {
-                                    if text.starts_with(literal.as_str()) {
-                                        frame.parse_state.advance(literal.len());
-                                        Ok(Value::String(literal))
-                                    } else {
-                                        Err(Error::ParseFailed {
-                                            position: frame.parse_state.position(),
-                                            message: format!("MatchStar: expected '{}'", literal),
-                                        })
-                                    }
-                                } else {
-                                    Err(Error::ParseFailed {
-                                        position: frame.parse_state.position(),
-                                        message: "MatchStar: no input".to_string(),
-                                    })
-                                }
-                            }
-                            // For other patterns, we can't easily re-execute without a VM
-                            // Fall back to single match (broken but won't crash)
-                            _ => {
-                                let result = frame.get(pattern);
-                                if matches!(result, Value::Null) {
-                                    Err(Error::ParseFailed {
-                                        position: frame.parse_state.position(),
-                                        message: "MatchStar: pattern not supported for repetition"
-                                            .to_string(),
-                                    })
-                                } else {
-                                    Ok(result)
-                                }
-                            }
-                        };
-
-                        match match_result {
-                            Ok(value) => {
-                                match &value {
-                                    Value::String(_) => {
-                                        results.push(value);
-                                    }
-                                    _ => {
-                                        all_strings = false;
-                                        results.push(value);
-                                    }
-                                }
-
-                                // GUARD: Check for zero-length match to prevent infinite loop
-                                let new_pos = frame.parse_state.position();
-                                let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
-                                if new_pos == checkpoint_pos {
-                                    break;
-                                }
-                            }
-                            Err(_) => {
-                                // Pattern failed - restore checkpoint and stop
-                                frame.parse_state.restore(checkpoint);
-                                break;
-                            }
-                        }
-                    }
-
-                    // Join strings if all results were strings (character class pattern)
-                    if all_strings {
-                        let joined: String = results
-                            .into_iter()
-                            .filter_map(|v| match v {
-                                Value::String(s) => Some(s.to_string()),
-                                _ => None,
-                            })
-                            .collect();
-                        frame.set_current(Value::String(SmolStr::new(joined)));
-                    } else {
-                        frame.set_current(Value::List(Arc::new(results)));
-                    }
-                }
-
-                Instruction::MatchPlus { pattern } => {
-                    // Match one or more times.
-                    // Same as MatchStar but requires at least one match.
-                    let frame = self.frames.last_mut().unwrap();
-                    let pattern_instr = frame.code.instructions.get(pattern.0).cloned();
-                    let mut results = Vec::new();
-                    let mut all_strings = true;
-
-                    loop {
-                        // Create checkpoint before each attempt
-                        let checkpoint = frame.parse_state.checkpoint(frame);
-
-                        // Execute pattern matching based on instruction type
-                        let match_result: Result<Value> = match &pattern_instr {
-                            Some(Instruction::MatchCharClass { ranges }) => {
-                                if let Some(ch) = frame.parse_state.head_char() {
-                                    if ranges.iter().any(|(lo, hi)| ch >= *lo && ch <= *hi) {
-                                        frame.parse_state.advance(ch.len_utf8());
-                                        Ok(Value::String(SmolStr::new(ch.to_string())))
-                                    } else {
-                                        Err(Error::ParseFailed {
-                                            position: frame.parse_state.position(),
-                                            message: "MatchPlus: char class mismatch".to_string(),
-                                        })
-                                    }
-                                } else {
-                                    Err(Error::ParseFailed {
-                                        position: frame.parse_state.position(),
-                                        message: "MatchPlus: end of input".to_string(),
-                                    })
-                                }
-                            }
-                            Some(Instruction::MatchChar { char: expected }) => {
-                                if let Some(ch) = frame.parse_state.head_char() {
-                                    if ch == *expected {
-                                        frame.parse_state.advance(ch.len_utf8());
-                                        Ok(Value::String(SmolStr::new(ch.to_string())))
-                                    } else {
-                                        Err(Error::ParseFailed {
-                                            position: frame.parse_state.position(),
-                                            message: format!(
-                                                "MatchPlus: expected '{}', got '{}'",
-                                                expected, ch
-                                            ),
-                                        })
-                                    }
-                                } else {
-                                    Err(Error::ParseFailed {
-                                        position: frame.parse_state.position(),
-                                        message: "MatchPlus: end of input".to_string(),
-                                    })
-                                }
-                            }
-                            Some(Instruction::MatchLiteral { const_idx }) => {
-                                let literal = frame.code.get_constant(*const_idx);
-                                let text = frame.parse_state.text_from();
-                                if let Some(text) = text {
-                                    if text.starts_with(literal.as_str()) {
-                                        frame.parse_state.advance(literal.len());
-                                        Ok(Value::String(literal))
-                                    } else {
-                                        Err(Error::ParseFailed {
-                                            position: frame.parse_state.position(),
-                                            message: format!("MatchPlus: expected '{}'", literal),
-                                        })
-                                    }
-                                } else {
-                                    Err(Error::ParseFailed {
-                                        position: frame.parse_state.position(),
-                                        message: "MatchPlus: no input".to_string(),
-                                    })
-                                }
-                            }
-                            _ => {
-                                let result = frame.get(pattern);
-                                if matches!(result, Value::Null) {
-                                    Err(Error::ParseFailed {
-                                        position: frame.parse_state.position(),
-                                        message: "MatchPlus: pattern not supported for repetition"
-                                            .to_string(),
-                                    })
-                                } else {
-                                    Ok(result)
-                                }
-                            }
-                        };
-
-                        match match_result {
-                            Ok(value) => {
-                                match &value {
-                                    Value::String(_) => {
-                                        results.push(value);
-                                    }
-                                    _ => {
-                                        all_strings = false;
-                                        results.push(value);
-                                    }
-                                }
-
-                                // GUARD: Check for zero-length match to prevent infinite loop
-                                let new_pos = frame.parse_state.position();
-                                let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
-                                if new_pos == checkpoint_pos {
-                                    if results.is_empty() {
-                                        return Err(Error::ParseFailed {
-                                            position: frame.parse_state.position(),
-                                            message: "MatchPlus: zero-length match".to_string(),
-                                        });
-                                    }
-                                    break;
-                                }
-                            }
-                            Err(e) => {
-                                // Pattern failed
-                                if results.is_empty() {
-                                    // Plus requires at least one match
-                                    return Err(e);
-                                } else {
-                                    // Have at least one match - restore checkpoint and stop
-                                    frame.parse_state.restore(checkpoint);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // Join strings if all results were strings (character class pattern)
-                    if all_strings {
-                        let joined: String = results
-                            .into_iter()
-                            .filter_map(|v| match v {
-                                Value::String(s) => Some(s.to_string()),
-                                _ => None,
-                            })
-                            .collect();
-                        frame.set_current(Value::String(SmolStr::new(joined)));
-                    } else {
-                        frame.set_current(Value::List(Arc::new(results)));
-                    }
-                }
-
+                // Note: MatchStar and MatchPlus (generic pattern versions) have been removed.
+                // They are now lowered to base IR by the compiler. See compile_grammar_pattern.
+                // The specialized versions (MatchStarCharClass, etc.) are still used for optimization.
                 Instruction::MatchSeq { patterns } => {
                     // Execute each pattern in sequence and collect results.
                     let mut results = Vec::new();
@@ -1611,87 +1434,8 @@ impl Vm {
                     frame.set_current(Value::List(Arc::new(results)));
                 }
 
-                Instruction::MatchChoice { cases } => {
-                    // Try each case in order, using backtracking on failure.
-                    // Each case is an instruction index that should be executed.
-                    eprintln!(
-                        "DEBUG MatchChoice: {} cases, pos={}",
-                        cases.len(),
-                        frame.parse_state.position()
-                    );
-                    let mut last_result = Err(Error::ParseFailed {
-                        position: frame.parse_state.position(),
-                        message: "MatchChoice: no cases matched".to_string(),
-                    });
-
-                    for (i, case_idx) in cases.iter().enumerate() {
-                        // Create checkpoint before trying this case
-                        let checkpoint = frame.parse_state.checkpoint(frame);
-
-                        eprintln!(
-                            "DEBUG MatchChoice: case {} executing instruction at {:?}",
-                            i, case_idx
-                        );
-
-                        // Execute the instruction at case_idx
-                        // We need to temporarily change the IP to execute this instruction
-                        let current_ip = frame.ip;
-                        frame.ip = case_idx.0;
-
-                        // Get the instruction and execute it
-                        let instruction = frame.code.instructions[case_idx.0].clone();
-                        eprintln!(
-                            "DEBUG MatchChoice: case {} instruction={:?}",
-                            i, instruction
-                        );
-
-                        // Manually execute this instruction by recursing
-                        // We need to be careful not to cause infinite recursion
-                        // So we'll use a different approach: set up the frame and continue
-
-                        // Actually, the simplest approach is to execute the instruction
-                        // by using the VM's execution mechanism
-                        // We'll temporarily replace the instruction at current_ip and continue
-
-                        // Replace current instruction with the case instruction
-                        // This is a hack but it works
-                        // (we can't modify the instructions because they're in an Arc)
-
-                        // Instead, let's use a different approach:
-                        // We'll jump to the case instruction and let the VM execute it
-                        // Then we'll jump back to handle the result
-
-                        // For now, let's just use a simple approach:
-                        // Execute the case instruction by calling execute_instruction_at
-                        // (This is a simplified version - the real implementation would be more complex)
-
-                        // Placeholder: this needs to be properly implemented
-                        let result = Value::Null;
-
-                        eprintln!("DEBUG MatchChoice: case {} result={:?}", i, result);
-
-                        // Check if result indicates success (non-null for now)
-                        // TODO: Need better success detection
-                        if !matches!(result, Value::Null) {
-                            // Success! Return this result
-                            eprintln!("DEBUG MatchChoice: case {} succeeded!", i);
-                            last_result = Ok(result);
-                            frame.ip = current_ip; // Restore IP
-                            break;
-                        } else {
-                            // Failure: restore checkpoint and try next case
-                            eprintln!("DEBUG MatchChoice: case {} failed, restoring checkpoint", i);
-                            frame.parse_state.restore(checkpoint);
-                            frame.ip = current_ip; // Restore IP
-                        }
-                    }
-
-                    match last_result {
-                        Ok(value) => frame.set_current(value),
-                        Err(e) => return Err(e),
-                    }
-                }
-
+                // Note: MatchChoice has been removed. It is now lowered to base IR
+                // (checkpoint + try each + restore) by the compiler. See compile_grammar_pattern.
                 Instruction::MatchPlusChar { c } => {
                     // Match one or more of a specific character
                     let frame = self.frames.last_mut().unwrap();
@@ -1715,7 +1459,7 @@ impl Vm {
 
                         // GUARD: Check for zero-length match
                         let new_pos = frame.parse_state.position();
-                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        let checkpoint_pos = checkpoint.position;
                         if new_pos == checkpoint_pos {
                             break;
                         }
@@ -1772,7 +1516,7 @@ impl Vm {
 
                         // GUARD: Check for zero-length match
                         let new_pos = frame.parse_state.position();
-                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        let checkpoint_pos = checkpoint.position;
                         if new_pos == checkpoint_pos {
                             break;
                         }
@@ -1821,7 +1565,7 @@ impl Vm {
 
                         // GUARD: Check for zero-length match
                         let new_pos = frame.parse_state.position();
-                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        let checkpoint_pos = checkpoint.position;
                         if new_pos == checkpoint_pos {
                             break;
                         }
@@ -1856,7 +1600,7 @@ impl Vm {
 
                         // GUARD: Check for zero-length match
                         let new_pos = frame.parse_state.position();
-                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        let checkpoint_pos = checkpoint.position;
                         if new_pos == checkpoint_pos {
                             break;
                         }
@@ -1889,7 +1633,7 @@ impl Vm {
 
                         // GUARD: Check for zero-length match
                         let new_pos = frame.parse_state.position();
-                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        let checkpoint_pos = checkpoint.position;
                         if new_pos == checkpoint_pos {
                             break;
                         }
@@ -1924,7 +1668,7 @@ impl Vm {
 
                         // GUARD: Check for zero-length match
                         let new_pos = frame.parse_state.position();
-                        let checkpoint_pos = checkpoint.input_pos.unwrap_or(0);
+                        let checkpoint_pos = checkpoint.position;
                         if new_pos == checkpoint_pos {
                             break;
                         }
@@ -2855,39 +2599,8 @@ impl Vm {
     }
 
     fn lookup_var(&self, name: &str) -> Result<Value> {
-        // Check builtins first
-        if name == "curl" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_curl")));
-        }
-        if name == "io" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_io")));
-        }
-        if name == "json" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_json")));
-        }
-        if name == "env" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_env")));
-        }
-        if name == "sse" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_sse")));
-        }
-        if name == "time" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_time")));
-        }
-        if name == "rand" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_rand")));
-        }
-        if name == "tuplespace" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_tuplespace")));
-        }
-        if name == "stream" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_stream")));
-        }
-        if name == "cursor" {
-            return Ok(Value::Symbol(SmolStr::new("__builtin_cursor")));
-        }
-
         // Check frame locals first (includes captures and parameters)
+        // This allows user-defined variables to shadow builtin module names
         if let Some(frame) = self.frames.last()
             && let Some(val) = frame.locals.get(name)
         {
@@ -2900,6 +2613,7 @@ impl Vm {
                 return Ok(val.clone());
             }
         }
+
         // Check named objects
         if let Some(id) = self.objects.lock().unwrap().lookup_name(name) {
             return Ok(Value::Object(id));
@@ -2910,6 +2624,21 @@ impl Vm {
             && let Some(id) = self.objects.lock().unwrap().lookup_name(&name[1..])
         {
             return Ok(Value::Object(id));
+        }
+
+        // Check builtins last (allows user variables to shadow builtin module names)
+        match name {
+            "curl" => return Ok(Value::Symbol(SmolStr::new("__builtin_curl"))),
+            "io" => return Ok(Value::Symbol(SmolStr::new("__builtin_io"))),
+            "json" => return Ok(Value::Symbol(SmolStr::new("__builtin_json"))),
+            "env" => return Ok(Value::Symbol(SmolStr::new("__builtin_env"))),
+            "sse" => return Ok(Value::Symbol(SmolStr::new("__builtin_sse"))),
+            "time" => return Ok(Value::Symbol(SmolStr::new("__builtin_time"))),
+            "rand" => return Ok(Value::Symbol(SmolStr::new("__builtin_rand"))),
+            "tuplespace" => return Ok(Value::Symbol(SmolStr::new("__builtin_tuplespace"))),
+            "stream" => return Ok(Value::Symbol(SmolStr::new("__builtin_stream"))),
+            "cursor" => return Ok(Value::Symbol(SmolStr::new("__builtin_cursor"))),
+            _ => {}
         }
 
         Err(Error::UndefinedVariable(name.to_string()))
