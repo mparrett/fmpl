@@ -299,7 +299,7 @@ fn convert_fmpl_to_json(value: &Value) -> serde_json::Value {
 /// Uses Indexed RPN execution model where values are stored in arrays indexed
 /// by instruction position rather than on an operand stack.
 pub struct Vm {
-    pub objects: ObjectDb,
+    pub objects: Arc<std::sync::Mutex<ObjectDb>>,
     pub grammars: GrammarRegistry,
     frames: Vec<Frame>,
     scopes: Vec<Scope>,
@@ -317,7 +317,7 @@ pub struct Vm {
 impl Vm {
     pub fn new() -> Self {
         Self {
-            objects: ObjectDb::new(),
+            objects: Arc::new(std::sync::Mutex::new(ObjectDb::new())),
             grammars: GrammarRegistry::new(),
             frames: Vec::new(),
             scopes: vec![Scope::default()],
@@ -488,6 +488,8 @@ impl Vm {
         match obj {
             Value::Object(id) => self
                 .objects
+                .lock()
+                .unwrap()
                 .get_property(*id, name.as_str())
                 .ok_or_else(|| Error::UndefinedProperty(name.to_string())),
             Value::Map(map) => map
@@ -583,7 +585,7 @@ impl Vm {
                 }
                 Instruction::LoadParent => {
                     let val = if let Some(id) = frame.this {
-                        if let Some(obj) = self.objects.get(id) {
+                        if let Some(obj) = self.objects.lock().unwrap().get(id) {
                             if let Some(parent) = obj.parent {
                                 Value::Object(parent)
                             } else {
@@ -824,7 +826,11 @@ impl Vm {
                     let val = frame.get(value);
                     match obj {
                         Value::Object(id) => {
-                            self.objects.set_property(id, name.clone(), val.clone())?;
+                            self.objects.lock().unwrap().set_property(
+                                id,
+                                name.clone(),
+                                val.clone(),
+                            )?;
                         }
                         _ => {
                             return Err(Error::Type {
@@ -847,7 +853,7 @@ impl Vm {
                     let obj = frame.get(object);
                     match obj {
                         Value::Object(id) => {
-                            if self.objects.get_facet(id, &name).is_some() {
+                            if self.objects.lock().unwrap().get_facet(id, &name).is_some() {
                                 let frame = self.frames.last_mut().unwrap();
                                 frame.set_current(Value::Object(id));
                             } else {
@@ -1205,8 +1211,8 @@ impl Vm {
 
                 // === Object Definition ===
                 Instruction::DefineObject(name) => {
-                    let id = self.objects.create(None);
-                    self.objects.register_name(name.clone(), id);
+                    let id = self.objects.lock().unwrap().create(None);
+                    self.objects.lock().unwrap().register_name(name.clone(), id);
                     let frame = self.frames.last_mut().unwrap();
                     frame.set_current(Value::Object(id));
                 }
@@ -1225,7 +1231,10 @@ impl Vm {
                                 params,
                                 code: Arc::new(code),
                             };
-                            self.objects.define_method(id, name, method)?;
+                            self.objects
+                                .lock()
+                                .unwrap()
+                                .define_method(id, name, method)?;
                         }
                     }
                 }
@@ -1237,7 +1246,7 @@ impl Vm {
                     let obj = frame.get(object);
                     let val = frame.get(value);
                     if let Value::Object(id) = obj {
-                        self.objects.set_property(id, name, val)?;
+                        self.objects.lock().unwrap().set_property(id, name, val)?;
                     }
                 }
                 Instruction::DefineFacet {
@@ -1259,7 +1268,7 @@ impl Vm {
                             members: member_vals,
                             terminal,
                         };
-                        self.objects.define_facet(id, name, facet)?;
+                        self.objects.lock().unwrap().define_facet(id, name, facet)?;
                     }
                 }
 
@@ -3124,13 +3133,13 @@ impl Vm {
             }
         }
         // Check named objects
-        if let Some(id) = self.objects.lookup_name(name) {
+        if let Some(id) = self.objects.lock().unwrap().lookup_name(name) {
             return Ok(Value::Object(id));
         }
 
         // Check for constructor syntax (^name or @name)
         if name.starts_with('^')
-            && let Some(id) = self.objects.lookup_name(&name[1..])
+            && let Some(id) = self.objects.lock().unwrap().lookup_name(&name[1..])
         {
             return Ok(Value::Object(id));
         }
@@ -3164,7 +3173,13 @@ impl Vm {
                 self.frames.push(frame);
             }
             Value::Object(id) => {
-                if self.objects.get_method(id, "call").is_some() {
+                if self
+                    .objects
+                    .lock()
+                    .unwrap()
+                    .get_method(id, "call")
+                    .is_some()
+                {
                     self.call_method(Value::Object(id), "call", args)?;
                 } else {
                     return Err(Error::Runtime("object is not callable".to_string()));
@@ -3656,7 +3671,7 @@ impl Vm {
                 return Ok(());
             }
             Value::Object(id) => {
-                if let Some(method) = self.objects.get_method(id, name).cloned() {
+                if let Some(method) = self.objects.lock().unwrap().get_method(id, name).cloned() {
                     let mut frame = Frame::new(method.code);
                     frame.this = Some(id);
 
@@ -3918,10 +3933,12 @@ impl Vm {
     fn spawn_object(&mut self, constructor: Value, args: Vec<Value>) -> Result<ObjectId> {
         match constructor {
             Value::Object(parent_id) => {
-                let id = self.objects.create(Some(parent_id));
+                let id = self.objects.lock().unwrap().create(Some(parent_id));
 
                 // Call init method if it exists on the new object
-                if let Some(method) = self.objects.get_method(id, "init").cloned() {
+                // Clone the method to drop the lock before execute_with_depth
+                let init_method = self.objects.lock().unwrap().get_method(id, "init").cloned();
+                if let Some(method) = init_method {
                     // Check if argument count matches (or allow empty init)
                     if args.len() == method.params.len() {
                         let mut frame = Frame::new(method.code);

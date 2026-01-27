@@ -183,7 +183,7 @@ fn handle_command(vm: &mut Vm, line: &str) -> CommandResult {
         ":objects" => {
             println!("Named objects:");
             let mut count = 0;
-            for (name, _id) in vm.objects.named_objects() {
+            for (name, _id) in vm.objects.lock().unwrap().named_objects() {
                 println!("  {}", name);
                 count += 1;
             }

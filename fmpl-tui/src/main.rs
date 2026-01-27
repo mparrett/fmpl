@@ -84,6 +84,13 @@ fn wait_for_async(value: Value) -> Result<Value, String> {
                         // Terminal error - return error
                         return Err(format!("Async error: {}", e));
                     }
+                    Some(StreamEvent::Done) => {
+                        // Stream completed without value - return final data or null
+                        if final_value != Value::Null {
+                            return Ok(final_value);
+                        }
+                        return Ok(Value::Null);
+                    }
                     None => {
                         // Channel closed without Ok/Err
                         if final_value != Value::Null {

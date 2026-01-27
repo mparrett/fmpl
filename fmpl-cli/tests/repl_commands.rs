@@ -10,7 +10,7 @@ fn test_named_objects_tracking() {
     let mut vm = Vm::new();
 
     // Initially, no named objects
-    let count = vm.objects.named_objects().count();
+    let count = vm.objects.lock().unwrap().named_objects().count();
     assert_eq!(count, 0, "Expected no named objects initially");
 
     // The @name registration in object definitions creates named objects
@@ -26,7 +26,13 @@ object test_obj {
     .expect("define object");
 
     // After defining an object, it should be registered by name
-    let named: Vec<_> = vm.objects.named_objects().collect();
+    let db = vm.objects.lock().unwrap();
+    let named: Vec<_> = db
+        .named_objects()
+        .map(|(name, id)| (name.to_owned(), *id))
+        .collect();
+    drop(db);
+
     assert!(
         named.len() > 0,
         "Expected at least 1 named object after object definition"
@@ -44,18 +50,34 @@ object test_obj {
 /// Test that multiple named objects can be tracked
 #[test]
 fn test_multiple_named_objects() {
-    let mut vm = Vm::new();
+    let vm = Vm::new();
 
     // Create multiple objects and register them
-    let obj1_id = vm.objects.create(None);
-    let obj2_id = vm.objects.create(None);
-    let obj3_id = vm.objects.create(None);
+    let obj1_id = vm.objects.lock().unwrap().create(None);
+    let obj2_id = vm.objects.lock().unwrap().create(None);
+    let obj3_id = vm.objects.lock().unwrap().create(None);
 
-    vm.objects.register_name("first".into(), obj1_id);
-    vm.objects.register_name("second".into(), obj2_id);
-    vm.objects.register_name("third".into(), obj3_id);
+    vm.objects
+        .lock()
+        .unwrap()
+        .register_name("first".into(), obj1_id);
+    vm.objects
+        .lock()
+        .unwrap()
+        .register_name("second".into(), obj2_id);
+    vm.objects
+        .lock()
+        .unwrap()
+        .register_name("third".into(), obj3_id);
 
-    let named: Vec<_> = vm.objects.named_objects().collect();
+    // Keep lock guard alive while collecting data
+    let db = vm.objects.lock().unwrap();
+    let named: Vec<_> = db
+        .named_objects()
+        .map(|(name, id)| (name.to_owned(), *id))
+        .collect();
+    drop(db);
+
     assert_eq!(named.len(), 3);
 
     // Names should be present (order may vary due to HashMap)
@@ -69,6 +91,6 @@ fn test_multiple_named_objects() {
 #[test]
 fn test_empty_named_objects() {
     let vm = Vm::new();
-    let count = vm.objects.named_objects().count();
+    let count = vm.objects.lock().unwrap().named_objects().count();
     assert_eq!(count, 0, "Expected no named objects in fresh VM");
 }

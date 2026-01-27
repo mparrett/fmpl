@@ -20,7 +20,7 @@ impl ImageStore {
             let source = std::fs::read_to_string(seed_path)?;
             let mut vm = Vm::new();
             let _ = eval(&mut vm, &source)?;
-            for (name, id) in vm.objects.named_objects() {
+            for (name, id) in vm.objects.lock().unwrap().named_objects() {
                 let key = format!("obj:{}", name);
                 let value = id.to_be_bytes().to_vec();
                 self.partition.insert(key, value)?;

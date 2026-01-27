@@ -397,7 +397,7 @@ fn render_from_db(vm: &mut Vm, token: &str, debug: bool, is_htmx: bool) -> Resul
     };
 
     let debug_panel = if debug {
-        if let Some(id) = vm.objects.lookup_name(object_name) {
+        if let Some(id) = vm.objects.lock().unwrap().lookup_name(object_name) {
             // Use dynamic source representation instead of stored debug_fmpl property
             let source = object_source_repr(&vm.objects, id);
             format!(

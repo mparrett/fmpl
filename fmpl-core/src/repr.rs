@@ -12,6 +12,7 @@ use crate::object::ObjectDb;
 use crate::value::{Lambda, Partial, Stream, StreamOp, Value};
 use smol_str::SmolStr;
 use std::fmt::{self, Display};
+use std::sync::Arc;
 
 /// Trait for converting to FMPL source representation.
 pub trait SourceRepr {
@@ -688,15 +689,16 @@ impl SourceRepr for Stream {
 // =============================================================================
 
 /// Generate source representation for an object given access to the ObjectDb.
-pub fn object_source_repr(db: &ObjectDb, id: u64) -> String {
-    let Some(obj) = db.get(id) else {
+pub fn object_source_repr(db: &Arc<std::sync::Mutex<ObjectDb>>, id: u64) -> String {
+    let db_guard = db.lock().unwrap();
+    let Some(obj) = db_guard.get(id) else {
         return format!("<object #{} not found>", id);
     };
 
     let mut result = String::new();
 
     // Try to find the object's name
-    let name = find_object_name(db, id)
+    let name = find_object_name(&db_guard, id)
         .map(|n| n.to_string())
         .unwrap_or_else(|| format!("_obj{}", id));
 
@@ -705,7 +707,7 @@ pub fn object_source_repr(db: &ObjectDb, id: u64) -> String {
 
     // Parents
     if let Some(parent_id) = obj.parent
-        && let Some(parent_name) = find_object_name(db, parent_id)
+        && let Some(parent_name) = find_object_name(&db_guard, parent_id)
     {
         result.push_str(&format!("({})", parent_name));
     }
