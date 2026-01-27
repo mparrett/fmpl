@@ -14,3 +14,4 @@ path = "src/main.rs"
 fmpl-core = { path = "../fmpl-core" }
 rustyline = { workspace = true }
 dirs = "5.0"
+tokio = { workspace = true }

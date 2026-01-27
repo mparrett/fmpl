@@ -7,7 +7,7 @@ use rustyline::error::ReadlineError;
 
 /// Block and wait for an async stream to complete.
 /// Returns the final result value or an error.
-fn wait_for_async(value: Value) -> Result<Value, String> {
+pub fn wait_for_async(value: Value) -> Result<Value, String> {
     match value {
         Value::AsyncStream(handle) => {
             let mut handle = handle.lock().map_err(|e| format!("Lock error: {}", e))?;
@@ -51,6 +51,10 @@ fn wait_for_async(value: Value) -> Result<Value, String> {
 }
 
 fn main() -> rustyline::Result<()> {
+    // Create a tokio runtime for async operations
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let handle = runtime.handle();
+
     println!("FMPL v0.1.0");
     println!("Type :help for commands, :quit to exit");
     println!();
@@ -63,7 +67,7 @@ fn main() -> rustyline::Result<()> {
         .unwrap_or_default();
     let _ = rl.load_history(&history_path);
 
-    let mut vm = Vm::new();
+    let mut vm = Vm::with_runtime(handle.clone());
 
     loop {
         match rl.readline("fmpl> ") {

@@ -573,6 +573,7 @@ dependencies = [
  "dirs",
  "fmpl-core",
  "rustyline",
+ "tokio",
 ]
 
 [[package]]
