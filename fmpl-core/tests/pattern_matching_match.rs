@@ -21,8 +21,8 @@ mod map_patterns {
     #[test]
     fn map_pattern_single_key() {
         let mut vm = Vm::new();
-        // Map pattern should extract key and bind it
-        let result = eval(&mut vm, r#"%{tool: "curl"} @ { %{tool: t} => t }"#).unwrap();
+        // Map pattern should extract key and bind it (OMeta syntax: _:binding)
+        let result = eval(&mut vm, r#"%{tool: "curl"} @ { %{tool: _:t} => t }"#).unwrap();
         assert!(
             matches!(result, Value::String(ref s) if s == "curl"),
             "got {:?}",
@@ -34,7 +34,7 @@ mod map_patterns {
     fn map_pattern_multiple_keys() {
         let mut vm = Vm::new();
         // Extract multiple keys from map
-        let result = eval(&mut vm, r#"%{tool: "curl", args: %{url: "https://api.example.com"}} @ { %{tool: t, args: a} => [t, a] }"#).unwrap();
+        let result = eval(&mut vm, r#"%{tool: "curl", args: %{url: "https://api.example.com"}} @ { %{tool: _:t, args: _:a} => [t, a] }"#).unwrap();
         if let Value::List(list) = result {
             assert_eq!(list.len(), 2);
             assert!(matches!(&list[0], Value::String(s) if s == "curl"));
@@ -50,7 +50,7 @@ mod map_patterns {
         // First pattern matches, returns tool name
         let result = eval(
             &mut vm,
-            r#"%{tool: "get"} @ { %{tool: t} => t; _ => "other" }"#,
+            r#"%{tool: "get"} @ { %{tool: _:t} => t; _ => "other" }"#,
         )
         .unwrap();
         assert!(
@@ -66,7 +66,7 @@ mod map_patterns {
         // First pattern doesn't match (no "tool" key), falls through to wildcard
         let result = eval(
             &mut vm,
-            r#"%{data: "value"} @ { %{tool: t} => t; _ => "other" }"#,
+            r#"%{data: "value"} @ { %{tool: _:t} => t; _ => "other" }"#,
         )
         .unwrap();
         assert!(
@@ -79,10 +79,10 @@ mod map_patterns {
     #[test]
     fn map_pattern_nested() {
         let mut vm = Vm::new();
-        // Nested map pattern - extract inner value
+        // Nested map pattern - extract inner value (OMeta syntax: nested wildcards then bind)
         let result = eval(
             &mut vm,
-            r#"%{outer: %{inner: "value"}} @ { %{outer: %{inner: i}} => i }"#,
+            r#"%{outer: %{inner: "value"}} @ { %{outer: %{inner: _:i}} => i }"#,
         )
         .unwrap();
         assert!(
@@ -96,7 +96,7 @@ mod map_patterns {
     fn map_pattern_with_guard() {
         let mut vm = Vm::new();
         // Map pattern with guard - only match if status is 200
-        let result = eval(&mut vm, r#"%{status: 200, body: "ok"} @ { %{status: s} when s == 200 => "success"; %{status: s} => "failed" }"#).unwrap();
+        let result = eval(&mut vm, r#"%{status: 200, body: "ok"} @ { %{status: _:s} when s == 200 => "success"; %{status: _:s} => "failed" }"#).unwrap();
         assert!(
             matches!(result, Value::String(ref s) if s == "success"),
             "got {:?}",
@@ -108,7 +108,7 @@ mod map_patterns {
     fn map_pattern_guard_fails_to_next_case() {
         let mut vm = Vm::new();
         // Guard fails, should fall through to next pattern
-        let result = eval(&mut vm, r#"%{status: 404} @ { %{status: s} when s == 200 => "success"; %{status: s} => "failed" }"#).unwrap();
+        let result = eval(&mut vm, r#"%{status: 404} @ { %{status: _:s} when s == 200 => "success"; %{status: _:s} => "failed" }"#).unwrap();
         assert!(
             matches!(result, Value::String(ref s) if s == "failed"),
             "got {:?}",
@@ -127,8 +127,8 @@ mod list_patterns {
     #[test]
     fn list_pattern_single_element() {
         let mut vm = Vm::new();
-        // List pattern should match single element
-        let result = eval(&mut vm, r#"["hello"] @ { [x] => x }"#).unwrap();
+        // List pattern should match single element (OMeta syntax: _:binding)
+        let result = eval(&mut vm, r#"["hello"] @ { [ _:x] => x }"#).unwrap();
         assert!(
             matches!(result, Value::String(ref s) if s == "hello"),
             "got {:?}",
@@ -140,7 +140,11 @@ mod list_patterns {
     fn list_pattern_multiple_elements() {
         let mut vm = Vm::new();
         // List pattern with multiple elements
-        let result = eval(&mut vm, r#"["a", "b", "c"] @ { [x, y, z] => [x, y, z] }"#).unwrap();
+        let result = eval(
+            &mut vm,
+            r#"["a", "b", "c"] @ { [ _:x, _:y, _:z] => [x, y, z] }"#,
+        )
+        .unwrap();
         if let Value::List(list) = result {
             assert_eq!(list.len(), 3);
             assert!(matches!(&list[0], Value::String(s) if s == "a"));
@@ -167,7 +171,7 @@ mod list_patterns {
     fn list_pattern_wrong_length_fails() {
         let mut vm = Vm::new();
         // Pattern expects 2 elements but list has 3
-        let result = eval(&mut vm, r#"[1, 2, 3] @ { [x, y] => "two" }"#);
+        let result = eval(&mut vm, r#"[1, 2, 3] @ { [ _:x, _:y] => "two" }"#);
         assert!(
             result.is_err(),
             "expected failure for wrong length, got {:?}",
@@ -181,7 +185,7 @@ mod list_patterns {
         // Nested list pattern
         let result = eval(
             &mut vm,
-            r#"[[1, 2], [3, 4]] @ { [[a, b], [c, d]] => a + b + c + d }"#,
+            r#"[[1, 2], [3, 4]] @ { [[ _:a, _:b], [ _:c, _:d]] => a + b + c + d }"#,
         )
         .unwrap();
         assert!(matches!(result, Value::Int(10)), "got {:?}", result);
@@ -193,7 +197,7 @@ mod list_patterns {
         // List pattern with guard
         let result = eval(
             &mut vm,
-            r#"[5] @ { [x] when x > 0 => "positive"; [x] => "not positive" }"#,
+            r#"[5] @ { [ _:x] when x > 0 => "positive"; [ _:x] => "not positive" }"#,
         )
         .unwrap();
         assert!(
@@ -217,7 +221,7 @@ mod mixed_patterns {
         // Match on map or list
         let result = eval(
             &mut vm,
-            r#"%{type: "map"} @ { %{type: t} => "map: " + t; [x] => "list" }"#,
+            r#"%{type: "map"} @ { %{type: _:t} => "map: " + t; [ _:x] => "list" }"#,
         )
         .unwrap();
         assert!(
@@ -233,7 +237,7 @@ mod mixed_patterns {
         // List pattern should match
         let result = eval(
             &mut vm,
-            r#"["item"] @ { %{type: t} => "map: " + t; [x] => "list: " + x }"#,
+            r#"["item"] @ { %{type: _:t} => "map: " + t; [ _:x] => "list: " + x }"#,
         )
         .unwrap();
         assert!(

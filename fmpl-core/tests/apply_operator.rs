@@ -518,8 +518,8 @@ mod map_list_patterns {
     #[test]
     fn map_pattern_single_key() {
         let mut vm = Vm::new();
-        // Match a map with a single key-value pair
-        let result = eval(&mut vm, r#"%{name: "Alice"} @ { %{name: n} => n }"#).unwrap();
+        // Match a map with a single key-value pair (OMeta syntax: _:binding)
+        let result = eval(&mut vm, r#"%{name: "Alice"} @ { %{name: _:n} => n }"#).unwrap();
         assert!(
             matches!(result, Value::String(ref s) if s == "Alice"),
             "got {:?}",
@@ -533,7 +533,7 @@ mod map_list_patterns {
         // Match a map with multiple keys
         let result = eval(
             &mut vm,
-            r#"%{type: "user", name: "Bob", age: 30} @ { %{type: t, name: n} => n }"#,
+            r#"%{type: "user", name: "Bob", age: 30} @ { %{type: _:t, name: _:n} => n }"#,
         )
         .unwrap();
         assert!(
@@ -551,7 +551,7 @@ mod map_list_patterns {
         // In grammar patterns, symbol keys also use :key: pattern syntax
         let result = eval(
             &mut vm,
-            r#"%{:type: "user", :name: "Charlie"} @ { %{:type: t, :name: n} => n }"#,
+            r#"%{:type: "user", :name: "Charlie"} @ { %{:type: _:t, :name: _:n} => n }"#,
         )
         .unwrap();
         assert!(
@@ -565,7 +565,7 @@ mod map_list_patterns {
     fn map_pattern_mismatch_fails() {
         let mut vm = Vm::new();
         // Map pattern should fail if key doesn't exist
-        let result = eval(&mut vm, r#"%{foo: "bar"} @ { %{baz: b} => b }"#);
+        let result = eval(&mut vm, r#"%{foo: "bar"} @ { %{baz: _:b} => b }"#);
         assert!(
             result.is_err(),
             "expected mismatch failure, got {:?}",
@@ -576,8 +576,8 @@ mod map_list_patterns {
     #[test]
     fn list_pattern_single_element() {
         let mut vm = Vm::new();
-        // Match a list with a single element
-        let result = eval(&mut vm, r#"[42] @ { [x] => x }"#).unwrap();
+        // Match a list with a single element (OMeta syntax: _:binding)
+        let result = eval(&mut vm, r#"[42] @ { [ _:x] => x }"#).unwrap();
         assert!(matches!(result, Value::Int(42)), "got {:?}", result);
     }
 
@@ -585,7 +585,7 @@ mod map_list_patterns {
     fn list_pattern_multiple_elements() {
         let mut vm = Vm::new();
         // Match a list with multiple elements
-        let result = eval(&mut vm, r#"["a", "b", "c"] @ { [x, y, z] => z }"#).unwrap();
+        let result = eval(&mut vm, r#"["a", "b", "c"] @ { [ _:x, _:y, _:z] => z }"#).unwrap();
         assert!(
             matches!(result, Value::String(ref s) if s == "c"),
             "got {:?}",
@@ -597,7 +597,11 @@ mod map_list_patterns {
     fn list_pattern_with_rest() {
         let mut vm = Vm::new();
         // Match a list with rest pattern
-        let result = eval(&mut vm, r#"[1, 2, 3, 4, 5] @ { [first | rest] => first }"#).unwrap();
+        let result = eval(
+            &mut vm,
+            r#"[1, 2, 3, 4, 5] @ { [ _:first | rest] => first }"#,
+        )
+        .unwrap();
         assert!(matches!(result, Value::Int(1)), "got {:?}", result);
     }
 
@@ -605,7 +609,7 @@ mod map_list_patterns {
     fn list_pattern_length_mismatch_fails() {
         let mut vm = Vm::new();
         // List pattern should fail if length doesn't match
-        let result = eval(&mut vm, r#"[1, 2, 3] @ { [x, y] => x }"#);
+        let result = eval(&mut vm, r#"[1, 2, 3] @ { [ _:x, _:y] => x }"#);
         assert!(
             result.is_err(),
             "expected length mismatch failure, got {:?}",
@@ -617,7 +621,7 @@ mod map_list_patterns {
     fn list_pattern_type_mismatch_fails() {
         let mut vm = Vm::new();
         // List pattern should fail if element type doesn't match
-        let result = eval(&mut vm, r#"["a", "b"] @ { [x: int, y: int] => x }"#);
+        let result = eval(&mut vm, r#"["a", "b"] @ { [ _:x: int, _:y: int] => x }"#);
         assert!(
             result.is_err(),
             "expected type mismatch failure, got {:?}",
@@ -631,7 +635,7 @@ mod map_list_patterns {
         // Match a list containing maps
         let result = eval(
             &mut vm,
-            r#"[%{x: 1}, %{x: 2}] @ { [%{x: a}, %{x: b}] => a + b }"#,
+            r#"[%{x: 1}, %{x: 2}] @ { [%{x: _:a}, %{x: _:b}] => a + b }"#,
         )
         .unwrap();
         assert!(matches!(result, Value::Int(3)), "got {:?}", result);

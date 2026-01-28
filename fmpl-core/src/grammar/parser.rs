@@ -812,42 +812,43 @@ impl<'a> GrammarParser<'a> {
     }
 
     /// Parse a value pattern (used inside map/list patterns).
-    /// Value patterns treat bare identifiers as bindings (not rule references).
+    /// Follows OMeta semantics: pattern[:binding] where pattern can be a rule, literal, or _.
     fn parse_value_pattern(&mut self) -> Result<Pattern> {
         self.skip_whitespace();
 
+        // First, parse the pattern (rule, literal, wildcard, etc.)
         let pattern = match self.peek_char() {
             Some('_') => {
                 self.advance();
-                Ok(Pattern::Any)
+                Pattern::Any
             }
             Some(':') => {
                 // Symbol literal
                 self.advance();
                 let name = self.parse_ident()?;
-                Ok(Pattern::SymbolMatch(name))
+                Pattern::SymbolMatch(name)
             }
             Some('[') => {
                 // For value patterns (inside map/list), we only support list patterns, not char classes
                 // Char classes are only supported in top-level grammar patterns
                 self.advance();
-                self.parse_list_pattern()
+                self.parse_list_pattern()?
             }
-            Some('%') => self.parse_map_pattern(),
+            Some('%') => self.parse_map_pattern()?,
             Some(c) if c.is_alphabetic() || c == '_' => {
-                // Bare identifier - treat as binding (not rule reference)
+                // Bare identifier - treat as rule reference (OMeta semantics)
                 let name = self.parse_ident()?;
-                Ok(Pattern::Bind(Box::new(Pattern::Any), name))
+                Pattern::Rule(name)
             }
             Some('"') => {
                 let s = self.parse_string()?;
-                Ok(Pattern::MatchValue(Value::String(s.into())))
+                Pattern::MatchValue(Value::String(s.into()))
             }
             Some('\'') => {
                 let s = self.parse_char_literal()?;
                 let mut str_buf = String::new();
                 str_buf.push(s);
-                Ok(Pattern::MatchValue(Value::String(str_buf.into())))
+                Pattern::MatchValue(Value::String(str_buf.into()))
             }
             Some(c) if c.is_ascii_digit() || c == '-' => {
                 // Parse a number literal
@@ -857,24 +858,36 @@ impl<'a> GrammarParser<'a> {
                         token: self.pos,
                         message: format!("invalid float literal: {}", num_str),
                     })?;
-                    Ok(Pattern::MatchValue(Value::Float(f)))
+                    Pattern::MatchValue(Value::Float(f))
                 } else {
                     let i: i64 = num_str.parse().map_err(|_| Error::Parser {
                         token: self.pos,
                         message: format!("invalid int literal: {}", num_str),
                     })?;
-                    Ok(Pattern::MatchValue(Value::Int(i)))
+                    Pattern::MatchValue(Value::Int(i))
                 }
             }
-            Some(c) => Err(Error::Parser {
-                token: self.pos,
-                message: format!("unexpected character in value pattern: {:?}", c),
-            }),
-            None => Err(Error::UnexpectedEof),
+            Some(c) => {
+                return Err(Error::Parser {
+                    token: self.pos,
+                    message: format!("unexpected character in value pattern: {:?}", c),
+                });
+            }
+            None => {
+                return Err(Error::UnexpectedEof);
+            }
         };
 
-        // Don't apply postfix modifiers to value patterns (they don't make sense for bindings)
-        pattern
+        // Check for optional :binding suffix
+        self.skip_whitespace();
+        if self.peek_char() == Some(':') {
+            self.advance();
+            self.skip_whitespace();
+            let binding_name = self.parse_ident()?;
+            Ok(Pattern::Bind(Box::new(pattern), binding_name))
+        } else {
+            Ok(pattern)
+        }
     }
 
     /// Parse a number literal (int or float).

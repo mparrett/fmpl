@@ -38,6 +38,9 @@ pub struct PegRuntime<'a, 'e, I: PegInput> {
     grammar: Arc<Grammar>,
     action_evaluator: Option<ActionEvaluator<'e>>,
     bindings: HashMap<SmolStr, Value>,
+    /// When true, Choice returns all successful alternatives for backtracking.
+    /// When false, Choice returns first match only (traditional PEG behavior).
+    backtracking_mode: bool,
 }
 
 impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
@@ -49,7 +52,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             grammar,
             action_evaluator: None,
             bindings: HashMap::new(),
+            backtracking_mode: false, // Default: traditional PEG behavior
         }
+    }
+
+    /// Enable backtracking mode where Choice returns all successful alternatives.
+    pub fn with_backtracking_mode(mut self) -> Self {
+        self.backtracking_mode = true;
+        self
     }
 
     /// Set an action evaluator callback for semantic actions.
@@ -305,15 +315,62 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             }
 
             Pattern::Choice(alternatives) => {
+                // In backtracking mode, try all alternatives and return all successful ones.
+                // In traditional mode (default), return first match only (PEG semantics).
+                let start_index = self.input.index(&pos);
+                let mut successful_alternatives: Vec<(Value, usize)> = Vec::new();
+
                 for alt in alternatives {
                     match self.match_pattern(alt, pos.clone())? {
                         ParseResult::Success(v, new_index) => {
-                            return Ok(ParseResult::Success(v, new_index));
+                            if self.backtracking_mode {
+                                // Collect all successful alternatives
+                                successful_alternatives.push((v, new_index));
+                            } else {
+                                // Traditional PEG: return first match immediately
+                                return Ok(ParseResult::Success(v, new_index));
+                            }
                         }
                         ParseResult::Failure => continue,
                     }
                 }
-                Ok(ParseResult::Failure)
+
+                // If we have successful alternatives, return them
+                if !successful_alternatives.is_empty() {
+                    if successful_alternatives.len() == 1 {
+                        // Single match - return the value directly (for backward compatibility)
+                        let (value, end_pos) = successful_alternatives.into_iter().next().unwrap();
+                        Ok(ParseResult::Success(value, end_pos))
+                    } else {
+                        // Multiple matches - return a list of tagged values
+                        // Each tagged value contains: :AlternativeMatch(value, consumed_count, start_pos, end_pos)
+                        // This allows the caller to create forked streams from each alternative
+                        let mut max_end_pos = start_index;
+                        let mut alternatives_with_meta = Vec::new();
+
+                        for (value, end_pos) in successful_alternatives {
+                            max_end_pos = max_end_pos.max(end_pos);
+                            let consumed_count = end_pos.saturating_sub(start_index);
+
+                            // Create a tagged value with metadata for stream creation
+                            let meta = Value::Tagged(
+                                SmolStr::new("AlternativeMatch"),
+                                Arc::new(vec![
+                                    value,                             // The matched value
+                                    Value::Int(consumed_count as i64), // Tokens consumed
+                                    Value::Int(start_index as i64),    // Start position
+                                    Value::Int(end_pos as i64),        // End position
+                                ]),
+                            );
+                            alternatives_with_meta.push(meta);
+                        }
+
+                        let result = Value::List(Arc::new(alternatives_with_meta));
+                        Ok(ParseResult::Success(result, max_end_pos))
+                    }
+                } else {
+                    Ok(ParseResult::Failure)
+                }
             }
 
             Pattern::Star(inner) => {
@@ -2243,6 +2300,67 @@ mod tests {
         match runtime.resume(state) {
             Ok(ParseNext::NeedInput(_)) => (),
             other => panic!("expected NeedInput, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_choice_returns_alternative_matches_for_multiple_successes() {
+        let registry = GrammarRegistry::new();
+        let grammar = registry.get("base::parser").unwrap();
+
+        // Create a grammar where multiple alternatives can succeed
+        // For text input: "a" can match both: the literal "a" and the character class [a-z]
+        let mut custom = Grammar::with_parent_grammar(SmolStr::new("test"), grammar.clone());
+        custom.add_rule(
+            SmolStr::new("multiple_matches"),
+            super::super::Rule::new(Pattern::Choice(vec![
+                Pattern::Literal(SmolStr::new("a")),
+                Pattern::CharClass(vec![CharRange::Range('a', 'z')]),
+            ])),
+        );
+        let custom = Arc::new(custom);
+
+        // Input "a" should match both alternatives
+        let input = TextInput::new("a");
+        let mut runtime = PegRuntime::new(input, &registry, custom).with_backtracking_mode(); // Enable backtracking mode
+        let result = runtime.parse("multiple_matches").unwrap();
+
+        // Should return a list of AlternativeMatch tagged values
+        match result {
+            ParseResult::Success(Value::List(items), end_pos) => {
+                assert_eq!(
+                    items.len(),
+                    2,
+                    "expected 2 alternatives, got {}",
+                    items.len()
+                );
+                assert_eq!(end_pos, 1, "expected end position 1, got {}", end_pos);
+
+                // Check first alternative
+                if let Value::Tagged(tag, children) = &items[0] {
+                    assert_eq!(tag.as_str(), "AlternativeMatch");
+                    assert_eq!(children.len(), 4);
+                    // children[0] is the matched value
+                    // children[1] is consumed count
+                    // children[2] is start position
+                    // children[3] is end position
+                    if let Value::Int(n) = children[1] {
+                        assert_eq!(n, 1); // consumed 1 character
+                    } else {
+                        panic!("expected Int for consumed count");
+                    }
+                } else {
+                    panic!("expected Tagged value, got {:?}", items[0]);
+                }
+
+                // Check second alternative
+                if let Value::Tagged(tag, _) = &items[1] {
+                    assert_eq!(tag.as_str(), "AlternativeMatch");
+                } else {
+                    panic!("expected Tagged value, got {:?}", items[1]);
+                }
+            }
+            other => panic!("expected Success with List, got {:?}", other),
         }
     }
 }
