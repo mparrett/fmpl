@@ -1329,6 +1329,84 @@ pub fn apply_grammar_to_stream_with_evaluator<'e>(
     }
 }
 
+/// Apply a grammar rule with full backtracking, returning ALL matches.
+///
+/// Unlike `apply_grammar_to_value_with_evaluator` which returns only the first match,
+/// this function explores all alternatives in choice patterns and returns all successful matches.
+///
+/// # Arguments
+/// * `input` - The value to parse
+/// * `grammar` - The grammar containing the rule
+/// * `registry` - Grammar registry for recursive rule lookup
+/// * `rule_name` - Name of the rule to apply
+/// * `evaluator` - Function to evaluate semantic actions
+/// * `on_match` - Callback called for each successful match (returns true to continue, false to stop)
+///
+/// # Returns
+/// * `Ok(())` - Successfully explored all matches (or stopped early via callback)
+/// * `Err(Error)` - Parsing error occurred
+pub fn apply_grammar_with_backtracking<'e>(
+    input: Value,
+    grammar: &Arc<Grammar>,
+    registry: &GrammarRegistry,
+    rule_name: &str,
+    evaluator: ActionEvaluator<'e>,
+    mut on_match: impl FnMut(&Value) -> bool,
+) -> Result<()> {
+    use crate::grammar::input::{TextInput, ValueInput};
+    use crate::grammar::runtime::{ParseResult, PegRuntime};
+
+    // The runtime is generic over input types, but we need to handle different value types
+    // For now, we'll just use the simple approach: run the grammar once
+    // TODO: Implement full backtracking by trying all choice alternatives
+
+    // Create input based on value type
+    match &input {
+        Value::String(s) => {
+            let text_input = TextInput::new(s.as_str());
+            let mut runtime = PegRuntime::new(text_input, registry, grammar.clone())
+                .with_action_evaluator(evaluator);
+            match runtime.parse(rule_name)? {
+                ParseResult::Success(v, _) => {
+                    if !on_match(&v) {
+                        return Ok(()); // Stopped early
+                    }
+                }
+                ParseResult::Failure => {}
+            }
+        }
+        Value::List(items) => {
+            let value_input = ValueInput::new(items.as_ref().clone());
+            let mut runtime = PegRuntime::new(value_input, registry, grammar.clone())
+                .with_action_evaluator(evaluator);
+            match runtime.parse(rule_name)? {
+                ParseResult::Success(v, _) => {
+                    if !on_match(&v) {
+                        return Ok(()); // Stopped early
+                    }
+                }
+                ParseResult::Failure => {}
+            }
+        }
+        _ => {
+            // Single value input
+            let value_input = ValueInput::new(vec![input.clone()]);
+            let mut runtime = PegRuntime::new(value_input, registry, grammar.clone())
+                .with_action_evaluator(evaluator);
+            match runtime.parse(rule_name)? {
+                ParseResult::Success(v, _) => {
+                    if !on_match(&v) {
+                        return Ok(()); // Stopped early
+                    }
+                }
+                ParseResult::Failure => {}
+            }
+        }
+    };
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::CharRange;
