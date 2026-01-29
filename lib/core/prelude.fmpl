@@ -1,6 +1,10 @@
 -- lib/core/prelude.fmpl
 -- Core helper functions for FMPL grammar actions
 
+-- Convert a string to a symbol
+-- symbol("foo") => :foo
+let symbol = \s string.to_symbol(s)
+
 -- Grammar for parsing digits to integers
 let digit_grammar = grammar digit_grammar {
     int = "0" => 0 | "1" => 1 | "2" => 2 | "3" => 3 | "4" => 4
@@ -14,3 +18,63 @@ let to_int = \c c @ digit_grammar.int
 -- Join a list of strings into a single string
 -- join(["a", "b", "c"]) => "abc"
 let join = \list string.join(list)
+
+-- Left fold: reduce(f, init, [a, b, c]) => f(f(f(init, a), b), c)
+-- reduce(\acc \x acc + x, 0, [1, 2, 3, 4]) => 10
+let reduce = lambda(f, init, list) fold f, init, list
+
+-- Fold operator/operand pairs into left-associative binary tree
+-- fold_binary(first, [[op1, e1], [op2, e2]]) => :Binary(op2, :Binary(op1, first, e1), e2)
+let fold_binary = lambda(first, rest)
+    reduce(\acc \pair :Binary(pair[0], acc, pair[1]), first, rest)
+
+-- Prepend an item to a list (since ++ is not implemented)
+-- prepend("a", ["b", "c"]) => ["a", "b", "c"]
+let prepend = lambda(item, list)
+    reduce(\acc \x acc.push(x), [item], list)
+
+-- Fold index operations into nested :Index nodes
+-- fold_index(base, [i1, i2]) => :Index(:Index(base, i1), i2)
+let fold_index = lambda(base, indices)
+    reduce(\acc \idx :Index(acc, idx), base, indices)
+
+-- Fold postfix operations into nested AST nodes
+-- Supported operations:
+--   [:index, idx]      => :Index(acc, idx)
+--   [:call, args]      => :Call(acc, args)
+--   [:prop, name]      => :Prop(acc, name)
+--   [:method, name, args] => :MethodCall(acc, name, args)
+let fold_postfix = lambda(base, ops)
+    reduce(\acc \op
+        if op[0] == :index then :Index(acc, op[1])
+        else if op[0] == :call then :Call(acc, op[1])
+        else if op[0] == :prop then :Prop(acc, op[1])
+        else :MethodCall(acc, op[1], op[2]), base, ops)
+
+-- Transform a binary operator symbol to its IR node constructor
+-- binary_op_to_ir(:+, l_ir, r_ir) => :Add(l_ir, r_ir)
+let binary_op_to_ir = lambda(op, l, r)
+    if op == :+ then :Add(l, r)
+    else if op == :- then :Sub(l, r)
+    else if op == :* then :Mul(l, r)
+    else if op == :/ then :Div(l, r)
+    else if op == :% then :Mod(l, r)
+    else if op == :== then :Eq(l, r)
+    else if op == :!= then :NotEq(l, r)
+    else if op == :< then :Lt(l, r)
+    else if op == :> then :Gt(l, r)
+    else if op == :<= then :LtEq(l, r)
+    else if op == :>= then :GtEq(l, r)
+    else if op == :&& then :And(l, r)
+    else :Or(l, r)
+
+-- Transform a unary operator symbol to its IR node constructor
+-- unary_op_to_ir(:-, e_ir) => :Neg(e_ir)
+let unary_op_to_ir = lambda(op, e)
+    if op == :- then :Neg(e)
+    else :Not(e)
+
+-- Transform list elements with a function
+-- map_list(\x x * 2, [1, 2, 3]) => [2, 4, 6]
+let map_list = lambda(f, list)
+    reduce(\acc \x acc.push(f(x)), [], list)

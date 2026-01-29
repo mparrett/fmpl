@@ -180,8 +180,13 @@ pub fn expr_to_value(expr: &Expr) -> Value {
             SmolStr::new("Slice"),
             Arc::new(vec![
                 expr_to_value(obj),
-                expr_to_value(start),
-                expr_to_value(end),
+                start
+                    .as_ref()
+                    .map(|s| expr_to_value(s))
+                    .unwrap_or(Value::Null),
+                end.as_ref()
+                    .map(|e| expr_to_value(e))
+                    .unwrap_or(Value::Null),
             ]),
         ),
 

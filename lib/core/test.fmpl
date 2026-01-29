@@ -1,0 +1,32 @@
+-- FMPL Test Framework
+-- Simple assertion-based testing for FMPL code
+
+-- Test case constructor
+let test_case = lambda(name, test_fn) %{name: name, test: test_fn};
+
+-- Run a single test case
+let run_one = lambda(tc)
+    if tc["test"]() then %{name: tc["name"], passed: true}
+    else %{name: tc["name"], passed: false};
+
+-- Run all test cases in a suite
+-- Uses nested let expressions to bind intermediate values
+let run = lambda(suite_name, cases)
+    let (results = map \tc run_one(tc), cases)
+        let (passed = fold \acc \r if r["passed"] then acc + 1 else acc, 0, results)
+            let (failed = fold \acc \r if r["passed"] then acc else acc + 1, 0, results)
+                let (failures = fold \acc \r if r["passed"] then acc else acc.push(r), [], results)
+                    %{
+                        suite: suite_name,
+                        total: cases.len(),
+                        passed: passed,
+                        failed: failed,
+                        failures: failures,
+                        ok: failed == 0
+                    };
+
+-- Export test module
+%{
+    case: test_case,
+    run: run
+}

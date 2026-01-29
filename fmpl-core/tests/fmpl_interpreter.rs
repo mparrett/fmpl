@@ -1330,3 +1330,874 @@ mod phase6_objects {
         // Accept either success or parse error for now
     }
 }
+
+// =============================================================================
+// Full Pipeline Tests with Grammar-Based AST→IR Transformation
+// =============================================================================
+//
+// These tests use the ast_to_ir grammar for recursive transformation of nested
+// expressions. The grammar uses explicit rule recursion via `expr:l` syntax.
+
+#[cfg(feature = "grammar_interpreter_tests")]
+mod full_pipeline_with_grammar {
+    use super::*;
+
+    const AST_TO_IR_PATH: &str = "../lib/core/ast_to_ir.fmpl";
+
+    /// Test full pipeline: parse nested arithmetic, transform via grammar, compile, execute.
+    #[test]
+    #[ignore = "ast_to_ir.fmpl not ready"]
+    fn nested_addition() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("1 + 2 + 3"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(6));
+    }
+
+    /// Test nested multiplication through the full pipeline.
+    #[test]
+    fn nested_multiplication() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("2 * 3 * 4"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(24));
+    }
+
+    /// Test mixed arithmetic with precedence: (1 + 2) * 3.
+    #[test]
+    fn mixed_arithmetic_precedence() {
+        let mut vm = Vm::new();
+        // Note: 1 + 2 * 3 should parse as 1 + (2 * 3) = 7 due to precedence
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("1 + 2 * 3"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(7));
+    }
+
+    /// Test parenthesized expression: (1 + 2) * 3 = 9.
+    #[test]
+    fn parenthesized_expression() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("(1 + 2) * 3"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(9));
+    }
+
+    /// Test deeply nested expression: ((1 + 2) * 3) + 4.
+    #[test]
+    fn deeply_nested_expression() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("((1 + 2) * 3) + 4"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // (1 + 2) = 3, then 3 * 3 = 9, then 9 + 4 = 13
+        assert_eq!(result, Value::Int(13));
+    }
+
+    /// Test if expression with nested arithmetic in branches.
+    #[test]
+    fn if_with_nested_arithmetic() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("if true then 2 + 3 else 10 - 5"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(5));
+    }
+
+    /// Test if expression with comparison condition.
+    #[test]
+    fn if_with_comparison() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("if 3 < 5 then 10 else 20"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(10));
+    }
+
+    /// Test nested if expressions.
+    #[test]
+    fn nested_if_expressions() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("if true then if false then 1 else 2 else 3"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(2));
+    }
+
+    /// Test let binding with arithmetic body.
+    #[test]
+    fn let_with_arithmetic_body() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("let (x = 5) x + 3"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(8));
+    }
+
+    /// Test nested let bindings.
+    #[test]
+    fn nested_let_bindings() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("let (x = 2) let (y = 3) x * y"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(6));
+    }
+
+    /// Test let binding with expression value.
+    #[test]
+    fn let_with_expression_value() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("let (x = 2 + 3) x * 2"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // x = 5, then 5 * 2 = 10
+        assert_eq!(result, Value::Int(10));
+    }
+
+    /// Test unary negation in nested context.
+    #[test]
+    fn unary_negation_nested() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("10 + -3"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(7));
+    }
+
+    /// Test complex expression combining multiple constructs.
+    #[test]
+    fn complex_combined_expression() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("let (x = 10) if x > 5 then x * 2 else x"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(20));
+    }
+
+    /// Test comparison chains.
+    #[test]
+    fn comparison_in_if_condition() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("if 1 + 1 == 2 then 100 else 0"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(100));
+    }
+
+    /// Test that self-interpreter matches direct execution.
+    #[test]
+    fn self_interpreter_matches_direct() {
+        let mut vm = Vm::new();
+
+        // Direct execution
+        let direct = eval(&mut vm, "let (x = 5) let (y = 3) x * y + 1").unwrap();
+
+        // Self-interpreted
+        let interpreted = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = ast::parse("let (x = 5) let (y = 3) x * y + 1"))
+            let (ir = ast @ ast_to_ir.expr)
+            code::eval(ir::compile(ir))
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(direct, interpreted);
+        assert_eq!(direct, Value::Int(16));
+    }
+}
+
+// =============================================================================
+// Full Pipeline Tests for Lists and Maps
+// =============================================================================
+//
+// These tests verify the full pipeline for list and map operations.
+// Note: The ast_to_ir grammar currently handles scalar expressions.
+// List/map element transformation requires iterating over variable-length
+// collections, which would need helper functions or grammar extensions.
+// For now, these tests use direct IR construction for lists/maps.
+
+mod full_pipeline_lists_maps {
+    use super::*;
+
+    /// Test parsing list literal to AST.
+    #[test]
+    fn parse_list_literal() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"ast::parse("[1, 2, 3]")"#).unwrap();
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "List");
+            // Check children is a list of Int AST nodes
+            if let Value::List(items) = &children[0] {
+                assert_eq!(items.len(), 3);
+            } else {
+                panic!("expected List children to be a list");
+            }
+        } else {
+            panic!("expected Tagged(:List, ...), got {:?}", result);
+        }
+    }
+
+    /// Test parsing map literal to AST.
+    #[test]
+    fn parse_map_literal() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"ast::parse("%{a: 1, b: 2}")"#).unwrap();
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "Map");
+            // Check children is a list of key-value pairs
+            if let Value::List(items) = &children[0] {
+                assert_eq!(items.len(), 2);
+            } else {
+                panic!("expected Map children to be a list");
+            }
+        } else {
+            panic!("expected Tagged(:Map, ...), got {:?}", result);
+        }
+    }
+
+    /// Test parsing index expression to AST.
+    #[test]
+    fn parse_index_expression() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"ast::parse("list[0]")"#).unwrap();
+        if let Value::Tagged(tag, _) = &result {
+            assert_eq!(tag.as_str(), "Index");
+        } else {
+            panic!("expected Tagged(:Index, ...), got {:?}", result);
+        }
+    }
+
+    /// Test full pipeline with list IR - create list and index it.
+    #[test]
+    fn list_creation_and_index() {
+        let mut vm = Vm::new();
+        // Manually construct IR for [10, 20, 30][1] = 20
+        let result = eval(
+            &mut vm,
+            r#"
+            let (ir = :Index(:MakeList([:LoadInt(10), :LoadInt(20), :LoadInt(30)]),
+                             :LoadInt(1)))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(20));
+    }
+
+    /// Test full pipeline with nested list IR.
+    #[test]
+    fn nested_list_creation() {
+        let mut vm = Vm::new();
+        // Manually construct IR for [[1, 2], [3, 4]][0][1] = 2
+        let result = eval(
+            &mut vm,
+            r#"
+            let (inner0 = :MakeList([:LoadInt(1), :LoadInt(2)]))
+            let (inner1 = :MakeList([:LoadInt(3), :LoadInt(4)]))
+            let (outer = :MakeList([inner0, inner1]))
+            let (ir = :Index(:Index(outer, :LoadInt(0)), :LoadInt(1)))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(2));
+    }
+
+    /// Test full pipeline with list containing computed values.
+    #[test]
+    fn list_with_computed_values() {
+        let mut vm = Vm::new();
+        // Manually construct IR for [1 + 2, 3 * 4][0] = 3
+        let result = eval(
+            &mut vm,
+            r#"
+            let (elem0 = :Add(:LoadInt(1), :LoadInt(2)))
+            let (elem1 = :Mul(:LoadInt(3), :LoadInt(4)))
+            let (ir = :Index(:MakeList([elem0, elem1]), :LoadInt(0)))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    /// Test full pipeline with map IR - create map and access value.
+    #[test]
+    fn map_creation_and_access() {
+        let mut vm = Vm::new();
+        // Manually construct IR for %{"x": 42}["x"] = 42
+        let result = eval(
+            &mut vm,
+            r#"
+            let (ir = :Index(
+                :MakeMap([[:LoadString("x"), :LoadInt(42)]]),
+                :LoadString("x")
+            ))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    /// Test full pipeline with map containing computed values.
+    #[test]
+    fn map_with_computed_values() {
+        let mut vm = Vm::new();
+        // Manually construct IR for %{"sum": 1 + 2}["sum"] = 3
+        let result = eval(
+            &mut vm,
+            r#"
+            let (ir = :Index(
+                :MakeMap([[:LoadString("sum"), :Add(:LoadInt(1), :LoadInt(2))]]),
+                :LoadString("sum")
+            ))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(3));
+    }
+
+    /// Test combining lists with arithmetic in a conditional.
+    #[test]
+    fn list_in_conditional() {
+        let mut vm = Vm::new();
+        // IR for: if true then [10, 20][0] else [30, 40][0]
+        let result = eval(
+            &mut vm,
+            r#"
+            let (list1 = :MakeList([:LoadInt(10), :LoadInt(20)]))
+            let (list2 = :MakeList([:LoadInt(30), :LoadInt(40)]))
+            let (ir = :If(:LoadBool(true),
+                          :Index(list1, :LoadInt(0)),
+                          :Index(list2, :LoadInt(0))))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(10));
+    }
+
+    /// Test list in let binding.
+    #[test]
+    fn list_in_let_binding() {
+        let mut vm = Vm::new();
+        // IR for: let (xs = [1, 2, 3]) xs[0] + xs[1] + xs[2]
+        let result = eval(
+            &mut vm,
+            r#"
+            let (ir = :Let(:xs,
+                       :MakeList([:LoadInt(1), :LoadInt(2), :LoadInt(3)]),
+                       :Add(:Add(:Index(:Var(:xs), :LoadInt(0)),
+                                 :Index(:Var(:xs), :LoadInt(1))),
+                            :Index(:Var(:xs), :LoadInt(2)))))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(6));
+    }
+
+    /// Test map in let binding.
+    #[test]
+    fn map_in_let_binding() {
+        let mut vm = Vm::new();
+        // IR for: let (m = %{"a": 10, "b": 20}) m["a"] + m["b"]
+        let result = eval(
+            &mut vm,
+            r#"
+            let (ir = :Let(:m,
+                       :MakeMap([[:LoadString("a"), :LoadInt(10)],
+                                [:LoadString("b"), :LoadInt(20)]]),
+                       :Add(:Index(:Var(:m), :LoadString("a")),
+                            :Index(:Var(:m), :LoadString("b")))))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+        assert_eq!(result, Value::Int(30));
+    }
+
+    /// Test self-interpreter produces same result as direct execution for list indexing.
+    #[test]
+    fn list_self_interpreter_matches_direct() {
+        let mut vm = Vm::new();
+
+        // Direct execution
+        let direct = eval(&mut vm, "[10, 20, 30][1]").unwrap();
+
+        // Self-interpreted via manual IR
+        let interpreted = eval(
+            &mut vm,
+            r#"
+            let (ir = :Index(:MakeList([:LoadInt(10), :LoadInt(20), :LoadInt(30)]),
+                             :LoadInt(1)))
+            code::eval(ir::compile(ir))
+        "#,
+        )
+        .unwrap();
+
+        assert_eq!(direct, interpreted);
+        assert_eq!(direct, Value::Int(20));
+    }
+}
+
+// =============================================================================
+// Grammar-based transformation tests for expr*:binding patterns
+// =============================================================================
+
+#[cfg(feature = "grammar_interpreter_tests")]
+mod grammar_star_pattern {
+    use super::*;
+
+    const AST_TO_IR_PATH: &str = "../lib/core/ast_to_ir.fmpl";
+
+    /// Test that List transformation works with expr*:items pattern
+    #[test]
+    fn list_transformation_via_grammar() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :List([:Int(1), :Int(2), :Int(3)]))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :MakeList([:LoadInt(1), :LoadInt(2), :LoadInt(3)])
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "MakeList");
+            if let Value::List(items) = &children[0] {
+                assert_eq!(items.len(), 3);
+                // Check each item is LoadInt
+                for (i, item) in items.iter().enumerate() {
+                    if let Value::Tagged(t, c) = item {
+                        assert_eq!(t.as_str(), "LoadInt");
+                        assert_eq!(c[0], Value::Int(i as i64 + 1));
+                    } else {
+                        panic!("expected LoadInt, got {:?}", item);
+                    }
+                }
+            } else {
+                panic!("expected List, got {:?}", children[0]);
+            }
+        } else {
+            panic!("expected Tagged(:MakeList), got {:?}", result);
+        }
+    }
+
+    /// Test that Call transformation works with expr*:args pattern
+    #[test]
+    fn call_transformation_via_grammar() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :Call(:Var(:f), [:Int(1)]))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :Call(:Var(:f), [:LoadInt(1)])
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "Call");
+            // First child should be :Var(:f)
+            if let Value::Tagged(func_tag, _) = &children[0] {
+                assert_eq!(func_tag.as_str(), "Var");
+            } else {
+                panic!("expected Tagged(:Var), got {:?}", children[0]);
+            }
+            // Second child should be [:LoadInt(1)]
+            if let Value::List(args) = &children[1] {
+                assert_eq!(args.len(), 1, "expected 1 argument, got {}", args.len());
+                if let Value::Tagged(arg_tag, arg_children) = &args[0] {
+                    assert_eq!(arg_tag.as_str(), "LoadInt");
+                    assert_eq!(arg_children[0], Value::Int(1));
+                } else {
+                    panic!("expected LoadInt, got {:?}", args[0]);
+                }
+            } else {
+                panic!("expected List of args, got {:?}", children[1]);
+            }
+        } else {
+            panic!("expected Tagged(:Call), got {:?}", result);
+        }
+    }
+
+    /// Test Call with multiple arguments
+    #[test]
+    fn call_transformation_multiple_args() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :Call(:Var(:g), [:Int(1), :Int(2), :Int(3)]))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :Call(:Var(:g), [:LoadInt(1), :LoadInt(2), :LoadInt(3)])
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "Call");
+            if let Value::List(args) = &children[1] {
+                assert_eq!(args.len(), 3, "expected 3 arguments, got {}", args.len());
+            } else {
+                panic!("expected List of args, got {:?}", children[1]);
+            }
+        } else {
+            panic!("expected Tagged(:Call), got {:?}", result);
+        }
+    }
+
+    /// Test MethodCall transformation
+    #[test]
+    fn method_call_transformation_via_grammar() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :MethodCall(:Var(:obj), :method, [:Int(42)]))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :MethodCall(:Var(:obj), :method, [:LoadInt(42)])
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "MethodCall");
+            // Third child should be [:LoadInt(42)]
+            if let Value::List(args) = &children[2] {
+                assert_eq!(args.len(), 1, "expected 1 argument, got {}", args.len());
+            } else {
+                panic!("expected List of args, got {:?}", children[2]);
+            }
+        } else {
+            panic!("expected Tagged(:MethodCall), got {:?}", result);
+        }
+    }
+
+    /// Test Lambda transformation (passthrough with body transformation)
+    #[test]
+    fn lambda_transformation_via_grammar() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :Lambda([:x], :Binary(:+, :Var(:x), :Int(1))))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :Lambda([:x], :Add(:Var(:x), :LoadInt(1)))
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "Lambda");
+            // Body should be transformed
+            if let Value::Tagged(body_tag, _) = &children[1] {
+                assert_eq!(body_tag.as_str(), "Add");
+            } else {
+                panic!("expected body to be :Add, got {:?}", children[1]);
+            }
+        } else {
+            panic!("expected Tagged(:Lambda), got {:?}", result);
+        }
+    }
+
+    /// Test While transformation (passthrough with recursive transformation)
+    #[test]
+    fn while_transformation_via_grammar() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :While(:Binary(:<, :Var(:x), :Int(10)), :Binary(:+, :Var(:x), :Int(1))))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :While(:Lt(:Var(:x), :LoadInt(10)), :Add(:Var(:x), :LoadInt(1)))
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "While");
+            // Condition should be transformed
+            if let Value::Tagged(cond_tag, _) = &children[0] {
+                assert_eq!(cond_tag.as_str(), "Lt");
+            } else {
+                panic!("expected cond to be :Lt, got {:?}", children[0]);
+            }
+            // Body should be transformed
+            if let Value::Tagged(body_tag, _) = &children[1] {
+                assert_eq!(body_tag.as_str(), "Add");
+            } else {
+                panic!("expected body to be :Add, got {:?}", children[1]);
+            }
+        } else {
+            panic!("expected Tagged(:While), got {:?}", result);
+        }
+    }
+
+    /// Test Return transformation
+    #[test]
+    fn return_transformation_via_grammar() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :Return(:Binary(:+, :Int(1), :Int(2))))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :Return(:Add(:LoadInt(1), :LoadInt(2)))
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "Return");
+            if let Value::Tagged(expr_tag, _) = &children[0] {
+                assert_eq!(expr_tag.as_str(), "Add");
+            } else {
+                panic!("expected return expr to be :Add, got {:?}", children[0]);
+            }
+        } else {
+            panic!("expected Tagged(:Return), got {:?}", result);
+        }
+    }
+
+    /// Test AsyncCall transformation
+    #[test]
+    fn async_call_transformation_via_grammar() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :AsyncCall(:Call(:Var(:fetch), [:String("url")])))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :AsyncCall(:Call(:Var(:fetch), [:LoadString("url")]))
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "AsyncCall");
+            if let Value::Tagged(inner_tag, _) = &children[0] {
+                assert_eq!(inner_tag.as_str(), "Call");
+            } else {
+                panic!("expected inner to be :Call, got {:?}", children[0]);
+            }
+        } else {
+            panic!("expected Tagged(:AsyncCall), got {:?}", result);
+        }
+    }
+
+    /// Test Block/Seq transformation
+    #[test]
+    fn block_transformation_via_grammar() {
+        let mut vm = Vm::new();
+        let result = eval(
+            &mut vm,
+            &format!(
+                r#"
+            io::load("{}")
+            let (ast = :Block([:Int(1), :Int(2), :Binary(:+, :Int(3), :Int(4))]))
+            ast @ ast_to_ir.expr
+        "#,
+                AST_TO_IR_PATH
+            ),
+        )
+        .unwrap();
+        // Should produce :Block([:LoadInt(1), :LoadInt(2), :Add(:LoadInt(3), :LoadInt(4))])
+        if let Value::Tagged(tag, children) = &result {
+            assert_eq!(tag.as_str(), "Block");
+            if let Value::List(stmts) = &children[0] {
+                assert_eq!(stmts.len(), 3);
+                // Third statement should be transformed
+                if let Value::Tagged(stmt_tag, _) = &stmts[2] {
+                    assert_eq!(stmt_tag.as_str(), "Add");
+                } else {
+                    panic!("expected third stmt to be :Add, got {:?}", stmts[2]);
+                }
+            } else {
+                panic!("expected List of stmts, got {:?}", children[0]);
+            }
+        } else {
+            panic!("expected Tagged(:Block), got {:?}", result);
+        }
+    }
+}

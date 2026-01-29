@@ -9,14 +9,19 @@
 //! - Values: Object stream parsing for AST transformation
 //! - Streams: Lazy async stream parsing with blocking
 
+use super::{Grammar, GrammarRegistry, ParseResult, Pattern, Rule};
+use crate::error::{Error, Result};
+use crate::value::Value;
+
+/// Stack size threshold for stacker to grow the stack.
+/// Using larger red zone (256KB) to account for large closures and VM frames.
+const STACK_RED_ZONE: usize = 256 * 1024;
+const STACK_GROWTH: usize = 4 * 1024 * 1024;
 use super::incremental::{ParseNext, ParseState};
 use super::input::{
     BinaryInput, InputItem, MemoEntry, PegInput, StreamingInput, TextInput, ValueInput,
 };
-use super::{Grammar, GrammarRegistry, ParseResult, Pattern, Rule};
-use crate::error::{Error, Result};
 use crate::stream::StreamHandle;
-use crate::value::Value;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,8 +29,12 @@ use std::time::Duration;
 
 /// Action evaluator callback type.
 /// Takes the action expression and bindings, returns the evaluated result.
-pub type ActionEvaluator<'e> =
-    Box<dyn FnMut(&crate::ast::Expr, &HashMap<SmolStr, Value>) -> Result<Value> + 'e>;
+/// Uses Rc<RefCell<...>> to allow sharing between parent and sub-runtimes.
+pub type ActionEvaluator<'e> = std::rc::Rc<
+    std::cell::RefCell<
+        dyn FnMut(&crate::ast::Expr, &HashMap<SmolStr, Value>) -> Result<Value> + 'e,
+    >,
+>;
 
 /// A backtracking stack entry.
 ///
@@ -68,6 +77,9 @@ pub struct PegRuntime<'a, 'e, I: PegInput> {
     /// When true, the next Choice pattern will treat ALL alternatives as choice points.
     /// This is set by `Bind(_, _, true)` (digit:?s syntax) before evaluating the inner pattern.
     force_choice_backtracking: bool,
+    /// Depth of nested rule applications. 0 = top-level, > 0 = nested.
+    /// At depth 0, bindings are preserved. At depth > 0, bindings are scoped.
+    rule_depth: usize,
 }
 
 impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
@@ -82,6 +94,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             backtracking_mode: false, // Default: traditional PEG behavior
             backtracking_stack: Vec::new(),
             force_choice_backtracking: false,
+            rule_depth: 0,
         }
     }
 
@@ -111,6 +124,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
 
     /// Apply a named rule at a position.
     fn apply_rule(&mut self, rule_name: &SmolStr, pos: I::Position) -> Result<ParseResult> {
+        // Use stacker to dynamically grow stack for deeply recursive grammars
+        stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, || {
+            self.apply_rule_inner(rule_name, pos.clone())
+        })
+    }
+
+    /// Inner implementation of apply_rule, called via stacker.
+    fn apply_rule_inner(&mut self, rule_name: &SmolStr, pos: I::Position) -> Result<ParseResult> {
         let pos_index = self.input.index(&pos);
 
         // In backtracking mode, if there's a Choice entry for this position,
@@ -138,6 +159,18 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
         self.input
             .set_memo(&pos, rule_name.clone(), MemoEntry::InProgress);
 
+        // Track rule depth and save bindings for nested rules
+        self.rule_depth += 1;
+        let saved_bindings = if self.rule_depth > 1 {
+            // Nested rule: save and clear bindings to prevent name collisions
+            let saved = self.bindings.clone();
+            self.bindings.clear();
+            Some(saved)
+        } else {
+            // Top-level rule: don't save/clear, preserve bindings after parse
+            None
+        };
+
         // Find the rule
         let rule = self.find_rule(rule_name)?;
         let result = self.match_pattern(&rule.pattern, pos.clone())?;
@@ -154,6 +187,12 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             result
         };
 
+        // Restore saved bindings for nested rules (discard nested bindings)
+        if let Some(saved) = saved_bindings {
+            self.bindings = saved;
+        }
+        self.rule_depth -= 1;
+
         // Update memo with final result
         let memo_entry = match &result {
             ParseResult::Success(v, end_pos) => MemoEntry::Done(Some(v.clone()), *end_pos),
@@ -166,6 +205,16 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
 
     /// Find a rule by name, checking current grammar and parents.
     fn find_rule(&self, name: &SmolStr) -> Result<Rule> {
+        // Check for built-in rules first
+        if name == "any" {
+            // `any` matches any single value/element (like _ but as a rule)
+            return Ok(Rule {
+                pattern: Pattern::Any,
+                action: None,
+                backtracking: false,
+            });
+        }
+
         // Check current grammar
         if let Some(rule) = self.grammar.rules.get(name) {
             return Ok(rule.clone());
@@ -234,6 +283,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
 
     /// Match a pattern at a position.
     fn match_pattern(&mut self, pattern: &Pattern, pos: I::Position) -> Result<ParseResult> {
+        // Use stacker to dynamically grow stack for deeply recursive grammars
+        stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, || {
+            self.match_pattern_inner(pattern, pos.clone())
+        })
+    }
+
+    /// Inner implementation of match_pattern, called via stacker.
+    fn match_pattern_inner(&mut self, pattern: &Pattern, pos: I::Position) -> Result<ParseResult> {
         match pattern {
             Pattern::Empty => Ok(ParseResult::Success(Value::Null, self.input.index(&pos))),
 
@@ -950,6 +1007,8 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                     let mut sub_runtime =
                         PegRuntime::new(sub_input, self.registry, self.grammar.clone());
                     sub_runtime.bindings = self.bindings.clone();
+                    // Share the action evaluator with sub-runtime (Rc allows cloning)
+                    sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                     let result = sub_runtime.match_pattern(pat, 0)?;
                     match result {
@@ -981,35 +1040,140 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                     _ => return Ok(ParseResult::Failure),
                 };
 
-                // Match patterns against list elements
-                if patterns.len() > items.len() && rest.is_none() {
-                    return Ok(ParseResult::Failure);
-                }
-
                 let mut matched_values = Vec::new();
                 let mut item_idx = 0;
 
                 for pat in patterns {
-                    if item_idx >= items.len() {
+                    // Check if this is a Star/Plus pattern (possibly wrapped in Bind)
+                    let (inner_pat, is_star, is_plus, bind_name) = match pat {
+                        Pattern::Star(inner) => (inner.as_ref(), true, false, None),
+                        Pattern::Plus(inner) => (inner.as_ref(), false, true, None),
+                        Pattern::Bind(inner, name, _) => match inner.as_ref() {
+                            Pattern::Star(inner2) => {
+                                (inner2.as_ref(), true, false, Some(name.clone()))
+                            }
+                            Pattern::Plus(inner2) => {
+                                (inner2.as_ref(), false, true, Some(name.clone()))
+                            }
+                            _ => {
+                                // Regular pattern - match single element
+                                if item_idx >= items.len() {
+                                    return Ok(ParseResult::Failure);
+                                }
+                                let sub_input = ValueInput::new(vec![items[item_idx].clone()]);
+                                let mut sub_runtime =
+                                    PegRuntime::new(sub_input, self.registry, self.grammar.clone());
+                                sub_runtime.bindings = self.bindings.clone();
+                                sub_runtime.action_evaluator = self.action_evaluator.clone();
+
+                                let result = sub_runtime.match_pattern(pat, 0)?;
+                                match result {
+                                    ParseResult::Success(v, _) => {
+                                        matched_values.push(v);
+                                        self.bindings.extend(sub_runtime.bindings);
+                                        item_idx += 1;
+                                    }
+                                    ParseResult::Failure => return Ok(ParseResult::Failure),
+                                }
+                                continue;
+                            }
+                        },
+                        _ => {
+                            // Regular pattern - match single element
+                            if item_idx >= items.len() {
+                                return Ok(ParseResult::Failure);
+                            }
+                            let sub_input = ValueInput::new(vec![items[item_idx].clone()]);
+                            let mut sub_runtime =
+                                PegRuntime::new(sub_input, self.registry, self.grammar.clone());
+                            sub_runtime.bindings = self.bindings.clone();
+                            sub_runtime.action_evaluator = self.action_evaluator.clone();
+
+                            let result = sub_runtime.match_pattern(pat, 0)?;
+                            match result {
+                                ParseResult::Success(v, _) => {
+                                    matched_values.push(v);
+                                    self.bindings.extend(sub_runtime.bindings);
+                                    item_idx += 1;
+                                }
+                                ParseResult::Failure => return Ok(ParseResult::Failure),
+                            }
+                            continue;
+                        }
+                    };
+
+                    // Handle Star/Plus: consume remaining elements greedily
+                    let mut collected_results = Vec::new();
+                    while item_idx < items.len() {
+                        let sub_input = ValueInput::new(vec![items[item_idx].clone()]);
+                        let mut sub_runtime =
+                            PegRuntime::new(sub_input, self.registry, self.grammar.clone());
+                        sub_runtime.bindings = self.bindings.clone();
+                        sub_runtime.action_evaluator = self.action_evaluator.clone();
+
+                        let result = sub_runtime.match_pattern(inner_pat, 0)?;
+                        match result {
+                            ParseResult::Success(v, _) => {
+                                collected_results.push(v);
+                                self.bindings.extend(sub_runtime.bindings);
+                                item_idx += 1;
+                            }
+                            ParseResult::Failure => break,
+                        }
+                    }
+
+                    // Determine if we should spread (concatenate) the results.
+                    // Spreading is appropriate when:
+                    // - All results are lists
+                    // - Those lists contain ONLY list elements (a "list of lists")
+                    //
+                    // Examples:
+                    // - [[[:Char, "a"]], [[:Char, "b"]]] -> spread to [[:Char, "a"], [:Char, "b"]]
+                    // - [[:Char, "a"], [:Char, "b"]] -> no spread (tagged tuple, starts with symbol)
+                    // - [[[:Char, "a"], false]] -> no spread (contains non-list element `false`)
+                    fn is_list_of_lists(v: &Value) -> bool {
+                        if let Value::List(items) = v {
+                            // Empty list is ambiguous, don't spread
+                            if items.is_empty() {
+                                return true; // Empty can be spread (contributes nothing)
+                            }
+                            // All elements must be lists
+                            items.iter().all(|elem| matches!(elem, Value::List(_)))
+                        } else {
+                            false
+                        }
+                    }
+
+                    fn should_spread(results: &[Value]) -> bool {
+                        // All results must be lists whose elements are all lists
+                        results.iter().all(|v| is_list_of_lists(v))
+                    }
+
+                    let collected =
+                        if !collected_results.is_empty() && should_spread(&collected_results) {
+                            // Spread: concatenate all lists
+                            let mut flattened = Vec::new();
+                            for v in collected_results {
+                                if let Value::List(items) = v {
+                                    flattened.extend(items.iter().cloned());
+                                }
+                            }
+                            flattened
+                        } else {
+                            // Collect: each result is one element
+                            collected_results
+                        };
+
+                    // Plus requires at least one match
+                    if is_plus && collected.is_empty() {
                         return Ok(ParseResult::Failure);
                     }
-                    // Create a sub-runtime for matching the element
-                    let sub_input = ValueInput::new(vec![items[item_idx].clone()]);
-                    let mut sub_runtime =
-                        PegRuntime::new(sub_input, self.registry, self.grammar.clone());
-                    // Copy bindings
-                    sub_runtime.bindings = self.bindings.clone();
 
-                    let result = sub_runtime.match_pattern(pat, 0)?;
-                    match result {
-                        ParseResult::Success(v, _) => {
-                            matched_values.push(v);
-                            // Merge bindings back
-                            self.bindings.extend(sub_runtime.bindings);
-                            item_idx += 1;
-                        }
-                        ParseResult::Failure => return Ok(ParseResult::Failure),
+                    let collected_value = Value::List(Arc::new(collected));
+                    if let Some(name) = bind_name {
+                        self.bindings.insert(name, collected_value.clone());
                     }
+                    matched_values.push(collected_value);
                 }
 
                 // Handle rest pattern
@@ -1019,6 +1183,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                     let mut sub_runtime =
                         PegRuntime::new(sub_input, self.registry, self.grammar.clone());
                     sub_runtime.bindings = self.bindings.clone();
+                    sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                     let result = sub_runtime.match_pattern(rest_pattern, 0)?;
                     match result {
@@ -1060,6 +1225,8 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         let mut sub_runtime =
                             PegRuntime::new(sub_input, self.registry, self.grammar.clone());
                         sub_runtime.bindings = self.bindings.clone();
+                        // Share the action evaluator with sub-runtime (Rc allows cloning)
+                        sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                         let result = sub_runtime.match_pattern(pat, 0)?;
                         match result {
@@ -1103,13 +1270,19 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 let mut sub_runtime =
                     PegRuntime::new(sub_input, self.registry, self.grammar.clone());
                 sub_runtime.bindings = self.bindings.clone();
+                // Share the action evaluator with sub-runtime (Rc allows cloning)
+                sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                 let result = sub_runtime.match_pattern(inner, 0)?;
                 match result {
                     ParseResult::Success(v, end_pos) => {
                         // Check if entire sub-input was consumed
                         if end_pos == sub_len {
-                            self.bindings.extend(sub_runtime.bindings);
+                            // NOTE: Do NOT extend bindings from sub-runtime to parent.
+                            // The sub-runtime's bindings are used for its own actions,
+                            // but should not leak into the parent's binding scope.
+                            // This prevents binding collisions when nested rules use
+                            // the same binding names (e.g., expr:l in both parent and child).
                             let new_pos = self.input.tail(&pos);
                             Ok(ParseResult::Success(v, self.input.index(&new_pos)))
                         } else {
@@ -1133,8 +1306,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
     /// Evaluate a semantic predicate expression.
     fn evaluate_predicate(&mut self, expr: &crate::ast::Expr) -> Result<Value> {
         // If we have an action evaluator, use it for predicates too
-        if let Some(ref mut evaluator) = self.action_evaluator {
-            return evaluator(expr, &self.bindings);
+        if let Some(ref evaluator) = self.action_evaluator {
+            // Wrap in stacker to handle deep recursion from VM evaluation
+            let evaluator_clone = evaluator.clone();
+            let bindings_clone = self.bindings.clone();
+            let expr_clone = expr.clone();
+            return stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, move || {
+                evaluator_clone.borrow_mut()(&expr_clone, &bindings_clone)
+            });
         }
 
         // Fallback: always succeed (for testing without VM)
@@ -1144,8 +1323,14 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
     /// Evaluate a semantic action expression.
     fn evaluate_action(&mut self, action: &crate::ast::Expr, matched: Value) -> Result<Value> {
         // If we have an action evaluator, use it
-        if let Some(ref mut evaluator) = self.action_evaluator {
-            return evaluator(action, &self.bindings);
+        if let Some(ref evaluator) = self.action_evaluator {
+            // Wrap in stacker to handle deep recursion from VM evaluation
+            let evaluator_clone = evaluator.clone();
+            let bindings_clone = self.bindings.clone();
+            let action_clone = action.clone();
+            return stacker::maybe_grow(STACK_RED_ZONE, STACK_GROWTH, move || {
+                evaluator_clone.borrow_mut()(&action_clone, &bindings_clone)
+            });
         }
 
         // Fallback: return matched value (or last binding if available)
@@ -1380,6 +1565,27 @@ pub fn apply_grammar_to_value(
 }
 
 /// Apply a grammar rule to any value with an action evaluator.
+///
+/// When the `trampolined-grammar` feature is enabled, uses the trampolined
+/// implementation with bounded stack usage. Otherwise, uses the recursive
+/// implementation with stacker for dynamic stack growth.
+#[cfg(feature = "trampolined-grammar")]
+pub fn apply_grammar_to_value_with_evaluator<'e>(
+    input: Value,
+    grammar: &Arc<Grammar>,
+    registry: &GrammarRegistry,
+    rule_name: &str,
+    evaluator: ActionEvaluator<'e>,
+) -> Result<Option<Value>> {
+    super::trampoline::apply_grammar_to_value_with_evaluator(
+        input, grammar, registry, rule_name, evaluator,
+    )
+}
+
+/// Apply a grammar rule to any value with an action evaluator.
+///
+/// Recursive implementation with stacker for dynamic stack growth.
+#[cfg(not(feature = "trampolined-grammar"))]
 pub fn apply_grammar_to_value_with_evaluator<'e>(
     input: Value,
     grammar: &Arc<Grammar>,
@@ -1401,16 +1607,20 @@ pub fn apply_grammar_to_value_with_evaluator<'e>(
             }
         }
         Value::List(items) => {
-            // For anonymous grammars (used in @ { [x] => x } pattern matching),
-            // wrap the list so patterns like [x] can match the entire list.
-            // For named grammars (base::tree.int, etc.), treat the list as a stream
-            // of elements so each element can be matched individually.
-            let is_anonymous = grammar.name.starts_with("<");
-            let values = if is_anonymous {
-                vec![Value::List(items.clone())]
-            } else {
-                (*items).clone()
-            };
+            // First try: treat the list as a single value (for ListMatch patterns)
+            // This allows grammars with patterns like [:Seq, trans*:xs] to match
+            let values = vec![Value::List(items.clone())];
+            let len = values.len();
+            let mut runtime = value_runtime(values, registry, grammar.clone())
+                .with_action_evaluator(evaluator.clone());
+            match runtime.parse(rule_name)? {
+                ParseResult::Success(v, pos) if pos == len => return Ok(Some(v)),
+                _ => {}
+            }
+
+            // Second try: unpack the list as a stream of values (for element matching)
+            // This allows grammars with patterns like MatchType("int") to match list elements
+            let values: Vec<Value> = (*items).clone();
             let len = values.len();
             let mut runtime =
                 value_runtime(values, registry, grammar.clone()).with_action_evaluator(evaluator);

@@ -1,0 +1,122 @@
+-- IR to Rust transpiler using pattern matching
+-- Transforms IR tagged values to Rust code strings
+-- Requires: lib/core/prelude.fmpl loaded first
+
+-- Helper to sanitize identifiers for Rust
+let sanitize_ident = \name
+    if name == "type" then "r#type"
+    else if name == "match" then "r#match"
+    else if name == "loop" then "r#loop"
+    else if name == "move" then "r#move"
+    else if name == "ref" then "r#ref"
+    else if name == "fn" then "r#fn"
+    else if name == "let" then "r#let"
+    else if name == "if" then "r#if"
+    else if name == "else" then "r#else"
+    else if name == "return" then "r#return"
+    else name
+
+-- Convert symbol to string (for variable names)
+let sym_to_str = \s s @ { :name => name }
+
+-- Join list items with separator
+let join_with = lambda(sep, items)
+    reduce(\acc \item
+        if acc == "" then item
+        else acc ++ sep ++ item, "", items)
+
+-- Convert IR to Rust expression (recursive)
+let ir_expr = \ir ir @ {
+    -- Literals
+    :LoadNull() => "Value::Null"
+    :LoadBool(true) => "Value::Bool(true)"
+    :LoadBool(false) => "Value::Bool(false)"
+    :LoadInt(n) => "Value::Int(" ++ int.to_string(n) ++ ")"
+    :LoadString(s) => "Value::String(\"" ++ s ++ "\".to_string())"
+
+    -- Variables
+    :Var(name) => sanitize_ident(symbol.to_string(name)) ++ ".clone()"
+
+    -- Binary operations
+    :Add(l, r) => "(" ++ ir_expr(l) ++ ").add(&(" ++ ir_expr(r) ++ "))"
+    :Sub(l, r) => "(" ++ ir_expr(l) ++ ").sub(&(" ++ ir_expr(r) ++ "))"
+    :Mul(l, r) => "(" ++ ir_expr(l) ++ ").mul(&(" ++ ir_expr(r) ++ "))"
+    :Div(l, r) => "(" ++ ir_expr(l) ++ ").div(&(" ++ ir_expr(r) ++ "))"
+    :Mod(l, r) => "(" ++ ir_expr(l) ++ ").modulo(&(" ++ ir_expr(r) ++ "))"
+    :Eq(l, r) => "(" ++ ir_expr(l) ++ ").eq(&(" ++ ir_expr(r) ++ "))"
+    :NotEq(l, r) => "(" ++ ir_expr(l) ++ ").eq(&(" ++ ir_expr(r) ++ ")).not()"
+    :Lt(l, r) => "(" ++ ir_expr(l) ++ ").lt(&(" ++ ir_expr(r) ++ "))"
+    :Gt(l, r) => "(" ++ ir_expr(l) ++ ").gt(&(" ++ ir_expr(r) ++ "))"
+    :LtEq(l, r) => "(" ++ ir_expr(l) ++ ").lteq(&(" ++ ir_expr(r) ++ "))"
+    :GtEq(l, r) => "(" ++ ir_expr(l) ++ ").gteq(&(" ++ ir_expr(r) ++ "))"
+
+    -- Unary operations
+    :Neg(e) => "(" ++ ir_expr(e) ++ ").neg()"
+    :Not(e) => "(" ++ ir_expr(e) ++ ").not()"
+
+    -- Control flow
+    :If(c, t, e) => "if (" ++ ir_expr(c) ++ ").is_truthy() { " ++ ir_expr(t) ++ " } else { " ++ ir_expr(e) ++ " }"
+
+    -- Let binding
+    :Let(name, val, body) => "{ let " ++ sanitize_ident(symbol.to_string(name)) ++ " = " ++ ir_expr(val) ++ "; " ++ ir_expr(body) ++ " }"
+
+    -- Short-circuit operators
+    :And(l, r) => "if (" ++ ir_expr(l) ++ ").is_truthy() { " ++ ir_expr(r) ++ " } else { Value::Bool(false) }"
+    :Or(l, r) => "{ let __tmp = " ++ ir_expr(l) ++ "; if (__tmp).is_truthy() { __tmp } else { " ++ ir_expr(r) ++ " } }"
+
+    -- Collections
+    :MakeList(items) => "Value::List(vec![" ++ join_with(", ", map_list(ir_expr, items)) ++ "])"
+    :Index(base, idx) => "(" ++ ir_expr(base) ++ ").index(&(" ++ ir_expr(idx) ++ "))"
+
+    -- Function calls
+    :Call(func, args) => "(" ++ ir_expr(func) ++ ").call(vec![" ++ join_with(", ", map_list(ir_expr, args)) ++ "])"
+}
+
+-- Rust runtime prelude (compact version)
+let rust_prelude = "use std::rc::Rc;
+
+#[derive(Clone)]
+enum Value {
+    Null, Bool(bool), Int(i64), Float(f64), String(String),
+    List(Vec<Value>), Map(Vec<(Value, Value)>),
+    Lambda(Rc<dyn Fn(Vec<Value>) -> Value>),
+}
+
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Null => write!(f, \"Null\"),
+            Value::Bool(b) => write!(f, \"Bool({})\", b),
+            Value::Int(n) => write!(f, \"Int({})\", n),
+            Value::Float(n) => write!(f, \"Float({})\", n),
+            Value::String(s) => write!(f, \"String({:?})\", s),
+            Value::List(items) => write!(f, \"List({:?})\", items),
+            Value::Map(pairs) => write!(f, \"Map({:?})\", pairs),
+            Value::Lambda(_) => write!(f, \"Lambda(<fn>)\"),
+        }
+    }
+}
+
+impl Value {
+    fn is_truthy(&self) -> bool { match self { Value::Null => false, Value::Bool(b) => *b, Value::Int(n) => *n != 0, _ => true } }
+    fn add(&self, o: &Value) -> Value { match (self,o) { (Value::Int(a),Value::Int(b)) => Value::Int(a+b), (Value::String(a),Value::String(b)) => Value::String(format!(\"{}{}\",a,b)), _ => panic!(\"add\") } }
+    fn sub(&self, o: &Value) -> Value { match (self,o) { (Value::Int(a),Value::Int(b)) => Value::Int(a-b), _ => panic!(\"sub\") } }
+    fn mul(&self, o: &Value) -> Value { match (self,o) { (Value::Int(a),Value::Int(b)) => Value::Int(a*b), _ => panic!(\"mul\") } }
+    fn div(&self, o: &Value) -> Value { match (self,o) { (Value::Int(a),Value::Int(b)) => Value::Int(a/b), _ => panic!(\"div\") } }
+    fn modulo(&self, o: &Value) -> Value { match (self,o) { (Value::Int(a),Value::Int(b)) => Value::Int(a%b), _ => panic!(\"mod\") } }
+    fn eq(&self, o: &Value) -> Value { Value::Bool(match (self,o) { (Value::Null,Value::Null) => true, (Value::Bool(a),Value::Bool(b)) => a==b, (Value::Int(a),Value::Int(b)) => a==b, (Value::String(a),Value::String(b)) => a==b, _ => false }) }
+    fn lt(&self, o: &Value) -> Value { Value::Bool(match (self,o) { (Value::Int(a),Value::Int(b)) => a<b, _ => false }) }
+    fn gt(&self, o: &Value) -> Value { Value::Bool(match (self,o) { (Value::Int(a),Value::Int(b)) => a>b, _ => false }) }
+    fn lteq(&self, o: &Value) -> Value { Value::Bool(match (self,o) { (Value::Int(a),Value::Int(b)) => a<=b, _ => false }) }
+    fn gteq(&self, o: &Value) -> Value { Value::Bool(match (self,o) { (Value::Int(a),Value::Int(b)) => a>=b, _ => false }) }
+    fn neg(&self) -> Value { match self { Value::Int(n) => Value::Int(-n), _ => panic!(\"neg\") } }
+    fn not(&self) -> Value { Value::Bool(!self.is_truthy()) }
+    fn index(&self, k: &Value) -> Value { match (self,k) { (Value::List(l),Value::Int(i)) => l[*i as usize].clone(), _ => panic!(\"idx\") } }
+    fn call(&self, args: Vec<Value>) -> Value { match self { Value::Lambda(f) => f(args), _ => panic!(\"call\") } }
+}
+"
+
+-- Convert IR to complete Rust program
+let ir_to_rust_program = \ir
+    "// Generated from FMPL IR\n" ++ rust_prelude ++ "\nfn main() {\n    let result = " ++ ir_expr(ir) ++ ";\n    println!(\"{:?}\", result);\n}\n"
+

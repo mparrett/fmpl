@@ -1,0 +1,166 @@
+-- Scannerless FMPL parser - produces AST tagged values
+-- Requires: lib/core/prelude.fmpl loaded first
+--
+-- Supported features:
+-- - Literals: int, bool, null, string
+-- - Collections: lists [], maps %{}
+-- - Variables and qualified names (foo::bar)
+-- - Tagged values: :Tag(args...)
+-- - Symbols: :name, :==, etc.
+-- - Arithmetic: +, -, *, /, %
+-- - Comparisons: ==, !=, <, >, <=, >=
+-- - Logical: &&, ||
+-- - Unary: -, !
+-- - Control flow: if/then/else, let bindings
+-- - Functions: lambdas (\x expr, lambda(x, y) expr), calls f(args)
+-- - Postfix: indexing [idx], property .name, method .name(args)
+-- - Comments: --, //, /* */
+--
+-- The grammar engine uses stacker for dynamic stack growth, enabling
+-- deeply nested grammars with indirect recursion.
+
+let fmpl_parser = grammar fmpl_parser {
+    ws = [ \t\n\r]+
+    line_comment_char = [^\n]
+    line_comment = ("--" | "/" "/") line_comment_char*
+    block_comment_end = "*" "/"
+    block_comment_char = ~block_comment_end .
+    block_comment = "/" "*" block_comment_char* block_comment_end
+    comment = line_comment | block_comment
+    sp = (ws | comment)*
+
+    digit_val = "0" => 0 | "1" => 1 | "2" => 2 | "3" => 3 | "4" => 4
+              | "5" => 5 | "6" => 6 | "7" => 7 | "8" => 8 | "9" => 9
+    digit_char = [0-9]
+
+    -- Float: digits, dot, digits (e.g., "3.14")
+    -- Note: digit_char+ auto-joins to string, prepend and join combine with "."
+    float_lit = digit_char+:int_part "." digit_char+:frac_part ~ident_rest sp
+             => :Float(float.parse(join(prepend(int_part, prepend(".", [frac_part])))))
+
+    -- Literals use negative lookahead to ensure they don't match prefixes of identifiers
+    -- (e.g., "false" vs "falsetto", "null" vs "nullable", "123" vs "123abc")
+    int = digit_val+:ds ~ident_rest sp => :Int(reduce(\acc \d acc * 10 + d, 0, ds))
+
+    bool = "true" ~ident_rest sp => :Bool(true)
+         | "false" ~ident_rest sp => :Bool(false)
+
+    null_lit = "null" ~ident_rest sp => :Null()
+
+    escape_char = "n" => "\n" | "r" => "\r" | "t" => "\t"
+                | "\"" => "\"" | "\\" => "\\"
+    string_char = "\\" escape_char:c => c
+                | [^"\\]:c => c
+    string_lit = "\"" string_char*:cs "\"" sp => :String(cs)
+
+    ident_start = [a-zA-Z_]
+    ident_rest = [a-zA-Z0-9_]
+
+    -- Keywords that cannot be used as identifiers
+    -- Use negative lookahead (~) to prevent matching keywords
+    keyword = ("if" | "then" | "else" | "let" | "true" | "false" | "null" | "lambda") ~ident_rest
+
+    -- ident returns a string (used for map keys, etc.)
+    -- Exclude keywords using negative lookahead
+    ident = ~keyword ident_start:first ident_rest*:rest sp => join(prepend(first, rest))
+    -- sym_ident returns a symbol (used for variable names, binding names)
+    sym_ident = ~keyword ident_start:first ident_rest*:rest sp => symbol(join(prepend(first, rest)))
+
+    sym_op_char = [+\-*/%<>=!&|]
+    -- Note: Plus (+) automatically concatenates strings, so sym_op_char+ returns a string directly
+    sym_name = ident_start:first ident_rest*:rest => join(prepend(first, rest))
+             | sym_op_char+:name => name
+    symbol = ":" sym_name:name sp => :Symbol(name)
+
+    tag_name = ident_start:first ident_rest*:rest => join(prepend(first, rest))
+    tagged_arg_rest = "," sp expr:e => e
+    tagged_args = expr:first tagged_arg_rest*:rest => prepend(first, rest)
+    tagged_with_args = ":" tag_name:tag "(" sp tagged_args:items ")" sp => :Tagged(tag, items)
+    tagged_empty = ":" tag_name:tag "(" sp ")" sp => :Tagged(tag, [])
+    tagged = tagged_with_args | tagged_empty
+
+    qualified_sep = ":" ":"
+    qualified_part = ident_start:first ident_rest*:rest => join(prepend(first, rest))
+    qualified_rest_item = qualified_sep qualified_part:p => p
+    qualified_rest = qualified_rest_item:first qualified_rest_item*:more => prepend(first, more)
+    qualified_name = qualified_part:first qualified_rest:rest sp => :QualifiedName(prepend(first, rest))
+    var = qualified_name | sym_ident:name => :Var(name)
+
+    list_item_rest = "," sp expr:e => e
+    list_items = expr:first list_item_rest*:rest => prepend(first, rest)
+    list_empty = "[" sp "]" sp => :List([])
+    list_nonempty = "[" sp list_items:items "]" sp => :List(items)
+    list_lit = list_empty | list_nonempty
+
+    arrow_sep = "=" ">"
+    map_entry_colon = ident:k ":" sp expr:v => [k, v]
+    map_entry_arrow = expr:k arrow_sep sp expr:v => [k, v]
+    map_entry = map_entry_colon | map_entry_arrow
+    map_entry_rest = "," sp map_entry:e => e
+    map_entries = map_entry:first map_entry_rest*:rest => prepend(first, rest)
+    map_empty = "%" "{" sp "}" sp => :Map([])
+    map_nonempty = "%" "{" sp map_entries:entries "}" sp => :Map(entries)
+    map_lit = map_empty | map_nonempty
+
+    paren = "(" sp expr:e ")" sp => e
+
+    param_list_rest = "," sp sym_ident:p => p
+    param_list = sym_ident:first param_list_rest*:rest => prepend(first, rest)
+    short_lambda = "\\" sp sym_ident:param short_lambda:body => :ShortLambda(param, body)
+                 | "\\" sp sym_ident:param or_expr:body => :ShortLambda(param, body)
+    full_lambda = "lambda" sp "(" sp param_list:params ")" sp expr:body => :Lambda(params, body)
+                | "lambda" sp "(" sp ")" sp expr:body => :Lambda([], body)
+
+    primary = paren | list_lit | map_lit | float_lit | int | bool | null_lit | string_lit | tagged | symbol | var
+
+    index_suffix = "[" sp expr:idx "]" sp => [:index, idx]
+
+    call_arg_rest = "," sp expr:e => e
+    call_args = expr:first call_arg_rest*:rest => prepend(first, rest)
+    call_suffix = "(" sp call_args:a ")" sp => [:call, a]
+                | "(" sp ")" sp => [:call, []]
+
+    prop_name = ident_start:first ident_rest*:rest => join(prepend(first, rest))
+    sym_prop_name = ident_start:first ident_rest*:rest => symbol(join(prepend(first, rest)))
+    method_suffix = "." sym_prop_name:name "(" sp call_args:a ")" sp => [:method, name, a]
+                  | "." sym_prop_name:name "(" sp ")" sp => [:method, name, []]
+    prop_suffix = "." sym_prop_name:name sp => [:prop, name]
+
+    postfix_op = index_suffix | call_suffix | method_suffix | prop_suffix
+    postfix = primary:base postfix_op*:ops => fold_postfix(base, ops)
+
+    unary = "-" sp unary:e => :Unary(:-, e)
+          | "!" sp unary:e => :Unary(:!, e)
+          | postfix
+
+    mult_op = "*" sp => :* | "/" sp =>:/ | "%" sp => :%
+    add_op = "+" sp => :+ | "-" sp => :-
+
+    mult = unary:first (mult_op unary)*:rest => fold_binary(first, rest)
+    add = mult:first (add_op mult)*:rest => fold_binary(first, rest)
+
+    cmp_op = "==" sp => :==
+           | "!=" sp => :!=
+           | "<=" sp => :<=
+           | ">=" sp => :>=
+           | "<" sp => :<
+           | ">" sp => :>
+    cmp = add:first (cmp_op add)*:rest => fold_binary(first, rest)
+
+    and_op = "&&" sp => :&&
+    and_expr = cmp:first (and_op cmp)*:rest => fold_binary(first, rest)
+
+    or_op = "||" sp => :||
+    or_expr = and_expr:first (or_op and_expr)*:rest => fold_binary(first, rest)
+
+    if_expr = "if" sp expr:cond "then" sp expr:then_branch "else" sp expr:else_branch
+            => :If(cond, then_branch, else_branch)
+
+    binding = sym_ident:name "=" sp expr:value => :Binding(name, value)
+    binding_rest = "," sp binding:b => b
+    bindings = binding:first binding_rest*:rest => prepend(first, rest)
+    let_expr = "let" sp "(" sp bindings:bs ")" sp expr:body => :Let(bs, body)
+
+    expr = if_expr | let_expr | short_lambda | full_lambda | or_expr
+    code = sp expr:e sp => e
+}

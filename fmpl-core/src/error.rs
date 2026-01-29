@@ -56,3 +56,10 @@ pub enum Error {
     #[error("Parse failed at position {position}: {message}")]
     ParseFailed { position: usize, message: String },
 }
+
+impl Error {
+    /// Returns true if this error indicates incomplete input that might be continued.
+    pub fn is_incomplete(&self) -> bool {
+        matches!(self, Error::UnexpectedEof)
+    }
+}

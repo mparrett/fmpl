@@ -882,8 +882,8 @@ impl Compiler {
             }
             Expr::Slice(expr, start, end) => {
                 let collection = self.compile_expr(expr)?;
-                let start_idx = Some(self.compile_expr(start)?);
-                let end_idx = Some(self.compile_expr(end)?);
+                let start_idx = start.as_ref().map(|s| self.compile_expr(s)).transpose()?;
+                let end_idx = end.as_ref().map(|e| self.compile_expr(e)).transpose()?;
                 Ok(self.code.emit(Instruction::Slice {
                     collection,
                     start: start_idx,
@@ -1208,6 +1208,25 @@ impl Compiler {
 
                 // Convert ir::compile(args) to __builtin_ir.compile(args)
                 if module == "ir" && method == "compile" {
+                    let builtin_idx = self
+                        .code
+                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_ir")));
+                    let mut arg_indices = Vec::with_capacity(args.len());
+                    for arg in args {
+                        match arg {
+                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                            Arg::Placeholder => unreachable!(),
+                        }
+                    }
+                    return Ok(self.code.emit(Instruction::MethodCall {
+                        receiver: builtin_idx,
+                        method: method.clone(),
+                        args: arg_indices,
+                    }));
+                }
+
+                // Convert ir::to_rust(args) and ir::to_rust_expr(args) to __builtin_ir.method(args)
+                if module == "ir" && (method == "to_rust" || method == "to_rust_expr") {
                     let builtin_idx = self
                         .code
                         .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_ir")));
@@ -3132,20 +3151,8 @@ impl Compiler {
             }
 
             GP::Action(p, action) => {
-                eprintln!(
-                    "DEBUG compile_grammar_pattern: compiling Action pattern={:?}",
-                    p
-                );
                 let pattern_idx = self.compile_grammar_pattern(p)?;
-                eprintln!(
-                    "DEBUG compile_grammar_pattern: Action pattern_idx={:?}",
-                    pattern_idx
-                );
                 let action_idx = self.compile_expr(action)?;
-                eprintln!(
-                    "DEBUG compile_grammar_pattern: Action action_idx={:?}",
-                    action_idx
-                );
                 let match_action_idx = self.code.emit(Instruction::MatchAction {
                     pattern: pattern_idx,
                     action: action_idx,

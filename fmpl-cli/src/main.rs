@@ -1,9 +1,11 @@
 //! FMPL Command-Line REPL
 
+use fmpl_core::debug;
 use fmpl_core::stream::StreamEvent;
-use fmpl_core::{Value, Vm, eval};
+use fmpl_core::{Value, Vm, eval, is_complete};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
+use std::sync::Mutex;
 
 /// Block and wait for an async stream to complete.
 /// Returns the final result value or an error.
@@ -56,7 +58,7 @@ fn main() -> rustyline::Result<()> {
     let handle = runtime.handle();
 
     println!("FMPL v0.1.0");
-    println!("Type :help for commands, :quit to exit");
+    println!("Type .help for commands, .quit to exit");
     println!();
 
     let mut rl = DefaultEditor::new()?;
@@ -69,53 +71,106 @@ fn main() -> rustyline::Result<()> {
 
     let mut vm = Vm::with_runtime(handle.clone());
 
-    loop {
-        match rl.readline("fmpl> ") {
-            Ok(line) => {
-                let line = line.trim();
+    let mut input_buffer = String::new();
+    let mut continuation = false;
 
-                if line.is_empty() {
+    // Store last input for debugging
+    let last_input = Mutex::new(String::new());
+
+    loop {
+        let prompt = if continuation { "....> " } else { "fmpl> " };
+        match rl.readline(prompt) {
+            Ok(line) => {
+                let trimmed = line.trim();
+
+                // Handle empty line
+                if trimmed.is_empty() {
+                    if continuation {
+                        // In continuation mode, empty line submits what we have
+                        // (or cancels if buffer is empty)
+                        if input_buffer.trim().is_empty() {
+                            input_buffer.clear();
+                            continuation = false;
+                        }
+                        // Otherwise just add a newline to the buffer
+                        input_buffer.push('\n');
+                    }
                     continue;
                 }
 
-                // Add to history
-                let _ = rl.add_history_entry(line);
+                // Add to input buffer
+                if continuation {
+                    input_buffer.push('\n');
+                }
+                input_buffer.push_str(&line);
 
-                // Check for REPL commands
-                if line.starts_with(':') {
-                    match handle_command(&mut vm, line) {
+                // Check for REPL commands (only on first line)
+                if !continuation && trimmed.starts_with('.') {
+                    let _ = rl.add_history_entry(&input_buffer);
+                    match handle_command(&mut vm, trimmed, &last_input) {
                         CommandResult::Continue => {}
                         CommandResult::Quit => break,
                     }
+                    input_buffer.clear();
                     continue;
                 }
 
-                // Evaluate FMPL code
-                match eval(&mut vm, line) {
-                    Ok(value) => {
-                        // Check if value is an async stream that needs blocking wait
-                        let display_value = if matches!(value, fmpl_core::Value::AsyncStream(_)) {
-                            // Block and wait for async result
-                            match wait_for_async(value) {
-                                Ok(result) => result,
-                                Err(e) => {
-                                    eprintln!("Error waiting for async: {}", e);
-                                    continue;
-                                }
-                            }
-                        } else {
-                            value
-                        };
+                // Check if input is complete
+                match is_complete(&input_buffer) {
+                    Ok(true) => {
+                        // Input is complete, evaluate it
+                        let _ = rl.add_history_entry(&input_buffer);
 
-                        println!("=> {}", display_value);
+                        // Store for debugging
+                        if let Ok(mut last) = last_input.lock() {
+                            *last = input_buffer.clone();
+                        }
+
+                        match eval(&mut vm, &input_buffer) {
+                            Ok(value) => {
+                                // Check if value is an async stream that needs blocking wait
+                                let display_value =
+                                    if matches!(value, fmpl_core::Value::AsyncStream(_)) {
+                                        // Block and wait for async result
+                                        match wait_for_async(value) {
+                                            Ok(result) => result,
+                                            Err(e) => {
+                                                eprintln!("Error waiting for async: {}", e);
+                                                input_buffer.clear();
+                                                continuation = false;
+                                                continue;
+                                            }
+                                        }
+                                    } else {
+                                        value
+                                    };
+
+                                println!("=> {}", display_value);
+                            }
+                            Err(e) => {
+                                eprintln!("Error: {}", e);
+                            }
+                        }
+
+                        input_buffer.clear();
+                        continuation = false;
+                    }
+                    Ok(false) => {
+                        // Input is incomplete, continue reading
+                        continuation = true;
                     }
                     Err(e) => {
+                        // Syntax error that can't be fixed
                         eprintln!("Error: {}", e);
+                        input_buffer.clear();
+                        continuation = false;
                     }
                 }
             }
             Err(ReadlineError::Interrupted) => {
                 println!("^C");
+                input_buffer.clear();
+                continuation = false;
                 continue;
             }
             Err(ReadlineError::Eof) => {
@@ -140,21 +195,22 @@ enum CommandResult {
     Quit,
 }
 
-fn handle_command(vm: &mut Vm, line: &str) -> CommandResult {
+fn handle_command(vm: &mut Vm, line: &str, last_input: &Mutex<String>) -> CommandResult {
     let parts: Vec<&str> = line.splitn(2, ' ').collect();
     let cmd = parts[0];
     let _arg = parts.get(1).copied().unwrap_or("");
 
     match cmd {
-        ":quit" | ":q" | ":exit" => CommandResult::Quit,
+        ".quit" | ".q" | ".exit" => CommandResult::Quit,
 
-        ":help" | ":h" | ":?" => {
+        ".help" | ".h" | ".?" => {
             println!("FMPL REPL Commands:");
-            println!("  :help, :h, :?     Show this help");
-            println!("  :quit, :q, :exit  Exit the REPL");
-            println!("  :clear            Clear the screen");
-            println!("  :reset            Reset the VM state");
-            println!("  :objects          List all named objects");
+            println!("  .help, .h, .?     Show this help");
+            println!("  .quit, .q, .exit  Exit the REPL");
+            println!("  .clear            Clear the screen");
+            println!("  .reset            Reset the VM state");
+            println!("  .objects          List all named objects");
+            println!("  .debug            Show debug info for last input");
             println!();
             println!("FMPL Quick Reference:");
             println!("  let (x = 42) x + 1       Let binding");
@@ -169,18 +225,18 @@ fn handle_command(vm: &mut Vm, line: &str) -> CommandResult {
             CommandResult::Continue
         }
 
-        ":clear" => {
+        ".clear" => {
             print!("\x1B[2J\x1B[1;1H");
             CommandResult::Continue
         }
 
-        ":reset" => {
+        ".reset" => {
             *vm = Vm::new();
             println!("VM state reset.");
             CommandResult::Continue
         }
 
-        ":objects" => {
+        ".objects" => {
             println!("Named objects:");
             let mut count = 0;
             for (name, _id) in vm.objects.lock().unwrap().named_objects() {
@@ -193,9 +249,57 @@ fn handle_command(vm: &mut Vm, line: &str) -> CommandResult {
             CommandResult::Continue
         }
 
+        ".debug" => {
+            // Show debug info for last input
+            let last = match last_input.lock() {
+                Ok(l) => l.clone(),
+                Err(_) => {
+                    eprintln!("Error accessing last input");
+                    return CommandResult::Continue;
+                }
+            };
+
+            if last.is_empty() {
+                println!("No previous input to debug.");
+                return CommandResult::Continue;
+            }
+
+            println!("=== Debug Info for Last Input ===");
+            println!();
+            println!("Source ({} bytes):", last.len());
+            if last.len() > 200 {
+                println!("{}", debug::format_with_lines(&last[..200]));
+                println!("... ({} more bytes)", last.len() - 200);
+            } else {
+                println!("{}", debug::format_with_lines(&last));
+            }
+            println!();
+
+            // Show tokenization
+            println!("=== Tokenization ===");
+            let tokens = debug::debug_tokenize(&last);
+            for token in &tokens {
+                println!("{}", token);
+            }
+            println!();
+
+            // Try to parse and show result
+            println!("=== Parse Result ===");
+            let parse_result = debug::debug_parse(&last, false);
+            if parse_result.success {
+                println!("Parse successful");
+            } else {
+                println!("Parse failed");
+                if let Some(error) = parse_result.error_message {
+                    println!("Error: {}", error);
+                }
+            }
+            CommandResult::Continue
+        }
+
         _ => {
             eprintln!("Unknown command: {}", cmd);
-            eprintln!("Type :help for available commands.");
+            eprintln!("Type .help for available commands.");
             CommandResult::Continue
         }
     }

@@ -1,0 +1,141 @@
+-- Tests for Grammar Optimizer
+-- Run with: io::load("lib/core/grammar_optimizer_test.fmpl")
+
+let test = io::load("lib/core/test.fmpl");
+let opt = io::load("lib/core/grammar_optimizer.fmpl");
+let null_opt = opt["null_opt"];
+let associative_opt = opt["associative_opt"];
+let empty_elim_opt = opt["empty_elim_opt"];
+let first_char = opt["first_char"];
+let jump_table_opt = opt["jump_table_opt"];
+let optimize = opt["optimize"];
+let optimize_fixpoint = opt["optimize_fixpoint"];
+
+-- =============================================================================
+-- Null Optimization Tests (identity transform)
+-- =============================================================================
+
+let null_opt_tests = test["run"]("null_opt", [
+    -- Atomic patterns pass through unchanged
+    test["case"]("Char unchanged", lambda()
+        let (result = [:Char, "a"] @ null_opt.trans)
+        result == [:Char, "a"]
+    ),
+    test["case"]("Literal unchanged", lambda()
+        let (result = [:Literal, "hello"] @ null_opt.trans)
+        result == [:Literal, "hello"]
+    ),
+    test["case"]("Any unchanged", lambda()
+        let (result = [:Any] @ null_opt.trans)
+        result == [:Any]
+    ),
+    test["case"]("Empty unchanged", lambda()
+        let (result = [:Empty] @ null_opt.trans)
+        result == [:Empty]
+    ),
+
+    -- Compound patterns recurse but don't change structure
+    test["case"]("Seq recurses", lambda()
+        let (result = [:Seq, [:Char, "a"], [:Char, "b"]] @ null_opt.trans)
+        result == [:Seq, [:Char, "a"], [:Char, "b"]]
+    ),
+    test["case"]("Star recurses", lambda()
+        let (result = [:Star, [:Char, "a"]] @ null_opt.trans)
+        result == [:Star, [:Char, "a"]]
+    ),
+    test["case"]("Choice recurses", lambda()
+        let (result = [:Choice, [[:Char, "a"], false], [[:Char, "b"], true]] @ null_opt.trans)
+        result == [:Choice, [[:Char, "a"], false], [[:Char, "b"], true]]
+    )
+]);
+
+-- =============================================================================
+-- Associative Optimization Tests
+-- =============================================================================
+
+let assoc_tests = test["run"]("associative_opt", [
+    -- Singleton elimination
+    test["case"]("Seq singleton", lambda()
+        let (result = [:Seq, [:Char, "a"]] @ associative_opt.trans)
+        result == [:Char, "a"]
+    ),
+    test["case"]("Choice singleton", lambda()
+        let (result = [:Choice, [[:Char, "a"], false]] @ associative_opt.trans)
+        result == [:Char, "a"]
+    ),
+
+    -- Flattening nested Seq
+    test["case"]("Flatten nested Seq", lambda()
+        let (input = [:Seq, [:Seq, [:Char, "a"], [:Char, "b"]], [:Char, "c"]])
+        let (result = input @ associative_opt.trans)
+        result == [:Seq, [:Char, "a"], [:Char, "b"], [:Char, "c"]]
+    ),
+
+    -- Flattening nested Choice
+    test["case"]("Flatten nested Choice", lambda()
+        let (input = [:Choice, [[:Choice, [[:Char, "a"], false], [[:Char, "b"], false]], false], [[:Char, "c"], false]])
+        let (result = input @ associative_opt.trans)
+        result == [:Choice, [[:Char, "a"], false], [[:Char, "b"], false], [[:Char, "c"], false]]
+    )
+]);
+
+-- =============================================================================
+-- Empty Elimination Tests
+-- =============================================================================
+
+let empty_tests = test["run"]("empty_elim_opt", [
+    test["case"]("Remove Empty from Seq", lambda()
+        let (input = [:Seq, [:Char, "a"], [:Empty], [:Char, "b"]])
+        let (result = input @ empty_elim_opt.trans)
+        result == [:Seq, [:Char, "a"], [:Char, "b"]]
+    ),
+    test["case"]("Seq of only Empty becomes Empty", lambda()
+        let (result = [:Seq, [:Empty]] @ empty_elim_opt.trans)
+        result == [:Empty]
+    ),
+    test["case"]("All Empty becomes Empty", lambda()
+        let (result = [:Seq, [:Empty], [:Empty]] @ empty_elim_opt.trans)
+        result == [:Empty]
+    )
+]);
+
+-- =============================================================================
+-- First Character Extraction Tests
+-- =============================================================================
+
+let first_char_tests = test["run"]("first_char", [
+    test["case"]("Extract from Char", lambda()
+        let (result = [:Char, "a"] @ first_char.extract)
+        result == "a"
+    ),
+    test["case"]("Extract from Literal", lambda()
+        let (result = [:Literal, "hello"] @ first_char.extract)
+        result == "h"
+    ),
+    test["case"]("Extract from Seq starting with Char", lambda()
+        let (result = [:Seq, [:Char, "x"], [:Char, "y"]] @ first_char.extract)
+        result == "x"
+    ),
+    test["case"]("Returns null for Any", lambda()
+        let (result = [:Any] @ first_char.extract)
+        result == null
+    )
+]);
+
+-- =============================================================================
+-- Run all tests and report
+-- =============================================================================
+
+let all_results = [null_opt_tests, assoc_tests, empty_tests, first_char_tests];
+
+let total_passed = fold \acc \r acc + r["passed"], 0, all_results;
+let total_failed = fold \acc \r acc + r["failed"], 0, all_results;
+let total = fold \acc \r acc + r["total"], 0, all_results;
+
+%{
+    ok: total_failed == 0,
+    total: total,
+    passed: total_passed,
+    failed: total_failed,
+    suites: all_results
+}

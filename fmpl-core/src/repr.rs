@@ -269,7 +269,17 @@ impl Display for Expr {
             Expr::Unary(op, expr) => write!(f, "{}{}", op, expr),
 
             Expr::Index(expr, idx) => write!(f, "{}[{}]", expr, idx),
-            Expr::Slice(expr, start, end) => write!(f, "{}[{}..{}]", expr, start, end),
+            Expr::Slice(expr, start, end) => {
+                write!(f, "{}[", expr)?;
+                if let Some(s) = start {
+                    write!(f, "{}", s)?;
+                }
+                write!(f, "..")?;
+                if let Some(e) = end {
+                    write!(f, "{}", e)?;
+                }
+                write!(f, "]")
+            }
 
             Expr::Call(func, args) => {
                 write!(f, "{}(", func)?;

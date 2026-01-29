@@ -1,0 +1,19 @@
+-- Parser Generator: FMPL grammar -> IR -> Rust parser code
+-- Transforms fmpl_parser.fmpl grammar into Rust parsing functions
+--
+-- Pipeline:
+-- 1. Load the grammar (fmpl_parser)
+-- 2. Convert grammar to parsing IR (codegen.grammar_to_ir)
+-- 3. Convert parsing IR to Rust code (codegen.ir_to_rust)
+--
+-- Usage: cargo run -p fmpl-bootstrap -- lib/core/parser_generator.fmpl
+-- Output: Rust source code for the generated parser (stdout)
+
+-- Load the grammar
+io::load("lib/core/fmpl_parser.fmpl")
+
+-- Convert grammar to parsing IR
+let parsing_ir = codegen.grammar_to_ir(fmpl_parser)
+
+-- Convert IR to Rust code
+codegen.ir_to_rust(parsing_ir)

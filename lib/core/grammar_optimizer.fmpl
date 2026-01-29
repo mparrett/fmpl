@@ -1,0 +1,239 @@
+-- Grammar Optimizer for FMPL
+-- Implements OMeta-style optimizations as tree-transforming grammars
+--
+-- These grammars transform Pattern AST nodes to produce optimized patterns.
+-- Based on bs-ometa-optimizer.txt from OMeta-JS.
+--
+-- Usage:
+--   let optimized = pattern @ associative_opt.trans
+--   let optimized = pattern @ jump_table_opt.trans
+--
+-- The key insight from OMeta: use recursive rule application, not explicit mapping.
+-- Each optimization grammar has a `trans` rule that recursively transforms,
+-- with a default `_:x => x` fallback that passes through unchanged nodes.
+--
+-- Pattern representation uses lists: [:Tag, arg1, arg2, ...]
+-- For example: [:Seq, [:Char, "a"], [:Char, "b"]]
+--
+-- NOTE: Grammar inheritance (<:) not yet implemented. Each grammar duplicates
+-- the full traversal with its specific optimizations at the top.
+
+-- Helper functions
+let first = \list list[0];
+let second = \list list[1];
+
+-- Concatenate two lists
+let concat = lambda(a, b)
+    fold \acc \x acc.push(x), a, b;
+
+-- Prepend element to list
+let prepend = lambda(x, list)
+    fold \acc \y acc.push(y), [x], list;
+
+-- Check if all elements satisfy a predicate
+let all = lambda(pred, list)
+    fold \acc \x acc && pred(x), true, list;
+
+-- Get unique elements
+let contains = lambda(list, x)
+    fold \acc \y acc || (y == x), false, list;
+
+let unique = lambda(list)
+    fold \acc \x if contains(acc, x) then acc else acc.push(x), [], list;
+
+-- =============================================================================
+-- Null Optimization: Identity transform, base for inheritance
+-- =============================================================================
+-- This just traverses the tree, applying `trans` recursively.
+-- Other optimizations override specific cases.
+
+let null_opt = grammar null_opt {
+    trans = [:Seq, trans*:xs] => prepend(:Seq, xs)
+          | [:Choice, trans_alt*:xs] => prepend(:Choice, xs)
+          | [:Star, trans:x] => [:Star, x]
+          | [:Plus, trans:x] => [:Plus, x]
+          | [:Optional, trans:x] => [:Optional, x]
+          | [:Lookahead, trans:x] => [:Lookahead, x]
+          | [:Not, trans:x] => [:Not, x]
+          | [:Bind, trans:x, any:name, any:is_choice] => [:Bind, x, name, is_choice]
+          | [:Guard, trans:x, any:expr] => [:Guard, x, expr]
+          | [:Action, trans:x, any:expr] => [:Action, x, expr]
+          | [:TagMatch, any:tag, trans*:children] => prepend(:TagMatch, prepend(tag, children))
+          | [:ListMatch, trans*:patterns, trans:rest] => prepend(:ListMatch, patterns.push(rest))
+          | [:MapMatch, trans_entry*:entries] => prepend(:MapMatch, entries)
+          | [:Apply, trans:x] => [:Apply, x]
+          | _:x => x
+
+    trans_alt = [trans:p, any:bt] => [p, bt]
+    trans_entry = [any:k, trans:p] => [k, p]
+};
+
+-- =============================================================================
+-- Associative Optimization: Flatten nested Seq/Choice, eliminate singletons
+-- =============================================================================
+-- Seq(Seq(a, b), c) => Seq(a, b, c)
+-- Choice(Choice(a, b), c) => Choice(a, b, c)
+-- Seq([x]) => x
+-- Choice([(x, false)]) => x
+
+let associative_opt = grammar associative_opt {
+    -- Specific optimizations first
+    trans = [:Seq, trans:x] => x
+          | [:Choice, [trans:x, false]] => x
+          | [:Seq, flatten_seq*:xs] => prepend(:Seq, xs)
+          | [:Choice, flatten_choice*:xs] => prepend(:Choice, xs)
+    -- Then fall through to recursive traversal
+          | [:Star, trans:x] => [:Star, x]
+          | [:Plus, trans:x] => [:Plus, x]
+          | [:Optional, trans:x] => [:Optional, x]
+          | [:Lookahead, trans:x] => [:Lookahead, x]
+          | [:Not, trans:x] => [:Not, x]
+          | [:Bind, trans:x, any:name, any:is_choice] => [:Bind, x, name, is_choice]
+          | [:Guard, trans:x, any:expr] => [:Guard, x, expr]
+          | [:Action, trans:x, any:expr] => [:Action, x, expr]
+          | [:TagMatch, any:tag, trans*:children] => prepend(:TagMatch, prepend(tag, children))
+          | [:Apply, trans:x] => [:Apply, x]
+          | _:x => x
+
+    flatten_seq = [:Seq, flatten_seq*:xs] => xs
+                | trans:x => [x]
+
+    flatten_choice = [:Choice, flatten_choice*:xs] => xs
+                   | [[:Choice, flatten_choice*:xs], any:bt] => xs
+                   | [trans:p, any:bt] => [[p, bt]]
+
+    trans_alt = [trans:p, any:bt] => [p, bt]
+};
+
+-- =============================================================================
+-- Empty Elimination: Remove Empty from sequences
+-- =============================================================================
+-- Seq(a, Empty, b) => Seq(a, b)
+-- Seq(Empty) => Empty
+
+let empty_elim_opt = grammar empty_elim_opt {
+    -- Specific optimizations first
+    trans = [:Seq, filter_empty*:xs] when xs.len() == 0 => [:Empty]
+          | [:Seq, filter_empty*:xs] when xs.len() == 1 => first(xs)
+          | [:Seq, filter_empty*:xs] => prepend(:Seq, xs)
+    -- Then fall through to recursive traversal
+          | [:Choice, trans_alt*:xs] => prepend(:Choice, xs)
+          | [:Star, trans:x] => [:Star, x]
+          | [:Plus, trans:x] => [:Plus, x]
+          | [:Optional, trans:x] => [:Optional, x]
+          | [:Lookahead, trans:x] => [:Lookahead, x]
+          | [:Not, trans:x] => [:Not, x]
+          | [:Bind, trans:x, any:name, any:is_choice] => [:Bind, x, name, is_choice]
+          | [:Guard, trans:x, any:expr] => [:Guard, x, expr]
+          | [:Action, trans:x, any:expr] => [:Action, x, expr]
+          | [:TagMatch, any:tag, trans*:children] => prepend(:TagMatch, prepend(tag, children))
+          | [:Apply, trans:x] => [:Apply, x]
+          | _:x => x
+
+    filter_empty = [:Empty] => []
+                 | trans:x => [x]
+
+    trans_alt = [trans:p, any:bt] => [p, bt]
+};
+
+-- =============================================================================
+-- First Character Extraction: Helper for jump table optimization
+-- =============================================================================
+-- Extracts the first character/literal from a pattern for dispatch.
+-- Returns the character or null if pattern doesn't start with a known char.
+
+let first_char = grammar first_char {
+    extract = [:Char, any:c] => c
+            | [:Literal, any:s] when s.len() > 0 => s[0]
+            | [:Seq, [:Char, any:c], _*] => c
+            | [:Seq, [:Literal, any:s], _*] when s.len() > 0 => s[0]
+            | [:Action, extract:c, any] => c
+            | [:Bind, extract:c, any, any] => c
+            | _ => null
+};
+
+-- =============================================================================
+-- Jump Table Optimization: Convert Choice with distinct first chars to JumpTable
+-- =============================================================================
+-- Choice(['a' x, 'b' y, 'c' z]) => JumpTable([['a', x], ['b', y], ['c', z]])
+--
+-- A JumpTable allows O(1) dispatch based on the next character instead of
+-- linear search through alternatives. This is one of OMeta's key optimizations.
+
+let jump_table_opt = grammar jump_table_opt {
+    -- Specific optimization first
+    trans = [:Choice, any:alts] when can_jump_table(alts) => make_jump_table(alts)
+    -- Then fall through to recursive traversal
+          | [:Seq, trans*:xs] => prepend(:Seq, xs)
+          | [:Choice, trans_alt*:xs] => prepend(:Choice, xs)
+          | [:Star, trans:x] => [:Star, x]
+          | [:Plus, trans:x] => [:Plus, x]
+          | [:Optional, trans:x] => [:Optional, x]
+          | [:Lookahead, trans:x] => [:Lookahead, x]
+          | [:Not, trans:x] => [:Not, x]
+          | [:Bind, trans:x, any:name, any:is_choice] => [:Bind, x, name, is_choice]
+          | [:Guard, trans:x, any:expr] => [:Guard, x, expr]
+          | [:Action, trans:x, any:expr] => [:Action, x, expr]
+          | [:TagMatch, any:tag, trans*:children] => prepend(:TagMatch, prepend(tag, children))
+          | [:Apply, trans:x] => [:Apply, x]
+          | _:x => x
+
+    trans_alt = [trans:p, any:bt] => [p, bt]
+};
+
+-- Check if all alternatives in a Choice start with distinct first chars
+let can_jump_table = lambda(alts)
+    let (chars = fold \acc \alt acc.push(first(alt) @ first_char.extract), [], alts)
+    all(\c c != null, chars) && unique(chars).len() == chars.len();
+
+-- Strip the first character from a pattern (after it's been used for dispatch)
+let strip_first = grammar strip_first {
+    strip = [:Char, any] => [:Empty]
+          | [:Literal, any:s] when s.len() == 1 => [:Empty]
+          | [:Literal, any:s] when s.len() > 1 => [:Literal, s[1..]]
+          | [:Seq, [:Char, any], strip*:rest] when rest.len() == 0 => [:Empty]
+          | [:Seq, [:Char, any], strip*:rest] when rest.len() == 1 => first(rest)
+          | [:Seq, [:Char, any], strip*:rest] => prepend(:Seq, rest)
+          | [:Seq, [:Literal, any:s], _*:rest] when s.len() == 1 && rest.len() == 0 => [:Empty]
+          | [:Seq, [:Literal, any:s], _*:rest] when s.len() == 1 && rest.len() == 1 => first(rest)
+          | [:Seq, [:Literal, any:s], _*:rest] when s.len() == 1 => prepend(:Seq, rest)
+          | [:Action, strip:inner, any:expr] => [:Action, inner, expr]
+          | [:Bind, strip:inner, any:name, any:is_choice] => [:Bind, inner, name, is_choice]
+          | _:x => x
+};
+
+-- Build a JumpTable from Choice alternatives
+let make_jump_table = lambda(alts)
+    let (entries = fold \acc \alt
+        let (c = first(alt) @ first_char.extract)
+        let (stripped = first(alt) @ strip_first.strip)
+        acc.push([c, stripped, second(alt)])
+    , [], alts)
+    [:JumpTable, entries];
+
+-- =============================================================================
+-- Combined optimizer: Apply all optimizations in sequence until fixpoint
+-- =============================================================================
+
+let optimize = lambda(pattern)
+    pattern @ null_opt.trans
+            @ associative_opt.trans
+            @ empty_elim_opt.trans
+            @ jump_table_opt.trans;
+
+let optimize_fixpoint = lambda(pattern)
+    let (result = optimize(pattern))
+    if result == pattern then result
+    else optimize_fixpoint(result);
+
+-- Export all optimizers
+%{
+    null_opt: null_opt,
+    associative_opt: associative_opt,
+    empty_elim_opt: empty_elim_opt,
+    first_char: first_char,
+    jump_table_opt: jump_table_opt,
+    strip_first: strip_first,
+    optimize: optimize,
+    optimize_fixpoint: optimize_fixpoint
+}

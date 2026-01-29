@@ -153,21 +153,10 @@ impl<'a> GrammarParser<'a> {
         let main_pattern = if cases.len() == 1 {
             cases.into_iter().next().unwrap()
         } else {
-            eprintln!(
-                "DEBUG parse_match_block: creating Choice with {} cases",
-                cases.len()
-            );
-            for (i, case) in cases.iter().enumerate() {
-                eprintln!("DEBUG parse_match_block: case {}: {:?}", i, case);
-            }
             // Match blocks use traditional PEG semantics (no backtracking)
             Pattern::Choice(cases.into_iter().map(|p| (p, false)).collect())
         };
         grammar.add_rule(SmolStr::new("main"), Rule::new(main_pattern));
-        eprintln!(
-            "DEBUG parse_match_block: grammar has {} rules",
-            grammar.rules.len()
-        );
         Ok(grammar)
     }
 
@@ -175,11 +164,6 @@ impl<'a> GrammarParser<'a> {
     fn parse_rules_into(&mut self, grammar: &mut Grammar) -> Result<()> {
         loop {
             self.skip_whitespace();
-            eprintln!(
-                "DEBUG parse_rules_into: pos={}, next_char={:?}",
-                self.pos,
-                self.peek_char()
-            );
             if self.peek_char() == Some('}') {
                 self.advance();
                 break;
@@ -192,10 +176,6 @@ impl<'a> GrammarParser<'a> {
             }
 
             let (rule_name, rule) = self.parse_rule()?;
-            eprintln!(
-                "DEBUG parse_rules_into: parsed rule '{}', pattern={:?}",
-                rule_name, rule.pattern
-            );
             grammar.add_rule(rule_name, rule);
 
             // Consume optional semicolon between rules
@@ -320,11 +300,6 @@ impl<'a> GrammarParser<'a> {
             }
             let guard_source = &self.source[guard_start..self.pos].trim();
 
-            eprintln!(
-                "DEBUG when guard: parsing guard expression: {:?}",
-                guard_source
-            );
-
             // Parse the guard as an FMPL expression
             let lexer = Lexer::new(guard_source);
             let tokens = lexer.tokenize()?;
@@ -357,6 +332,7 @@ impl<'a> GrammarParser<'a> {
         let mut bracket_depth = 0;
         let mut in_string = false;
         let mut escape_next = false;
+        let mut in_symbol = false; // Track if we're inside a symbol literal like :||
 
         while !self.is_eof() {
             let c = self.peek_char().unwrap();
@@ -384,6 +360,46 @@ impl<'a> GrammarParser<'a> {
                 continue;
             }
 
+            // Track symbol literal state
+            // A symbol starts with : followed by any non-whitespace, non-delimiter character
+            // Inside a symbol, | and other special chars are allowed
+            if c == ':' && !in_symbol {
+                // Check if this is the start of a symbol
+                let next_pos = self.pos + 1;
+                if next_pos < self.source.len() {
+                    let next_c = self.source[next_pos..next_pos + 1].chars().next();
+                    // Symbol starts if : is followed by non-whitespace and certain non-delimiters
+                    // Note: | IS allowed in symbols (e.g., :||, :|), so don't exclude it here
+                    if next_c != Some(' ')
+                        && next_c != Some('(')
+                        && next_c != Some('[')
+                        && next_c != Some('{')
+                        && next_c != Some(',')
+                        && next_c != Some(';')
+                        && next_c != Some('\n')
+                        && next_c != Some('\t')
+                    {
+                        in_symbol = true;
+                    }
+                }
+            }
+
+            // End symbol at whitespace, (, [, {, comma, semicolon, or newline
+            // But NOT at | since | is allowed inside symbols
+            if in_symbol {
+                if c == ' '
+                    || c == '('
+                    || c == '['
+                    || c == '{'
+                    || c == ','
+                    || c == ';'
+                    || c == '\n'
+                    || c == '\t'
+                {
+                    in_symbol = false;
+                }
+            }
+
             match c {
                 '{' => brace_depth += 1,
                 '}' if brace_depth > 0 => brace_depth -= 1,
@@ -395,11 +411,14 @@ impl<'a> GrammarParser<'a> {
                 '|' if brace_depth == 0
                     && paren_depth == 0
                     && bracket_depth == 0
-                    && !self.peek_str("|>") =>
+                    && !self.peek_str("|>")
+                    && !in_symbol =>
                 {
                     break;
-                } // Choice separator
-                ';' if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 => break, // Rule terminator
+                } // Choice separator (not in symbol)
+                ';' if brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 && !in_symbol => {
+                    break;
+                } // Rule terminator (not in symbol)
                 '\n' => {
                     // Check if there's a rule starting on next line
                     let saved_pos = self.pos;
@@ -483,14 +502,24 @@ impl<'a> GrammarParser<'a> {
                         break;
                     }
                     // Check for start of next sequence element (identifier not followed by 'in')
+                    // But NOT if we're after a '.' (method call) or a comparison operator
                     if paren_depth == 0 && bracket_depth == 0 {
                         // Look for pattern starts: identifier, string literal, character class, etc.
-                        if c.is_alphabetic() && !self.peek_keyword("when") {
+                        // Skip this check if the previous character was '.' (method call context)
+                        let prev_char = if self.pos > guard_start {
+                            self.source[..self.pos].chars().last()
+                        } else {
+                            None
+                        };
+                        let in_method_call = prev_char == Some('.');
+
+                        if c.is_alphabetic() && !self.peek_keyword("when") && !in_method_call {
                             // Could be start of next pattern - peek ahead to see if it's an identifier
                             // followed by something that looks like a pattern
                             let saved = self.pos;
                             // Try to parse as an expression or pattern start
-                            // If the identifier is followed by : or whitespace+pattern, it's a new element
+                            // If the identifier is followed by : then whitespace/pattern, it's a new element
+                            // But if it's followed by ( directly (method call), it's part of the guard expression
                             while let Some(ch) = self.peek_char() {
                                 if ch.is_alphanumeric() || ch == '_' {
                                     self.advance();
@@ -498,15 +527,22 @@ impl<'a> GrammarParser<'a> {
                                     break;
                                 }
                             }
+                            let after_ident = self.peek_char();
                             self.skip_whitespace();
-                            let next = self.peek_char();
+                            let after_ws = self.peek_char();
                             self.pos = saved;
-                            if next == Some(':')
-                                || next == Some('(')
-                                || next == Some('[')
-                                || next == Some('"')
+
+                            // Only break for pattern-like constructs:
+                            // - identifier followed by ':' is binding like foo:x
+                            // - identifier followed by whitespace then '[' or '"' is a pattern
+                            // But NOT identifier followed by '(' (that's a function call)
+                            if after_ident == Some(':') {
+                                // Binding syntax
+                                break;
+                            } else if after_ident != Some('(')
+                                && (after_ws == Some('[') || after_ws == Some('"'))
                             {
-                                // Looks like a new pattern element
+                                // Pattern element
                                 break;
                             }
                             // Otherwise continue as part of the guard expression
@@ -517,11 +553,6 @@ impl<'a> GrammarParser<'a> {
                 let guard_source = &self.source[guard_start..self.pos].trim();
 
                 if !guard_source.is_empty() {
-                    eprintln!(
-                        "DEBUG sequence when guard: parsing guard expression: {:?}",
-                        guard_source
-                    );
-
                     let lexer = Lexer::new(guard_source);
                     let tokens = lexer.tokenize()?;
                     let mut expr_parser = ExprParser::new(&tokens);
@@ -1097,7 +1128,48 @@ impl<'a> GrammarParser<'a> {
         let pattern = match self.peek_char() {
             Some('_') => {
                 self.advance();
-                Pattern::Any
+                // Check if next char is alphanumeric (identifier like _foo)
+                if self
+                    .peek_char()
+                    .is_some_and(|c| c.is_alphanumeric() || c == '_')
+                {
+                    // It's an identifier starting with _, continue parsing
+                    let mut name = String::from("_");
+                    while let Some(c) = self.peek_char() {
+                        if c.is_alphanumeric() || c == '_' {
+                            name.push(c);
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    let rule_pattern = Pattern::Rule(SmolStr::new(&name));
+                    // Check for * or + suffix (repetition)
+                    match self.peek_char() {
+                        Some('*') => {
+                            self.advance();
+                            Pattern::Star(Box::new(rule_pattern))
+                        }
+                        Some('+') => {
+                            self.advance();
+                            Pattern::Plus(Box::new(rule_pattern))
+                        }
+                        _ => rule_pattern,
+                    }
+                } else {
+                    // Just `_` - wildcard/any pattern, check for * or + suffix
+                    match self.peek_char() {
+                        Some('*') => {
+                            self.advance();
+                            Pattern::Star(Box::new(Pattern::Any))
+                        }
+                        Some('+') => {
+                            self.advance();
+                            Pattern::Plus(Box::new(Pattern::Any))
+                        }
+                        _ => Pattern::Any,
+                    }
+                }
             }
             Some(':') => {
                 // Symbol literal
@@ -1113,9 +1185,31 @@ impl<'a> GrammarParser<'a> {
             }
             Some('%') => self.parse_map_pattern()?,
             Some(c) if c.is_alphabetic() || c == '_' => {
-                // Bare identifier - treat as rule reference (OMeta semantics)
+                // Bare identifier - check for keywords first, then treat as rule reference
                 let name = self.parse_ident()?;
-                Pattern::Rule(name)
+
+                // Handle boolean literals
+                if name.as_str() == "true" {
+                    Pattern::MatchValue(Value::Bool(true))
+                } else if name.as_str() == "false" {
+                    Pattern::MatchValue(Value::Bool(false))
+                } else if name.as_str() == "null" {
+                    Pattern::MatchValue(Value::Null)
+                } else {
+                    let rule_pattern = Pattern::Rule(name);
+                    // Check for * or + suffix (repetition)
+                    match self.peek_char() {
+                        Some('*') => {
+                            self.advance();
+                            Pattern::Star(Box::new(rule_pattern))
+                        }
+                        Some('+') => {
+                            self.advance();
+                            Pattern::Plus(Box::new(rule_pattern))
+                        }
+                        _ => rule_pattern,
+                    }
+                }
             }
             Some('"') => {
                 let s = self.parse_string()?;
@@ -1445,7 +1539,23 @@ impl<'a> GrammarParser<'a> {
             if c.is_whitespace() {
                 self.advance();
             } else if c == '#' {
-                // Skip comment to end of line
+                // Skip # comment to end of line
+                while let Some(c) = self.peek_char() {
+                    self.advance();
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            } else if self.peek_str("--") {
+                // Skip -- comment to end of line (FMPL style)
+                while let Some(c) = self.peek_char() {
+                    self.advance();
+                    if c == '\n' {
+                        break;
+                    }
+                }
+            } else if self.peek_str("//") {
+                // Skip // comment to end of line (C style)
                 while let Some(c) = self.peek_char() {
                     self.advance();
                     if c == '\n' {

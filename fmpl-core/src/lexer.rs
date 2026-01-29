@@ -16,6 +16,7 @@ pub struct SpannedToken {
 #[logos(skip r"[ \t\n\r]+")]
 #[logos(skip r"--[^\n]*")]
 #[logos(skip r"//[^\n]*")]
+#[logos(skip r"/\*([^*]|\*[^/])*\*/")]
 pub enum Token {
     // Keywords
     #[token("object")]
@@ -356,11 +357,57 @@ mod tests {
     }
 
     #[test]
+    fn test_c_line_comments() {
+        let tokens = Lexer::new("x // this is a C comment\ny")
+            .tokenize()
+            .unwrap();
+        assert_eq!(tokens.len(), 2);
+        assert!(matches!(tokens[0].token, Token::Ident(_)));
+        assert!(matches!(tokens[1].token, Token::Ident(_)));
+    }
+
+    #[test]
+    fn test_block_comments() {
+        let tokens = Lexer::new("x /* block comment */ y").tokenize().unwrap();
+        assert_eq!(tokens.len(), 2);
+        assert!(matches!(tokens[0].token, Token::Ident(_)));
+        assert!(matches!(tokens[1].token, Token::Ident(_)));
+    }
+
+    #[test]
+    fn test_multiline_block_comments() {
+        let tokens = Lexer::new("x /* multi\nline\ncomment */ y")
+            .tokenize()
+            .unwrap();
+        assert_eq!(tokens.len(), 2);
+        assert!(matches!(tokens[0].token, Token::Ident(_)));
+        assert!(matches!(tokens[1].token, Token::Ident(_)));
+    }
+
+    #[test]
     fn test_try_catch_tokens() {
         let tokens = Lexer::new("try { } catch e { }").tokenize().unwrap();
         assert_eq!(tokens[0].token, Token::Try);
         assert_eq!(tokens[1].token, Token::LBrace);
         assert_eq!(tokens[2].token, Token::RBrace);
         assert_eq!(tokens[3].token, Token::Catch);
+    }
+
+    #[test]
+    fn test_grammar_tokens_with_newline() {
+        let input = "let g = grammar test {\ntrans = _:x => x\n}";
+        match Lexer::new(input).tokenize() {
+            Ok(tokens) => {
+                for (i, tok) in tokens.iter().enumerate() {
+                    eprintln!("{}: {:?}", i, tok);
+                }
+                // The lexer treats :x as Symbol("x"), not Colon + Ident("x")
+                // So we expect 13 tokens, not 14
+                assert_eq!(tokens.len(), 13);
+            }
+            Err(e) => {
+                panic!("Lexer failed: {:?}", e);
+            }
+        }
     }
 }

@@ -412,6 +412,14 @@ impl Value {
                     && a.iter()
                         .all(|(k, v)| b.get(k).map_or(false, |bv| v.equals(bv)))
             }
+            (Value::Tagged(tag_a, children_a), Value::Tagged(tag_b, children_b)) => {
+                tag_a == tag_b
+                    && children_a.len() == children_b.len()
+                    && children_a
+                        .iter()
+                        .zip(children_b.iter())
+                        .all(|(x, y)| x.equals(y))
+            }
             _ => false,
         }
     }

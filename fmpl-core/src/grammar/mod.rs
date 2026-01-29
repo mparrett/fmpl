@@ -85,6 +85,7 @@ pub mod input;
 pub mod parser;
 pub mod runtime;
 pub mod stream_input;
+pub mod trampoline;
 
 use crate::ast::Expr;
 use crate::value::Value;

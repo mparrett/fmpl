@@ -176,8 +176,8 @@ pub enum Expr {
 
     /// Index access (expr[index]).
     Index(Box<Expr>, Box<Expr>),
-    /// Slice access (expr[start..end]).
-    Slice(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// Slice access (expr[start..end]). Start and end are optional for open slices.
+    Slice(Box<Expr>, Option<Box<Expr>>, Option<Box<Expr>>),
 
     /// Function call.
     Call(Box<Expr>, Vec<Arg>),

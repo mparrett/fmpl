@@ -1,11 +1,24 @@
 //! Recursive descent parser for FMPL.
+//!
+//! This module contains both the legacy hand-written parser and the
+//! generated parser (included at build time).
 
 use crate::ast::*;
-use crate::error::{Error, Result};
+use crate::error::Error;
 use crate::grammar::Grammar;
 use crate::grammar::parser::GrammarParser;
 use crate::lexer::{SpannedToken, Token};
+use crate::value::Value;
 use smol_str::SmolStr;
+use std::rc::Rc;
+use std::sync::Arc;
+
+// Local Result type for parser (same as crate::error::Result)
+type Result<T> = std::result::Result<T, Error>;
+
+// Include the generated parser at build time
+// The generated_parse function provides an alternative entry point
+include!(concat!(env!("OUT_DIR"), "/generated_parser.rs"));
 
 /// Parser state.
 pub struct Parser<'a> {
@@ -495,7 +508,8 @@ impl<'a> Parser<'a> {
                     expr = Expr::FacetAccess(Box::new(expr), facet);
                 } else {
                     // Property or method access
-                    let name = self.expect_ident()?;
+                    // Use expect_ident_or_keyword to allow keywords like `in`, `map`, etc. as method names
+                    let name = self.expect_ident_or_keyword()?;
                     if self.check(&Token::LParen) {
                         let args = self.parse_args()?;
                         expr = Expr::MethodCall(Box::new(expr), name, args);
@@ -505,17 +519,36 @@ impl<'a> Parser<'a> {
                 }
             } else if self.check(&Token::LBracket) {
                 self.advance();
-                let index = self.parse_expr()?;
 
-                // Check for slice
+                // Check for slice starting with .. (open start)
                 if self.check(&Token::DotDot) {
                     self.advance();
-                    let end = self.parse_expr()?;
+                    // Check for open end too (full slice [..])
+                    let end = if self.check(&Token::RBracket) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expr()?))
+                    };
                     self.expect(&Token::RBracket)?;
-                    expr = Expr::Slice(Box::new(expr), Box::new(index), Box::new(end));
+                    expr = Expr::Slice(Box::new(expr), None, end);
                 } else {
-                    self.expect(&Token::RBracket)?;
-                    expr = Expr::Index(Box::new(expr), Box::new(index));
+                    let index = self.parse_expr()?;
+
+                    // Check for slice
+                    if self.check(&Token::DotDot) {
+                        self.advance();
+                        // Check for open end (slice from index to end)
+                        let end = if self.check(&Token::RBracket) {
+                            None
+                        } else {
+                            Some(Box::new(self.parse_expr()?))
+                        };
+                        self.expect(&Token::RBracket)?;
+                        expr = Expr::Slice(Box::new(expr), Some(Box::new(index)), end);
+                    } else {
+                        self.expect(&Token::RBracket)?;
+                        expr = Expr::Index(Box::new(expr), Box::new(index));
+                    }
                 }
             } else {
                 break;
@@ -782,7 +815,7 @@ impl<'a> Parser<'a> {
         Ok(Expr::GrammarLiteral(grammar))
     }
 
-    /// Parse named grammar: `grammar Name { rules }`
+    /// Parse named grammar: `grammar Name { rules }` or `grammar Name <: Parent { rules }`
     fn parse_named_grammar(&mut self) -> Result<Expr> {
         // We need source access to parse grammar body
         let source = self
@@ -795,6 +828,17 @@ impl<'a> Parser<'a> {
 
         // Expect the grammar name
         let _name = self.expect_ident()?;
+
+        // Check for optional inheritance: <: ParentName
+        if self.check(&Token::Inherits) {
+            self.advance(); // consume <:
+            // Consume the parent name (could be qualified like parent::name)
+            self.expect_ident()?;
+            while self.check(&Token::ColonColon) {
+                self.advance();
+                self.expect_ident()?;
+            }
+        }
 
         // Find the opening brace token
         self.expect(&Token::LBrace)?;
@@ -1746,6 +1790,53 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Expect an identifier or keyword (for method/property names after `.`).
+    /// Keywords like `in`, `map`, `filter` can be used as method names.
+    fn expect_ident_or_keyword(&mut self) -> Result<SmolStr> {
+        let result = match self.peek_token() {
+            Some(Token::Ident(s)) => Ok(s.clone()),
+            // Allow keywords as method names
+            Some(Token::In) => Ok(SmolStr::new("in")),
+            Some(Token::Map) => Ok(SmolStr::new("map")),
+            Some(Token::Filter) => Ok(SmolStr::new("filter")),
+            Some(Token::Fold) => Ok(SmolStr::new("fold")),
+            Some(Token::Foldr) => Ok(SmolStr::new("foldr")),
+            Some(Token::Match) => Ok(SmolStr::new("match")),
+            Some(Token::When) => Ok(SmolStr::new("when")),
+            Some(Token::As) => Ok(SmolStr::new("as")),
+            Some(Token::Return) => Ok(SmolStr::new("return")),
+            Some(Token::Yield) => Ok(SmolStr::new("yield")),
+            Some(Token::Spawn) => Ok(SmolStr::new("spawn")),
+            Some(Token::Do) => Ok(SmolStr::new("do")),
+            Some(Token::While) => Ok(SmolStr::new("while")),
+            Some(Token::For) => Ok(SmolStr::new("for")),
+            Some(Token::If) => Ok(SmolStr::new("if")),
+            Some(Token::Then) => Ok(SmolStr::new("then")),
+            Some(Token::Else) => Ok(SmolStr::new("else")),
+            Some(Token::Let) => Ok(SmolStr::new("let")),
+            Some(Token::Try) => Ok(SmolStr::new("try")),
+            Some(Token::Catch) => Ok(SmolStr::new("catch")),
+            Some(Token::Throw) => Ok(SmolStr::new("throw")),
+            Some(Token::Object) => Ok(SmolStr::new("object")),
+            Some(Token::Lambda) => Ok(SmolStr::new("lambda")),
+            Some(Token::Stream) => Ok(SmolStr::new("stream")),
+            Some(Token::Grammar) => Ok(SmolStr::new("grammar")),
+            Some(Token::Self_) => Ok(SmolStr::new("self")),
+            Some(Token::Parent) => Ok(SmolStr::new("parent")),
+            Some(Token::Caller) => Ok(SmolStr::new("caller")),
+            Some(Token::User) => Ok(SmolStr::new("user")),
+            Some(Token::Args) => Ok(SmolStr::new("args")),
+            Some(Token::Null) => Ok(SmolStr::new("null")),
+            Some(Token::True) => Ok(SmolStr::new("true")),
+            Some(Token::False) => Ok(SmolStr::new("false")),
+            _ => Err(self.error("expected identifier")),
+        };
+        if result.is_ok() {
+            self.advance();
+        }
+        result
+    }
+
     /// Expect an identifier or underscore (for lambda parameters that can use _ as wildcard)
     fn expect_ident_or_underscore(&mut self) -> Result<SmolStr> {
         match self.peek_token() {
@@ -1780,9 +1871,27 @@ impl<'a> Parser<'a> {
     }
 
     fn error(&self, message: &str) -> Error {
+        // Include current token information in error message for better debugging
+        let token_info = if let Some(token) = self.peek_token() {
+            format!(
+                " (at position {}, token {}: {:?})",
+                self.pos, self.pos, token
+            )
+        } else if let Some(st) = self.tokens.get(self.pos) {
+            format!(
+                " (at position {}, token {}: {:?})",
+                self.pos, self.pos, st.token
+            )
+        } else {
+            format!(
+                " (at position {}, no token available, total tokens: {})",
+                self.pos,
+                self.tokens.len()
+            )
+        };
         Error::Parser {
             token: self.pos,
-            message: message.to_string(),
+            message: format!("{}{}", message, token_info),
         }
     }
 }

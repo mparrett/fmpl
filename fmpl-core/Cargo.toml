@@ -6,6 +6,11 @@ authors.workspace = true
 license.workspace = true
 description = "FMPL language core: lexer, parser, compiler, and VM"
 
+[features]
+default = []
+# Use trampolined grammar evaluation for bounded stack usage
+trampolined-grammar = []
+
 [dependencies]
 curl = "0.4"
 fjall = "3"
@@ -15,6 +20,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = "1.0"
 smol_str = { workspace = true }
+stacker = "0.1"
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time"] }
 

@@ -142,6 +142,100 @@ impl IrCompiler {
                 let rhs = self.compile_ir(&children[1])?;
                 Ok(self.emit(Instruction::GtEq { lhs, rhs }))
             }
+            "And" => {
+                // Short-circuit AND: if left is falsy, result is false; else evaluate right
+                let result_var =
+                    SmolStr::new(format!("__and_result_{}", self.code.instructions.len()));
+                let left_idx = self.compile_ir(&children[0])?;
+
+                // If left is falsy, skip to false result
+                let jump_to_false_idx = self.code.instructions.len();
+                self.emit(Instruction::JumpIfFalse {
+                    cond: left_idx,
+                    target: InstrIndex(0), // placeholder
+                });
+
+                // Left was truthy, evaluate right and store
+                let right_idx = self.compile_ir(&children[1])?;
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: right_idx,
+                });
+
+                // Jump over false case
+                let jump_to_end_idx = self.code.instructions.len();
+                self.emit(Instruction::Jump {
+                    target: InstrIndex(0), // placeholder
+                });
+
+                // False case
+                let false_target = InstrIndex(self.code.instructions.len());
+                if let Instruction::JumpIfFalse { target, .. } =
+                    &mut self.code.instructions[jump_to_false_idx]
+                {
+                    *target = false_target;
+                }
+                let false_idx = self.emit(Instruction::LoadBool(false));
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: false_idx,
+                });
+
+                // End
+                let end_target = InstrIndex(self.code.instructions.len());
+                if let Instruction::Jump { target } = &mut self.code.instructions[jump_to_end_idx] {
+                    *target = end_target;
+                }
+
+                Ok(self.emit(Instruction::LoadVar(result_var)))
+            }
+            "Or" => {
+                // Short-circuit OR: if left is truthy, result is true; else evaluate right
+                let result_var =
+                    SmolStr::new(format!("__or_result_{}", self.code.instructions.len()));
+                let left_idx = self.compile_ir(&children[0])?;
+
+                // If left is truthy, skip to true result
+                let jump_to_true_idx = self.code.instructions.len();
+                self.emit(Instruction::JumpIfTrue {
+                    cond: left_idx,
+                    target: InstrIndex(0), // placeholder
+                });
+
+                // Left was falsy, evaluate right and store
+                let right_idx = self.compile_ir(&children[1])?;
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: right_idx,
+                });
+
+                // Jump over true case
+                let jump_to_end_idx = self.code.instructions.len();
+                self.emit(Instruction::Jump {
+                    target: InstrIndex(0), // placeholder
+                });
+
+                // True case
+                let true_target = InstrIndex(self.code.instructions.len());
+                if let Instruction::JumpIfTrue { target, .. } =
+                    &mut self.code.instructions[jump_to_true_idx]
+                {
+                    *target = true_target;
+                }
+                let true_idx = self.emit(Instruction::LoadBool(true));
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: true_idx,
+                });
+
+                // End
+                let end_target = InstrIndex(self.code.instructions.len());
+                if let Instruction::Jump { target } = &mut self.code.instructions[jump_to_end_idx] {
+                    *target = end_target;
+                }
+
+                Ok(self.emit(Instruction::LoadVar(result_var)))
+            }
             "Let" => {
                 // :Let(:name, :value_ir, :body_ir)
                 let name = self.expect_symbol(&children[0])?;
@@ -322,6 +416,53 @@ impl IrCompiler {
                 let name = self.expect_symbol(&children[1])?;
                 Ok(self.emit(Instruction::GetFacet { object, name }))
             }
+            "Lambda" => {
+                // :Lambda([:param1, :param2, ...], body_ir)
+                // Compiles to MakeLambda which creates a closure
+                let param_list = self.expect_list(&children[0])?;
+                let mut params = Vec::new();
+                for p in param_list {
+                    params.push(self.expect_symbol(&p)?);
+                }
+
+                // Collect free variables from the body
+                let mut free_vars = std::collections::HashSet::new();
+                let mut bound_vars = std::collections::HashSet::new();
+                // Params are bound in the lambda body
+                for p in &params {
+                    bound_vars.insert(p.clone());
+                }
+                Self::collect_free_vars(&children[1], &bound_vars, &mut free_vars);
+
+                // All free variables need to be captured - the VM will resolve them at runtime
+                let captures: Vec<SmolStr> = free_vars.into_iter().collect();
+
+                // Save current bindings
+                let saved_bindings = self.bindings.clone();
+
+                // Body is compiled separately - we need to track where nested code starts
+                let nested_idx = self.code.nested.len();
+
+                // Create a new compiler for the lambda body
+                let mut body_compiler = IrCompiler::new();
+                // Params are available in the lambda body scope
+                // (handled by VM at runtime, not tracked here)
+                let body_idx = body_compiler.compile_ir(&children[1])?;
+                // Add return instruction if body doesn't end with one
+                body_compiler.emit(Instruction::Return { value: body_idx });
+
+                // Store the nested code
+                self.code.nested.push(body_compiler.finish());
+
+                // Restore bindings
+                self.bindings = saved_bindings;
+
+                Ok(self.emit(Instruction::MakeLambda {
+                    params,
+                    body: nested_idx,
+                    captures,
+                }))
+            }
             _ => Err(Error::Runtime(format!("Unknown IR node: {}", tag))),
         }
     }
@@ -388,6 +529,72 @@ impl IrCompiler {
 
     fn finish(self) -> CompiledCode {
         self.code
+    }
+
+    /// Collect free variables from an IR value.
+    /// `bound` contains variables that are bound in the current scope (params, let bindings).
+    /// `free` accumulates the free variables found.
+    fn collect_free_vars(
+        ir: &Value,
+        bound: &std::collections::HashSet<SmolStr>,
+        free: &mut std::collections::HashSet<SmolStr>,
+    ) {
+        match ir {
+            Value::Tagged(tag, children) => {
+                match tag.as_str() {
+                    "Var" => {
+                        // Variable reference - check if it's free
+                        if let Some(Value::Symbol(name)) = children.first() {
+                            if !bound.contains(name) {
+                                free.insert(name.clone());
+                            }
+                        }
+                    }
+                    "Let" => {
+                        // :Let(:name, value_ir, body_ir)
+                        // The name is bound in the body but not in the value
+                        if children.len() >= 3 {
+                            // Collect from value (name not yet bound)
+                            Self::collect_free_vars(&children[1], bound, free);
+                            // Collect from body (name is bound)
+                            if let Value::Symbol(name) = &children[0] {
+                                let mut new_bound = bound.clone();
+                                new_bound.insert(name.clone());
+                                Self::collect_free_vars(&children[2], &new_bound, free);
+                            }
+                        }
+                    }
+                    "Lambda" => {
+                        // :Lambda([params], body_ir)
+                        // Params are bound in the body
+                        if children.len() >= 2 {
+                            if let Value::List(params) = &children[0] {
+                                let mut new_bound = bound.clone();
+                                for p in params.iter() {
+                                    if let Value::Symbol(name) = p {
+                                        new_bound.insert(name.clone());
+                                    }
+                                }
+                                Self::collect_free_vars(&children[1], &new_bound, free);
+                            }
+                        }
+                    }
+                    // For all other IR nodes, recurse into children
+                    _ => {
+                        for child in children.iter() {
+                            Self::collect_free_vars(child, bound, free);
+                        }
+                    }
+                }
+            }
+            Value::List(items) => {
+                for item in items.iter() {
+                    Self::collect_free_vars(item, bound, free);
+                }
+            }
+            // Other values (Int, Bool, String, etc.) have no free variables
+            _ => {}
+        }
     }
 }
 

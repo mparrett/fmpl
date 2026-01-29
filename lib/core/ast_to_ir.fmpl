@@ -1,0 +1,76 @@
+-- AST to IR transformer using named tree grammar with explicit recursion
+-- Transforms AST tagged values from fmpl_parser into IR nodes for compilation
+-- Requires: lib/core/prelude.fmpl loaded first
+--
+-- Tree grammar explicit recursion: Use `rule:binding` syntax to apply a rule
+-- to child values. E.g., :Binary(:+, expr:l, expr:r) applies `expr` rule to
+-- the left and right children, binding the results to `l` and `r`.
+
+let ast_to_ir = grammar ast_to_ir {
+    -- Main expression transformer
+    expr = :Int(n) => :LoadInt(n)
+         | :Bool(b) => :LoadBool(b)
+         | :Null() => :LoadNull
+         | :String(s) => :LoadString(s)
+         | :Symbol(s) => :LoadSymbol(s)
+         | :Var(name) => :Var(name)
+         | :QualifiedName(parts) => :QualifiedName(parts)
+         -- Binary operators
+         | :Binary(:+, expr:l, expr:r) => :Add(l, r)
+         | :Binary(:-, expr:l, expr:r) => :Sub(l, r)
+         | :Binary(:*, expr:l, expr:r) => :Mul(l, r)
+         | :Binary(:/, expr:l, expr:r) => :Div(l, r)
+         | :Binary(:%, expr:l, expr:r) => :Mod(l, r)
+         | :Binary(:==, expr:l, expr:r) => :Eq(l, r)
+         | :Binary(:!=, expr:l, expr:r) => :NotEq(l, r)
+         | :Binary(:<, expr:l, expr:r) => :Lt(l, r)
+         | :Binary(:>, expr:l, expr:r) => :Gt(l, r)
+         | :Binary(:<=, expr:l, expr:r) => :LtEq(l, r)
+         | :Binary(:>=, expr:l, expr:r) => :GtEq(l, r)
+         | :Binary(:&&, expr:l, expr:r) => :And(l, r)
+         | :Binary(:||, expr:l, expr:r) => :Or(l, r)
+         -- Unary operators
+         | :Unary(:-, expr:e) => :Neg(e)
+         | :Unary(:!, expr:e) => :Not(e)
+         -- Control flow
+         | :If(expr:c, expr:t, expr:e) => :If(c, t, e)
+         -- Let bindings: :Let([:Binding(name, value), ...], body)
+         | :Let([:Binding(name, expr:value)], expr:body) => :Let(name, value, body)
+         -- Indexing: :Index(collection, key)
+         | :Index(expr:coll, expr:key) => :Index(coll, key)
+         -- Function calls: :Call(func, [arglist])
+         | :Call(expr:func, expr*:a) => :Call(func, a)
+         -- Method calls: :MethodCall(receiver, method, [arglist])
+         | :MethodCall(expr:recv, method, expr*:a) => :MethodCall(recv, method, a)
+         -- List literals: :List([elements])
+         | :List(expr*:items) => :MakeList(items)
+         -- Map literals: :Map([[key, val], ...])
+         | :Map(pair*:pairs) => :MakeMap(pairs)
+         -- Property access: :PropAccess(obj, prop)
+         | :PropAccess(expr:obj, prop) => :GetProp(obj, prop)
+         -- Lambdas: :Lambda(params, body) - params is a list of symbols
+         | :Lambda(params, expr:body) => :Lambda(params, body)
+         -- Control flow (passthrough with recursive transformation)
+         | :While(expr:cond, expr:body) => :While(cond, body)
+         | :DoWhile(expr:body, expr:cond) => :DoWhile(body, cond)
+         | :For(pat, expr:iter, expr:body) => :For(pat, iter, body)
+         | :Return(expr:e) => :Return(e)
+         | :Return() => :Return(:LoadNull)
+         -- Match expressions
+         | :Match(expr:e, case*:cases) => :Match(e, cases)
+         -- Async operations
+         | :AsyncCall(expr:e) => :AsyncCall(e)
+         | :SyncCall(expr:e) => :SyncCall(e)
+         -- Assignment
+         | :Assign(target, expr:value) => :Assign(target, value)
+         -- Block/sequence
+         | :Block(expr*:stmts) => :Block(stmts)
+         | :Seq(expr:first, expr:rest) => :Seq(first, rest)
+
+    -- Transform a [key, val] pair
+    pair = [expr:k, expr:v] => [k, v]
+
+    -- Transform match cases
+    case = :Case(pat, expr:body) => :Case(pat, body)
+         | :CaseGuard(pat, expr:guard, expr:body) => :CaseGuard(pat, guard, body)
+}

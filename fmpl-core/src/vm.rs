@@ -191,11 +191,11 @@ impl Vm {
 
         let registry = self.grammars.clone();
 
-        let evaluator = Box::new(
+        let evaluator = std::rc::Rc::new(std::cell::RefCell::new(
             |expr: &crate::ast::Expr, bindings: &HashMap<SmolStr, Value>| {
                 self.eval_with_bindings(expr, bindings)
             },
-        );
+        ));
 
         // If input is an AsyncStream, use streaming grammar application
         if let Value::AsyncStream(stream_arc) = input {
@@ -337,17 +337,8 @@ impl Vm {
                     // let (code = ir::compile(ir))
                     let val_to_store = match &val {
                         Value::Stream(stream) => {
-                            eprintln!("DEBUG StoreVar: executing stream for variable {}", name);
                             // Execute the stream and return the first match
-                            match self.execute_stream(stream) {
-                                Ok(v) => {
-                                    eprintln!("DEBUG StoreVar: stream executed to {:?}", v);
-                                    v
-                                }
-                                Err(e) => {
-                                    return Err(e);
-                                }
-                            }
+                            self.execute_stream(stream)?
                         }
                         _ => val.clone(),
                     };
@@ -885,17 +876,8 @@ impl Vm {
                     // let (ir = ast @ { ... })
                     let val_to_bind = match &val {
                         Value::Stream(stream) => {
-                            eprintln!("DEBUG Bind: executing stream for variable {}", name);
                             // Execute the stream and return the first match
-                            match self.execute_stream(stream) {
-                                Ok(v) => {
-                                    eprintln!("DEBUG Bind: stream executed to {:?}", v);
-                                    v
-                                }
-                                Err(e) => {
-                                    return Err(e);
-                                }
-                            }
+                            self.execute_stream(stream)?
                         }
                         _ => val.clone(),
                     };
@@ -1191,8 +1173,7 @@ impl Vm {
                     grammar,
                     rule,
                 } => {
-                    // NEW: GrammarApply returns a STREAM of all matches (backtracking)
-                    eprintln!("DEBUG GrammarApply: rule='{}', creating stream", rule);
+                    // GrammarApply returns a STREAM of all matches (backtracking)
                     let input_val = frame.get(input);
                     let grammar_val = frame.get(grammar);
 
@@ -1243,11 +1224,19 @@ impl Vm {
                         if let Ok(compiled) = compiled {
                             let compiled = Arc::new(compiled);
                             let mut cache = self.compiled_grammars.lock().unwrap();
-                            cache.insert(grammar_name, compiled);
+                            cache.insert(grammar_name.clone(), compiled);
                         }
                     }
 
-                    frame.set_current(Value::Grammar(grammar));
+                    let grammar_value = Value::Grammar(grammar);
+
+                    // Bind the grammar to its name in the current scope
+                    // This allows "grammar foo { ... }" to make "foo" available as a variable
+                    frame
+                        .locals
+                        .insert(grammar_name.clone(), grammar_value.clone());
+
+                    frame.set_current(grammar_value);
                 }
                 Instruction::ExtendGrammar { base, extension } => {
                     let base_val = frame.get(base);
@@ -1466,22 +1455,10 @@ impl Vm {
                 Instruction::MatchLiteral { const_idx } => {
                     let frame = self.frames.last_mut().unwrap();
                     let literal = frame.code.get_constant_as::<SmolStr>(const_idx).unwrap();
-                    eprintln!(
-                        "DEBUG MatchLiteral: ip={}, literal='{}', position={}, text='{:?}'",
-                        frame.ip,
-                        literal,
-                        frame.parse_state.position(),
-                        frame.parse_state.text_from()
-                    );
                     if frame.parse_state.starts_with(&literal) {
                         frame.parse_state.advance(literal.len());
                         frame.set_current(Value::String(literal));
-                        eprintln!(
-                            "DEBUG MatchLiteral: matched, new position={}",
-                            frame.parse_state.position()
-                        );
                     } else {
-                        eprintln!("DEBUG MatchLiteral: failed to match");
                         return Err(Error::ParseFailed {
                             position: frame.parse_state.position(),
                             message: format!("MatchLiteral: expected '{}'", literal),
@@ -1493,12 +1470,6 @@ impl Vm {
                     // Match a literal value (Int, String, Bool, Symbol, etc.) against the current input value
                     let frame = self.frames.last_mut().unwrap();
                     let expected_value = frame.code.get_constant(const_idx);
-                    eprintln!(
-                        "DEBUG MatchLiteralValue: ip={}, expected={:?}, position={}",
-                        frame.ip,
-                        expected_value,
-                        frame.parse_state.position()
-                    );
 
                     // Get the current input value
                     let input_value = frame
@@ -1512,16 +1483,8 @@ impl Vm {
                         // Value matches - advance and return the matched value
                         frame.parse_state.advance(1);
                         frame.set_current(input_value);
-                        eprintln!(
-                            "DEBUG MatchLiteralValue: matched, new position={}",
-                            frame.parse_state.position()
-                        );
                     } else {
                         // Value doesn't match - return Null to signal pattern failure
-                        eprintln!(
-                            "DEBUG MatchLiteralValue: failed to match, expected={:?}, got={:?}",
-                            expected_value, input_value
-                        );
                         frame.set_current(Value::Null);
                     }
                 }
@@ -1622,13 +1585,6 @@ impl Vm {
                 Instruction::MatchPlusCharClass { ranges } => {
                     // Match one or more characters from the given ranges
                     let frame = self.frames.last_mut().unwrap();
-                    eprintln!(
-                        "DEBUG MatchPlusCharClass: ip={}, ranges={:?}, position={}, text='{:?}'",
-                        frame.ip,
-                        ranges,
-                        frame.parse_state.position(),
-                        frame.parse_state.text_from()
-                    );
                     let mut results = Vec::new();
 
                     loop {
@@ -1641,7 +1597,6 @@ impl Vm {
                             } else {
                                 if results.is_empty() {
                                     // No match - return Null to allow Choice to try next case
-                                    eprintln!("DEBUG MatchPlusCharClass: no match, returning Null");
                                     frame.set_current(Value::Null);
                                     break;
                                 }
@@ -1651,7 +1606,6 @@ impl Vm {
                         } else {
                             if results.is_empty() {
                                 // End of input - return Null to allow Choice to try next case
-                                eprintln!("DEBUG MatchPlusCharClass: end of input, returning Null");
                                 frame.set_current(Value::Null);
                                 break;
                             }
@@ -1869,61 +1823,25 @@ impl Vm {
 
                 Instruction::MatchPlusRule { rule } => {
                     // One or more repetitions of a named rule (like OMeta's _many1).
-                    println!(
-                        "DEBUG MatchPlusRule: rule='{}'",
-                        frame.code.get_constant(rule)
-                    );
                     // Extract data first, then call helper which sets the result.
                     let rule_name_smol = frame.code.get_constant_as::<SmolStr>(rule).unwrap();
                     let grammar_opt = frame.parse_state.grammar().cloned();
                     let initial_position = frame.parse_state.position();
 
-                    println!(
-                        "DEBUG MatchPlusRule: grammar_opt={:?}",
-                        grammar_opt.as_ref().map(|g| &g.name)
-                    );
-
                     // Prepare helper input
                     let helper_input = if let Some(grammar) = grammar_opt {
                         let grammar_name = grammar.name.clone();
-                        println!(
-                            "DEBUG MatchPlusRule: looking for grammar '{}'",
-                            grammar_name
-                        );
                         let cache = self.compiled_grammars.lock().unwrap();
-                        println!("DEBUG MatchPlusRule: cache has {} grammars", cache.len());
                         if let Some(compiled_code) = cache.get(&grammar_name).cloned() {
-                            println!(
-                                "DEBUG MatchPlusRule: found compiled code, entry points: {:?}",
-                                compiled_code.rule_entry_points.keys().collect::<Vec<_>>()
-                            );
-                            if let Some(entry_point) = compiled_code.get_rule_entry(&rule_name_smol)
-                            {
-                                println!(
-                                    "DEBUG MatchPlusRule: found entry point for '{}' at {:?}",
-                                    rule_name_smol, entry_point
-                                );
-                                Some((compiled_code, entry_point))
-                            } else {
-                                println!(
-                                    "DEBUG MatchPlusRule: NO entry point for '{}'",
-                                    rule_name_smol
-                                );
-                                None
-                            }
+                            compiled_code
+                                .get_rule_entry(&rule_name_smol)
+                                .map(|entry_point| (compiled_code, entry_point))
                         } else {
-                            println!("DEBUG MatchPlusRule: compiled code NOT in cache");
                             None
                         }
                     } else {
-                        println!("DEBUG MatchPlusRule: NO grammar in parse_state");
                         None
                     };
-
-                    println!(
-                        "DEBUG MatchPlusRule: helper_input={}",
-                        helper_input.is_some()
-                    );
 
                     // Call helper (sets result in frame)
                     match helper_input {
@@ -2024,30 +1942,22 @@ impl Vm {
                 }
 
                 Instruction::MatchAction { pattern, action } => {
-                    eprintln!(
-                        "DEBUG MatchAction: ip={}, pattern={:?}, action={:?}",
-                        frame.ip, pattern, action
-                    );
                     // Execute pattern, then execute action expression.
                     // The action expression produces the final result.
                     // If pattern failed (returned Null), the MatchAction should also fail (return Null).
                     let pattern_result = frame.get(pattern);
-                    eprintln!("DEBUG MatchAction: pattern_result={:?}", pattern_result);
 
                     if matches!(pattern_result, Value::Null) {
                         // Pattern failed - return Null to allow Choice to try next case
-                        eprintln!("DEBUG MatchAction: pattern failed, returning Null");
                         frame.set_current(Value::Null);
                     } else {
                         // Pattern succeeded - get the action result
                         // The action instruction has already been executed during normal flow
                         let action_result = frame.get(action);
-                        eprintln!("DEBUG MatchAction: action_result={:?}", action_result);
 
                         // If action result is Null (e.g., LoadVar returned Null for undefined var),
                         // propagate the Null to allow Choice to try next case
                         if matches!(action_result, Value::Null) {
-                            eprintln!("DEBUG MatchAction: action returned Null, propagating");
                             frame.set_current(Value::Null);
                         } else {
                             frame.set_current(action_result);
@@ -2790,10 +2700,6 @@ impl Vm {
         initial_position: usize,
         require_at_least_one: bool,
     ) -> Result<()> {
-        println!(
-            "DEBUG match_rule_repeatedly: START rule='{}', entry_point={:?}",
-            rule_name, entry_point
-        );
         let mut results = Vec::new();
 
         loop {
@@ -2816,37 +2722,20 @@ impl Vm {
                             // Cached result found - use it and continue loop from new position
                             // GUARD: Break on zero-length match to prevent infinite loop
                             if end_pos == pos {
-                                println!(
-                                    "DEBUG match_rule_repeatedly: ZERO-LENGTH match at pos={}, breaking to prevent infinite loop",
-                                    pos
-                                );
                                 break;
                             }
                             // Update parse state to cached end position
-                            println!(
-                                "DEBUG match_rule_repeatedly: cache HIT for '{}' at pos={}, value={:?}",
-                                rule_name, pos, value
-                            );
                             f.parse_state.advance(end_pos - f.parse_state.position());
                             results.push(value);
                             (key, f.parse_state.clone(), Some(true)) // true = success
                         }
                         MemoEntry::Done(None, _) => {
                             // Cached failure - stop loop
-                            println!(
-                                "DEBUG match_rule_repeatedly: cache FAIL for '{}' at pos={}",
-                                rule_name, pos
-                            );
                             (key, f.parse_state.clone(), Some(false)) // false = failure
                         }
                     }
                 } else {
                     // No cache entry - need to execute
-                    println!(
-                        "DEBUG match_rule_repeatedly: NO cache for '{}' at pos={}, marking in-progress",
-                        rule_name,
-                        f.parse_state.position()
-                    );
                     f.parse_state.set_memo(key.clone(), MemoEntry::InProgress);
                     (key, f.parse_state.clone(), None) // None = need to execute
                 }
@@ -2855,30 +2744,22 @@ impl Vm {
             match cached_result {
                 Some(true) => {
                     // Cached success - continue loop to check for more matches
-                    println!("DEBUG match_rule_repeatedly: continuing loop after cache hit");
                     continue;
                 }
                 Some(false) => {
                     // Cached failure - stop loop
-                    println!("DEBUG match_rule_repeatedly: stopping loop due to cache failure");
                     break;
                 }
                 None => {
                     // No cache - execute the rule
-                    // Save position and rule_name before move
+                    // Save position before move
                     let restore_position = current_parse_state.position();
-                    let rule_name_debug = rule_name.to_string();
 
                     // Push new frame to execute the rule
                     let mut rule_frame = Frame::new(compiled_code.clone());
                     rule_frame.parse_state = current_parse_state;
                     rule_frame.ip = entry_point.0;
                     self.frames.push(rule_frame);
-
-                    println!(
-                        "DEBUG match_rule_repeatedly: calling rule '{}' at position {}",
-                        rule_name_debug, restore_position
-                    );
 
                     // Execute until frame returns
                     let base_depth = self.frames.len() - 1;
@@ -2892,20 +2773,11 @@ impl Vm {
                         (val, pos)
                     };
 
-                    println!(
-                        "DEBUG match_rule_repeatedly: rule '{}' returned {:?} at position {}",
-                        rule_name_debug, value, end_pos
-                    );
-
                     match execute_result {
                         Ok(()) => {
                             // Success - store in memo and continue
                             // GUARD: Break on zero-length match to prevent infinite loop
                             if end_pos == restore_position {
-                                println!(
-                                    "DEBUG match_rule_repeatedly: ZERO-LENGTH match at pos={}, breaking to prevent infinite loop",
-                                    restore_position
-                                );
                                 let f = self.frames.last_mut().unwrap();
                                 f.parse_state.set_memo(
                                     memo_key,
@@ -3075,14 +2947,14 @@ impl Vm {
                     let registry_for_closure = self.grammars.clone();
                     let rule_for_closure = rule.clone();
 
-                    let mut evaluator: Box<
-                        dyn FnMut(&crate::ast::Expr, &HashMap<SmolStr, Value>) -> Result<Value>,
-                    > = Box::new(move |expr, bindings| {
-                        // SAFETY: We need mutable access to the VM to evaluate expressions
-                        // This is safe because we're the only caller during this evaluation
-                        let vm = unsafe { &mut *vm_ptr };
-                        vm.eval_with_bindings(expr, bindings)
-                    });
+                    let evaluator = std::rc::Rc::new(std::cell::RefCell::new(
+                        move |expr: &crate::ast::Expr, bindings: &HashMap<SmolStr, Value>| {
+                            // SAFETY: We need mutable access to the VM to evaluate expressions
+                            // This is safe because we're the only caller during this evaluation
+                            let vm = unsafe { &mut *vm_ptr };
+                            vm.eval_with_bindings(expr, bindings)
+                        },
+                    ));
 
                     // Run grammar with backtracking by trying different approaches
                     // Approach 1: Run once and get the first match (current behavior)
@@ -3214,6 +3086,7 @@ impl Vm {
             "stream" => return Ok(Value::Symbol(SmolStr::new("__builtin_stream"))),
             "cursor" => return Ok(Value::Symbol(SmolStr::new("__builtin_cursor"))),
             "string" => return Ok(Value::Symbol(SmolStr::new("__builtin_string"))),
+            "codegen" => return Ok(Value::Symbol(SmolStr::new("__builtin_codegen"))),
             _ => {}
         }
 
@@ -3474,6 +3347,64 @@ impl Vm {
                     }
                 };
                 crate::builtins::ir::compile(ir)
+            }
+            ("__builtin_ir", "to_rust") => {
+                let ir = match args.first() {
+                    Some(v) => v,
+                    None => {
+                        return Ok(Value::Map(std::sync::Arc::new(
+                            vec![
+                                ("error".into(), Value::String("invalid_args".into())),
+                                (
+                                    "message".into(),
+                                    Value::String("ir::to_rust requires IR argument".into()),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        )));
+                    }
+                };
+                match crate::builtins::ir_to_rust::transpile(ir) {
+                    Ok(rust_code) => Ok(Value::String(rust_code.into())),
+                    Err(e) => Ok(Value::Map(std::sync::Arc::new(
+                        vec![
+                            ("error".into(), Value::String("transpile_failed".into())),
+                            ("message".into(), Value::String(e.to_string().into())),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ))),
+                }
+            }
+            ("__builtin_ir", "to_rust_expr") => {
+                let ir = match args.first() {
+                    Some(v) => v,
+                    None => {
+                        return Ok(Value::Map(std::sync::Arc::new(
+                            vec![
+                                ("error".into(), Value::String("invalid_args".into())),
+                                (
+                                    "message".into(),
+                                    Value::String("ir::to_rust_expr requires IR argument".into()),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        )));
+                    }
+                };
+                match crate::builtins::ir_to_rust::transpile_expr(ir) {
+                    Ok(rust_code) => Ok(Value::String(rust_code.into())),
+                    Err(e) => Ok(Value::Map(std::sync::Arc::new(
+                        vec![
+                            ("error".into(), Value::String("transpile_failed".into())),
+                            ("message".into(), Value::String(e.to_string().into())),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ))),
+                }
             }
             ("__builtin_code", "eval") => {
                 let code = match args.first() {
@@ -3836,6 +3767,70 @@ impl Vm {
                     }
                 }
                 Ok(Value::String(SmolStr::new(result)))
+            }
+            ("__builtin_codegen", "grammar_to_ir") => {
+                // codegen.grammar_to_ir(grammar) -> Value::Tagged (parsing IR)
+                // Converts a Grammar to parsing IR for transpilation to Rust.
+                let grammar = match args.first() {
+                    Some(Value::Grammar(g)) => g.clone(),
+                    _ => {
+                        return Ok(Value::Map(std::sync::Arc::new(
+                            vec![
+                                ("error".into(), Value::String("invalid_args".into())),
+                                (
+                                    "message".into(),
+                                    Value::String(
+                                        "codegen.grammar_to_ir requires Grammar argument".into(),
+                                    ),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        )));
+                    }
+                };
+                match crate::builtins::grammar_to_ir::grammar_to_ir(&grammar) {
+                    Ok(ir) => Ok(ir),
+                    Err(e) => Ok(Value::Map(std::sync::Arc::new(
+                        vec![
+                            ("error".into(), Value::String("grammar_to_ir_failed".into())),
+                            ("message".into(), Value::String(e.to_string().into())),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ))),
+                }
+            }
+            ("__builtin_codegen", "ir_to_rust") => {
+                // codegen.ir_to_rust(ir) -> String (Rust source code)
+                // Transpiles parsing IR to complete Rust parser code.
+                let ir = match args.first() {
+                    Some(v) => v,
+                    None => {
+                        return Ok(Value::Map(std::sync::Arc::new(
+                            vec![
+                                ("error".into(), Value::String("invalid_args".into())),
+                                (
+                                    "message".into(),
+                                    Value::String("codegen.ir_to_rust requires IR argument".into()),
+                                ),
+                            ]
+                            .into_iter()
+                            .collect(),
+                        )));
+                    }
+                };
+                match crate::builtins::ir_to_rust::transpile(ir) {
+                    Ok(rust_code) => Ok(Value::String(rust_code.into())),
+                    Err(e) => Ok(Value::Map(std::sync::Arc::new(
+                        vec![
+                            ("error".into(), Value::String("ir_to_rust_failed".into())),
+                            ("message".into(), Value::String(e.to_string().into())),
+                        ]
+                        .into_iter()
+                        .collect(),
+                    ))),
+                }
             }
             _ => Err(Error::Runtime(format!(
                 "unknown builtin: {}.{}",
