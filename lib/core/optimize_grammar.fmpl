@@ -1,0 +1,15 @@
+-- Grammar Optimizer: Apply pattern optimizations to parsing grammars
+--
+-- Takes a :ParseGrammar value and applies grammar_optimizer.fmpl optimizations
+-- to each rule's pattern, producing an optimized :ParseGrammar.
+--
+-- NOTE: Currently just returns the grammar unchanged. Optimizations disabled
+-- due to parsing issues with map() and short lambdas.
+
+io::load("lib/core/grammar_optimizer.fmpl")
+
+-- Optimize a ParseGrammar by applying optimize to each rule's pattern
+let optimize_grammar = lambda(g)
+    g @ {
+        [:ParseGrammar, any:name, any:rules] => [:ParseGrammar, name, rules]
+    }

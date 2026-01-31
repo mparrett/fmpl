@@ -16,11 +16,18 @@ use std::collections::HashSet;
 /// Transpile IR to Rust source code.
 pub fn transpile(ir: &Value) -> Result<String> {
     // Special case: ParseGrammar generates a complete self-contained file
-    if let Value::Tagged(tag, _) = ir {
-        if tag.as_str() == "ParseGrammar" {
-            let mut transpiler = IrToRust::new_grammar_mode();
-            return transpiler.transpile_ir(ir);
+    // Support both Value::Tagged("ParseGrammar", ...) and [:ParseGrammar, ...]
+    let is_grammar = match ir {
+        Value::Tagged(tag, _) => tag.as_str() == "ParseGrammar",
+        Value::List(items) if !items.is_empty() => {
+            matches!(&items[0], Value::Symbol(tag) if tag.as_str() == "ParseGrammar")
         }
+        _ => false,
+    };
+
+    if is_grammar {
+        let mut transpiler = IrToRust::new_grammar_mode();
+        return transpiler.transpile_ir(ir);
     }
 
     let mut transpiler = IrToRust::new();
@@ -392,11 +399,43 @@ impl IrToRust {
         format!("__v{}", self.var_counter)
     }
 
-    fn transpile_ir(&mut self, ir: &Value) -> Result<String> {
+    /// Check if a value has a specific tag, supporting both formats:
+    /// - Old: Value::Tagged(tag, ...)
+    /// - New: Value::List([Symbol(tag), ...])
+    fn has_tag(&self, ir: &Value, expected_tag: &str) -> bool {
         match ir {
-            Value::Tagged(tag, children) => self.transpile_tagged(tag.as_str(), children),
-            _ => Err(Error::Runtime(format!(
-                "IR transpile expected tagged value, got {}",
+            Value::Tagged(tag, _) => tag.as_str() == expected_tag,
+            Value::List(items) if !items.is_empty() => {
+                matches!(&items[0], Value::Symbol(tag) if tag.as_str() == expected_tag)
+            }
+            _ => false,
+        }
+    }
+
+    /// Extract tag and children from IR, supporting both formats:
+    /// - Old: Value::Tagged(tag, children)
+    /// - New: Value::List([Symbol(tag), ...children])
+    fn extract_tag_children(&self, ir: &Value) -> Option<(SmolStr, Vec<Value>)> {
+        match ir {
+            Value::Tagged(tag, children) => Some((tag.clone(), (**children).clone())),
+            Value::List(items) if !items.is_empty() => {
+                // New format: [:Tag, arg1, arg2, ...]
+                if let Value::Symbol(tag) = &items[0] {
+                    let children: Vec<Value> = items.iter().skip(1).cloned().collect();
+                    Some((tag.clone(), children))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn transpile_ir(&mut self, ir: &Value) -> Result<String> {
+        match self.extract_tag_children(ir) {
+            Some((tag, children)) => self.transpile_tagged(tag.as_str(), &children),
+            None => Err(Error::Runtime(format!(
+                "IR transpile expected tagged value or list syntax, got {}",
                 ir.type_name()
             ))),
         }
@@ -428,18 +467,36 @@ impl IrToRust {
 
         // Check if body is another Lambda (curried form)
         // Keep unwrapping nested Lambdas to flatten them
-        while let Value::Tagged(tag, children) = current_body {
-            if tag.as_str() == "Lambda" && children.len() >= 2 {
-                // Collect inner params
-                let inner_params = self.expect_list(&children[0])?;
-                for p in &inner_params {
-                    if let Value::Symbol(name) = p {
-                        all_params.push(sanitize_ident(name));
+        // Use pattern matching to get references that live long enough
+        loop {
+            match current_body {
+                Value::Tagged(tag, children) if tag.as_str() == "Lambda" && children.len() >= 2 => {
+                    // Collect inner params
+                    let inner_params = self.expect_list(&children[0])?;
+                    for p in &inner_params {
+                        if let Value::Symbol(name) = p {
+                            all_params.push(sanitize_ident(name));
+                        }
                     }
+                    current_body = &children[1];
                 }
-                current_body = &children[1];
-            } else {
-                break;
+                Value::List(items) if !items.is_empty() => {
+                    if let Value::Symbol(tag) = &items[0] {
+                        if tag.as_str() == "Lambda" && items.len() >= 3 {
+                            // List format: [:Lambda, params, body]
+                            let inner_params = self.expect_list(&items[1])?;
+                            for p in &inner_params {
+                                if let Value::Symbol(name) = p {
+                                    all_params.push(sanitize_ident(name));
+                                }
+                            }
+                            current_body = &items[2];
+                            continue;
+                        }
+                    }
+                    break;
+                }
+                _ => break,
             }
         }
 
@@ -689,11 +746,12 @@ impl IrToRust {
                 }
 
                 // Check if this is a call to a known helper function
-                if let Value::Tagged(tag, func_children) = &children[0] {
+                // Support both Value::Tagged and list syntax [:Tag, ...]
+                if let Some((func_tag, func_children)) = self.extract_tag_children(&children[0]) {
                     // Check for qualified calls like float.parse(x)
                     // Structure: Call(GetProp(Var(float), parse), [x])
-                    if tag.as_str() == "GetProp" && func_children.len() >= 2 {
-                        if let Value::Tagged(var_tag, var_children) = &func_children[0] {
+                    if func_tag.as_str() == "GetProp" && func_children.len() >= 2 {
+                        if let Some((var_tag, var_children)) = self.extract_tag_children(&func_children[0]) {
                             if var_tag.as_str() == "Var" {
                                 if let (Some(Value::Symbol(obj)), Some(Value::Symbol(method))) =
                                     (var_children.first(), func_children.get(1)) {
@@ -708,7 +766,7 @@ impl IrToRust {
                             }
                         }
                     }
-                    if tag.as_str() == "Var" {
+                    if func_tag.as_str() == "Var" {
                         if let Some(Value::Symbol(name)) = func_children.first() {
                             match name.as_str() {
                                 "prepend" if arg_strs.len() == 2 => {
@@ -731,7 +789,7 @@ impl IrToRust {
                                 }
                                 "reduce" | "fold" if args.len() == 3 => {
                                     // For fold/reduce, if the first arg is a Lambda, generate a native Rust closure
-                                    if let Value::Tagged(lambda_tag, lambda_children) = &args[0] {
+                                    if let Some((lambda_tag, lambda_children)) = self.extract_tag_children(&args[0]) {
                                         if lambda_tag.as_str() == "Lambda" && lambda_children.len() >= 2 {
                                             let closure = self.transpile_lambda_as_closure(&lambda_children[0], &lambda_children[1])?;
                                             return Ok(format!("fold({}, {}, {})", closure, arg_strs[1], arg_strs[2]));
@@ -773,8 +831,8 @@ impl IrToRust {
                 }
 
                 // Check for known builtin method calls like float.parse
-                if let Value::Tagged(tag, obj_children) = &children[0] {
-                    if tag.as_str() == "Var" {
+                if let Some((obj_tag, obj_children)) = self.extract_tag_children(&children[0]) {
+                    if obj_tag.as_str() == "Var" {
                         if let Some(Value::Symbol(obj_name)) = obj_children.first() {
                             match (obj_name.as_str(), method.as_str()) {
                                 ("float", "parse") if arg_strs.len() == 1 => {
@@ -1067,8 +1125,8 @@ macro_rules! trace_exit {
                 code.push_str("\n");
 
                 for rule in rules {
-                    if let Value::Tagged(tag, rule_children) = rule {
-                        if tag.as_str() == "ParseRuleDef" && rule_children.len() >= 2 {
+                    if let Some((rule_tag, rule_children)) = self.extract_tag_children(&rule) {
+                        if rule_tag.as_str() == "ParseRuleDef" && rule_children.len() >= 2 {
                             let rule_name = self.expect_symbol(&rule_children[0])?;
                             let rule_body = self.transpile_ir(&rule_children[1])?;
                             let sanitized_name = sanitize_ident(&rule_name);
@@ -1095,203 +1153,229 @@ pub fn generated_parse(source: &str) -> Result<Expr> {
 }
 
 /// Convert a Value (tagged AST) to an Expr (typed AST).
+/// Supports both formats:
+/// - Old: Value::Tagged(tag, children)
+/// - New: Value::List([Symbol(tag), ...children])
 fn value_to_expr(value: &Value) -> Result<Expr> {
-    match value {
-        Value::Tagged(tag, children) => {
-            match tag.as_str() {
-                "Int" => {
-                    if let Some(Value::Int(n)) = children.first() {
-                        Ok(Expr::Int(*n))
-                    } else {
-                        Err(Error::Runtime("Invalid Int node".to_string()))
-                    }
+    // Helper to extract tag and children from either format
+    let (tag, children) = match value {
+        Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
+        Value::List(items) if !items.is_empty() => {
+            if let Value::Symbol(tag) = &items[0] {
+                let children: Vec<Value> = items.iter().skip(1).cloned().collect();
+                (tag.clone(), children)
+            } else {
+                return Err(Error::Runtime(format!("Expected list starting with symbol, got {:?}", value)));
+            }
+        }
+        _ => return Err(Error::Runtime(format!("Expected tagged value or list, got {:?}", value))),
+    };
+
+    match tag.as_str() {
+        "Int" => {
+            if let Some(Value::Int(n)) = children.first() {
+                Ok(Expr::Int(*n))
+            } else {
+                Err(Error::Runtime("Invalid Int node".to_string()))
+            }
+        }
+        "Float" => {
+            if let Some(Value::Float(f)) = children.first() {
+                Ok(Expr::Float(*f))
+            } else {
+                Err(Error::Runtime("Invalid Float node".to_string()))
+            }
+        }
+        "Bool" => {
+            if let Some(Value::Bool(b)) = children.first() {
+                Ok(Expr::Bool(*b))
+            } else {
+                Err(Error::Runtime("Invalid Bool node".to_string()))
+            }
+        }
+        "Null" => Ok(Expr::Null),
+        "String" => {
+            // Handle both List of chars (from Star without auto-join) and String (from auto-join)
+            match children.first() {
+                Some(Value::List(chars)) => {
+                    // Join characters into string
+                    let s: String = chars.iter().filter_map(|v| {
+                        if let Value::String(s) = v { Some(s.as_str()) } else { None }
+                    }).collect();
+                    Ok(Expr::String(SmolStr::new(&s)))
                 }
-                "Float" => {
-                    if let Some(Value::Float(f)) = children.first() {
-                        Ok(Expr::Float(*f))
-                    } else {
-                        Err(Error::Runtime("Invalid Float node".to_string()))
-                    }
+                Some(Value::String(s)) => {
+                    // Already a joined string
+                    Ok(Expr::String(s.clone()))
                 }
-                "Bool" => {
-                    if let Some(Value::Bool(b)) = children.first() {
-                        Ok(Expr::Bool(*b))
-                    } else {
-                        Err(Error::Runtime("Invalid Bool node".to_string()))
-                    }
-                }
-                "Null" => Ok(Expr::Null),
-                "String" => {
-                    // Handle both List of chars (from Star without auto-join) and String (from auto-join)
-                    match children.first() {
-                        Some(Value::List(chars)) => {
-                            // Join characters into string
-                            let s: String = chars.iter().filter_map(|v| {
-                                if let Value::String(s) = v { Some(s.as_str()) } else { None }
-                            }).collect();
-                            Ok(Expr::String(SmolStr::new(&s)))
+                _ => Err(Error::Runtime("Invalid String node".to_string()))
+            }
+        }
+        "Symbol" => {
+            if let Some(Value::String(s)) = children.first() {
+                Ok(Expr::Symbol(s.clone()))
+            } else if let Some(Value::Symbol(s)) = children.first() {
+                Ok(Expr::Symbol(s.clone()))
+            } else {
+                Err(Error::Runtime("Invalid Symbol node".to_string()))
+            }
+        }
+        "Var" => {
+            if let Some(Value::Symbol(name)) = children.first() {
+                Ok(Expr::Ident(name.clone()))
+            } else {
+                Err(Error::Runtime("Invalid Var node".to_string()))
+            }
+        }
+        "List" => {
+            if let Some(Value::List(items)) = children.first() {
+                let exprs: Result<Vec<Expr>> = items.iter().map(value_to_expr).collect();
+                Ok(Expr::List(exprs?))
+            } else {
+                Err(Error::Runtime("Invalid List node".to_string()))
+            }
+        }
+        "Map" => {
+            if let Some(Value::List(entries)) = children.first() {
+                let mut map_entries = Vec::new();
+                for entry in entries.iter() {
+                    if let Value::List(pair) = entry {
+                        if pair.len() >= 2 {
+                            let key = match &pair[0] {
+                                Value::String(s) => s.clone(),
+                                _ => return Err(Error::Runtime("Map key must be string".to_string())),
+                            };
+                            let val = value_to_expr(&pair[1])?;
+                            map_entries.push(MapEntry::Symbol(key, val));
                         }
-                        Some(Value::String(s)) => {
-                            // Already a joined string
-                            Ok(Expr::String(s.clone()))
-                        }
-                        _ => Err(Error::Runtime("Invalid String node".to_string()))
                     }
                 }
-                "Symbol" => {
-                    if let Some(Value::String(s)) = children.first() {
-                        Ok(Expr::Symbol(s.clone()))
-                    } else if let Some(Value::Symbol(s)) = children.first() {
-                        Ok(Expr::Symbol(s.clone()))
-                    } else {
-                        Err(Error::Runtime("Invalid Symbol node".to_string()))
+                Ok(Expr::Map(map_entries))
+            } else {
+                Err(Error::Runtime("Invalid Map node".to_string()))
+            }
+        }
+        "Lambda" => {
+            if children.len() >= 2 {
+                let params = if let Value::List(ps) = &children[0] {
+                    ps.iter().filter_map(|p| {
+                        if let Value::Symbol(s) = p { Some(s.clone()) } else { None }
+                    }).collect()
+                } else {
+                    Vec::new()
+                };
+                let body = value_to_expr(&children[1])?;
+                Ok(Expr::Lambda(params, Box::new(body)))
+            } else {
+                Err(Error::Runtime("Invalid Lambda node".to_string()))
+            }
+        }
+        "ShortLambda" => {
+            // :ShortLambda(param, body) - single parameter short form
+            if children.len() >= 2 {
+                let param = if let Value::Symbol(s) = &children[0] {
+                    s.clone()
+                } else {
+                    return Err(Error::Runtime("Invalid ShortLambda param".to_string()));
+                };
+                let body = value_to_expr(&children[1])?;
+                Ok(Expr::ShortLambda(param, Box::new(body)))
+            } else {
+                Err(Error::Runtime("Invalid ShortLambda node".to_string()))
+            }
+        }
+        "Binary" => {
+            // FMPL's fold_binary produces :Binary(op, left, right)
+            if children.len() >= 3 {
+                let op = if let Value::Symbol(s) = &children[0] {
+                    match s.as_str() {
+                        "+" => BinOp::Add,
+                        "-" => BinOp::Sub,
+                        "*" => BinOp::Mul,
+                        "/" => BinOp::Div,
+                        "%" => BinOp::Mod,
+                        "==" => BinOp::Eq,
+                        "!=" => BinOp::NotEq,
+                        "<" => BinOp::Lt,
+                        ">" => BinOp::Gt,
+                        "<=" => BinOp::LtEq,
+                        ">=" => BinOp::GtEq,
+                        "&&" => BinOp::And,
+                        "||" => BinOp::Or,
+                        _ => return Err(Error::Runtime(format!("Unknown binary operator: {}", s))),
                     }
-                }
-                "Var" => {
-                    if let Some(Value::Symbol(name)) = children.first() {
-                        Ok(Expr::Ident(name.clone()))
-                    } else {
-                        Err(Error::Runtime("Invalid Var node".to_string()))
+                } else {
+                    return Err(Error::Runtime("Invalid Binary operator".to_string()));
+                };
+                let lhs = value_to_expr(&children[1])?;
+                let rhs = value_to_expr(&children[2])?;
+                Ok(Expr::Binary(Box::new(lhs), op, Box::new(rhs)))
+            } else {
+                Err(Error::Runtime("Invalid Binary node".to_string()))
+            }
+        }
+        "Unary" => {
+            if children.len() >= 2 {
+                let op = if let Value::Symbol(s) = &children[0] {
+                    match s.as_str() {
+                        "-" => UnaryOp::Neg,
+                        "!" => UnaryOp::Not,
+                        _ => return Err(Error::Runtime(format!("Unknown unary operator: {}", s))),
                     }
-                }
-                "List" => {
-                    if let Some(Value::List(items)) = children.first() {
-                        let exprs: Result<Vec<Expr>> = items.iter().map(value_to_expr).collect();
-                        Ok(Expr::List(exprs?))
-                    } else {
-                        Err(Error::Runtime("Invalid List node".to_string()))
-                    }
-                }
-                "Map" => {
-                    if let Some(Value::List(entries)) = children.first() {
-                        let mut map_entries = Vec::new();
-                        for entry in entries.iter() {
-                            if let Value::List(pair) = entry {
-                                if pair.len() >= 2 {
-                                    let key = match &pair[0] {
-                                        Value::String(s) => s.clone(),
-                                        _ => return Err(Error::Runtime("Map key must be string".to_string())),
-                                    };
-                                    let val = value_to_expr(&pair[1])?;
-                                    map_entries.push(MapEntry::Symbol(key, val));
+                } else {
+                    return Err(Error::Runtime("Invalid Unary operator".to_string()));
+                };
+                let operand = value_to_expr(&children[1])?;
+                Ok(Expr::Unary(op, Box::new(operand)))
+            } else {
+                Err(Error::Runtime("Invalid Unary node".to_string()))
+            }
+        }
+        "If" => {
+            if children.len() >= 3 {
+                let cond = value_to_expr(&children[0])?;
+                let then_branch = value_to_expr(&children[1])?;
+                let else_branch = value_to_expr(&children[2])?;
+                Ok(Expr::If(Box::new(cond), Box::new(then_branch), Some(Box::new(else_branch))))
+            } else {
+                Err(Error::Runtime("Invalid If node".to_string()))
+            }
+        }
+        "Let" => {
+            if children.len() >= 2 {
+                if let Value::List(bindings) = &children[0] {
+                    let mut let_bindings = Vec::new();
+                    for binding in bindings.iter() {
+                        // Support both Value::Tagged("Binding", ...) and [:Binding, ...]
+                        let (tag, parts) = match binding {
+                            Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
+                            Value::List(items) if !items.is_empty() => {
+                                if let Value::Symbol(tag) = &items[0] {
+                                    let parts: Vec<Value> = items.iter().skip(1).cloned().collect();
+                                    (tag.clone(), parts)
+                                } else {
+                                    continue;
                                 }
                             }
+                            _ => continue,
+                        };
+                        if tag.as_str() == "Binding" && parts.len() >= 2 {
+                            if let Value::Symbol(name) = &parts[0] {
+                                let value = value_to_expr(&parts[1])?;
+                                let_bindings.push(LetBinding::Simple(name.clone(), Some(Box::new(value))));
+                            }
                         }
-                        Ok(Expr::Map(map_entries))
-                    } else {
-                        Err(Error::Runtime("Invalid Map node".to_string()))
                     }
+                    let body = value_to_expr(&children[1])?;
+                    Ok(Expr::Let(let_bindings, Box::new(body)))
+                } else {
+                    Err(Error::Runtime("Invalid Let bindings".to_string()))
                 }
-                "Lambda" => {
-                    if children.len() >= 2 {
-                        let params = if let Value::List(ps) = &children[0] {
-                            ps.iter().filter_map(|p| {
-                                if let Value::Symbol(s) = p { Some(s.clone()) } else { None }
-                            }).collect()
-                        } else {
-                            Vec::new()
-                        };
-                        let body = value_to_expr(&children[1])?;
-                        Ok(Expr::Lambda(params, Box::new(body)))
-                    } else {
-                        Err(Error::Runtime("Invalid Lambda node".to_string()))
-                    }
-                }
-                "ShortLambda" => {
-                    // :ShortLambda(param, body) - single parameter short form
-                    if children.len() >= 2 {
-                        let param = if let Value::Symbol(s) = &children[0] {
-                            s.clone()
-                        } else {
-                            return Err(Error::Runtime("Invalid ShortLambda param".to_string()));
-                        };
-                        let body = value_to_expr(&children[1])?;
-                        Ok(Expr::ShortLambda(param, Box::new(body)))
-                    } else {
-                        Err(Error::Runtime("Invalid ShortLambda node".to_string()))
-                    }
-                }
-                "Binary" => {
-                    // FMPL's fold_binary produces :Binary(op, left, right)
-                    if children.len() >= 3 {
-                        let op = if let Value::Symbol(s) = &children[0] {
-                            match s.as_str() {
-                                "+" => BinOp::Add,
-                                "-" => BinOp::Sub,
-                                "*" => BinOp::Mul,
-                                "/" => BinOp::Div,
-                                "%" => BinOp::Mod,
-                                "==" => BinOp::Eq,
-                                "!=" => BinOp::NotEq,
-                                "<" => BinOp::Lt,
-                                ">" => BinOp::Gt,
-                                "<=" => BinOp::LtEq,
-                                ">=" => BinOp::GtEq,
-                                "&&" => BinOp::And,
-                                "||" => BinOp::Or,
-                                _ => return Err(Error::Runtime(format!("Unknown binary operator: {}", s))),
-                            }
-                        } else {
-                            return Err(Error::Runtime("Invalid Binary operator".to_string()));
-                        };
-                        let lhs = value_to_expr(&children[1])?;
-                        let rhs = value_to_expr(&children[2])?;
-                        Ok(Expr::Binary(Box::new(lhs), op, Box::new(rhs)))
-                    } else {
-                        Err(Error::Runtime("Invalid Binary node".to_string()))
-                    }
-                }
-                "Unary" => {
-                    if children.len() >= 2 {
-                        let op = if let Value::Symbol(s) = &children[0] {
-                            match s.as_str() {
-                                "-" => UnaryOp::Neg,
-                                "!" => UnaryOp::Not,
-                                _ => return Err(Error::Runtime(format!("Unknown unary operator: {}", s))),
-                            }
-                        } else {
-                            return Err(Error::Runtime("Invalid Unary operator".to_string()));
-                        };
-                        let operand = value_to_expr(&children[1])?;
-                        Ok(Expr::Unary(op, Box::new(operand)))
-                    } else {
-                        Err(Error::Runtime("Invalid Unary node".to_string()))
-                    }
-                }
-                "If" => {
-                    if children.len() >= 3 {
-                        let cond = value_to_expr(&children[0])?;
-                        let then_branch = value_to_expr(&children[1])?;
-                        let else_branch = value_to_expr(&children[2])?;
-                        Ok(Expr::If(Box::new(cond), Box::new(then_branch), Some(Box::new(else_branch))))
-                    } else {
-                        Err(Error::Runtime("Invalid If node".to_string()))
-                    }
-                }
-                "Let" => {
-                    if children.len() >= 2 {
-                        if let Value::List(bindings) = &children[0] {
-                            let mut let_bindings = Vec::new();
-                            for binding in bindings.iter() {
-                                if let Value::Tagged(tag, parts) = binding {
-                                    if tag.as_str() == "Binding" && parts.len() >= 2 {
-                                        if let Value::Symbol(name) = &parts[0] {
-                                            let value = value_to_expr(&parts[1])?;
-                                            let_bindings.push(LetBinding::Simple(name.clone(), Some(Box::new(value))));
-                                        }
-                                    }
-                                }
-                            }
-                            let body = value_to_expr(&children[1])?;
-                            Ok(Expr::Let(let_bindings, Box::new(body)))
-                        } else {
-                            Err(Error::Runtime("Invalid Let bindings".to_string()))
-                        }
-                    } else {
-                        Err(Error::Runtime("Invalid Let node".to_string()))
-                    }
-                }
-                "Tagged" => {
+            } else {
+                Err(Error::Runtime("Invalid Let node".to_string()))
+            }
+        }
+        "Tagged" => {
                     if children.len() >= 2 {
                         if let Value::String(tag) = &children[0] {
                             if let Value::List(args) = &children[1] {

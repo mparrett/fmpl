@@ -1035,8 +1035,16 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                     ));
                 }
                 // Get the list from input
+                // Normalize Value::Tagged to Value::List for pattern matching
+                // Value::Tagged(tag, [arg1, arg2, ...]) becomes [Symbol(tag), arg1, arg2, ...]
                 let items = match self.input.head(&pos) {
                     Some(InputItem::Value(Value::List(items))) => (*items).clone(),
+                    Some(InputItem::Value(Value::Tagged(tag, children))) => {
+                        // Normalize Tagged to List: prepend tag symbol to children
+                        let mut normalized = vec![Value::Symbol(tag.clone())];
+                        normalized.extend(children.as_ref().clone());
+                        normalized
+                    }
                     _ => return Ok(ParseResult::Failure),
                 };
 

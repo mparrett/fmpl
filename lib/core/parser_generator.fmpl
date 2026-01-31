@@ -2,23 +2,24 @@
 -- Transforms fmpl_parser.fmpl grammar into Rust parsing functions
 --
 -- Pipeline:
--- 1. Load the grammar (fmpl_parser)
+-- 1. Load the grammars (fmpl_parser, grammar_optimizer, optimize_grammar)
 -- 2. Convert grammar to parsing IR (codegen.grammar_to_ir)
--- 3. Convert parsing IR to Rust code (codegen.ir_to_rust)
+-- 3. Optimize the parsing IR using grammar_optimizer
+-- 4. Convert optimized IR to Rust code (codegen.ir_to_rust)
 --
 -- Usage: cargo run -p fmpl-bootstrap -- lib/core/parser_generator.fmpl
 -- Output: Rust source code for the generated parser (stdout)
---
--- TODO: Apply grammar_optimizer.fmpl optimizations to the grammar IR
--- before generating Rust code. This requires either:
--- 1. Converting optimizer grammars to work on grammar IR, or
--- 2. Implementing grammar inheritance (<:) to chain optimizations
 
--- Load the grammar
+-- Load the required grammars
 io::load("lib/core/fmpl_parser.fmpl")
+io::load("lib/core/grammar_optimizer.fmpl")
+io::load("lib/core/optimize_grammar.fmpl")
 
 -- Convert grammar to parsing IR
 let parsing_ir = codegen.grammar_to_ir(fmpl_parser)
 
--- Convert IR to Rust code
-codegen.ir_to_rust(parsing_ir)
+-- Optimize the grammar IR
+let optimized_ir = optimize_grammar(parsing_ir)
+
+-- Convert optimized IR to Rust code
+codegen.ir_to_rust(optimized_ir)

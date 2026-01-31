@@ -73,8 +73,8 @@ let fmpl_parser = grammar fmpl_parser {
     symbol = ":" sym_name:name sp => :Symbol(name)
 
     tag_name = ident_start:first ident_rest*:rest => join(prepend(first, rest))
-    tagged_arg_rest = "," sp expr:e => e
-    tagged_args = expr:first tagged_arg_rest*:rest => prepend(first, rest)
+    tagged_arg_rest = "," sp or_expr:e => e
+    tagged_args = or_expr:first tagged_arg_rest*:rest => prepend(first, rest)
     tagged_with_args = ":" tag_name:tag "(" sp tagged_args:items ")" sp => :Tagged(tag, items)
     tagged_empty = ":" tag_name:tag "(" sp ")" sp => :Tagged(tag, [])
     tagged = tagged_with_args | tagged_empty
@@ -153,14 +153,15 @@ let fmpl_parser = grammar fmpl_parser {
     or_op = "||" sp => :||
     or_expr = and_expr:first (or_op and_expr)*:rest => fold_binary(first, rest)
 
-    if_expr = "if" sp expr:cond "then" sp expr:then_branch "else" sp expr:else_branch
+    if_expr = "if" sp or_expr:cond "then" sp or_expr:then_branch "else" sp or_expr:else_branch
             => :If(cond, then_branch, else_branch)
 
-    binding = sym_ident:name "=" sp expr:value => :Binding(name, value)
+    binding = sym_ident:name "=" sp or_expr:value => :Binding(name, value)
     binding_rest = "," sp binding:b => b
     bindings = binding:first binding_rest*:rest => prepend(first, rest)
-    let_expr = "let" sp "(" sp bindings:bs ")" sp expr:body => :Let(bs, body)
+    let_expr = "let" sp "(" sp bindings:bs ")" sp or_expr:body => :Let(bs, body)
 
+    -- Expression is the top level that includes if/let/lambdas
     expr = if_expr | let_expr | short_lambda | full_lambda | or_expr
     code = sp expr:e sp => e
 }
