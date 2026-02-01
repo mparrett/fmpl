@@ -1376,22 +1376,22 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
             }
         }
         "Tagged" => {
-                    if children.len() >= 2 {
-                        if let Value::String(tag) = &children[0] {
-                            if let Value::List(args) = &children[1] {
-                                let exprs: Result<Vec<Expr>> = args.iter().map(value_to_expr).collect();
-                                Ok(Expr::Tagged(tag.clone(), exprs?))
-                            } else {
-                                Err(Error::Runtime("Invalid Tagged args".to_string()))
-                            }
-                        } else {
-                            Err(Error::Runtime("Invalid Tagged tag".to_string()))
-                        }
+            if children.len() >= 2 {
+                if let Value::String(tag) = &children[0] {
+                    if let Value::List(args) = &children[1] {
+                        let exprs: Result<Vec<Expr>> = args.iter().map(value_to_expr).collect();
+                        Ok(Expr::Tagged(tag.clone(), exprs?))
                     } else {
-                        Err(Error::Runtime("Invalid Tagged node".to_string()))
+                        Err(Error::Runtime("Invalid Tagged args".to_string()))
                     }
+                } else {
+                    Err(Error::Runtime("Invalid Tagged tag".to_string()))
                 }
-                "QualifiedName" => {
+            } else {
+                Err(Error::Runtime("Invalid Tagged node".to_string()))
+            }
+        }
+        "QualifiedName" => {
                     if let Some(Value::List(parts)) = children.first() {
                         let names: Vec<SmolStr> = parts.iter().filter_map(|p| {
                             if let Value::String(s) = p { Some(s.clone()) } else { None }

@@ -16,6 +16,7 @@ pub mod debug;
 pub mod error;
 pub mod grammar;
 pub mod instructions;
+pub mod ir_builder;
 pub mod json;
 pub mod lexer;
 pub mod object;

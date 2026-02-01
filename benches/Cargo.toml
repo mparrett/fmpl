@@ -1,0 +1,26 @@
+[package]
+name = "fmpl-benches"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+criterion = "0.5"
+fmpl-core = { path = "../fmpl-core" }
+
+[dependencies.execution_tape]
+path = "../../execution/execution_tape"
+
+[[bin]]
+name = "vm_comparison"
+path = "vm_comparison.rs"
+
+[[bin]]
+name = "quick_comparison"
+path = "quick_comparison.rs"
+
+[[-bench]]
+name = "vm_comparison"
+harness = false
