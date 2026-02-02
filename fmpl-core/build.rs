@@ -28,20 +28,36 @@ fn main() {
 
     // Track dependencies for incremental builds
     println!("cargo::rerun-if-changed=build.rs");
-    println!(
-        "cargo::rerun-if-changed={}",
-        workspace_root.join("lib/core/prelude.fmpl").display()
-    );
-    println!(
-        "cargo::rerun-if-changed={}",
-        workspace_root.join("lib/core/fmpl_parser.fmpl").display()
-    );
-    println!(
-        "cargo::rerun-if-changed={}",
-        workspace_root
-            .join("lib/core/parser_generator.fmpl")
-            .display()
-    );
+
+    // Track FMPL source files that the parser generator depends on
+    let fmpl_sources = [
+        "lib/core/prelude.fmpl",
+        "lib/core/fmpl_parser.fmpl",
+        "lib/core/parser_generator.fmpl",
+        "lib/core/grammar_optimizer.fmpl",
+        "lib/core/optimize_grammar.fmpl",
+        "lib/core/ast_to_ir.fmpl",
+        "lib/core/ir_to_rust.fmpl",
+    ];
+
+    for source in &fmpl_sources {
+        let path = workspace_root.join(source);
+        if path.exists() {
+            println!("cargo::rerun-if-changed={}", path.display());
+        }
+    }
+
+    // Track the fmpl-bootstrap binary itself
+    // If it changes, we need to regenerate the parser
+    let bootstrap_binary = workspace_root.join("target/debug/fmpl-bootstrap");
+    let release_bootstrap = workspace_root.join("target/release/fmpl-bootstrap");
+
+    if bootstrap_binary.exists() {
+        println!("cargo::rerun-if-changed={}", bootstrap_binary.display());
+    }
+    if release_bootstrap.exists() {
+        println!("cargo::rerun-if-changed={}", release_bootstrap.display());
+    }
 
     // Skip generation if explicitly requested or during bootstrap
     if env::var("FMPL_SKIP_PARSER_GEN").is_ok() || env::var("FMPL_BOOTSTRAP_PHASE").is_ok() {
@@ -52,9 +68,6 @@ fn main() {
 
     // Look for a pre-built fmpl-bootstrap binary
     // This avoids the circular dependency by using an already-built binary
-    let bootstrap_binary = workspace_root.join("target/debug/fmpl-bootstrap");
-    let release_bootstrap = workspace_root.join("target/release/fmpl-bootstrap");
-
     let binary_path = if bootstrap_binary.exists() {
         bootstrap_binary
     } else if release_bootstrap.exists() {
@@ -78,6 +91,47 @@ fn main() {
             generator_path.display()
         );
         write_fallback_parser(&out_dir);
+        return;
+    }
+
+    // Get the modification time of the bootstrap binary
+    // If the binary is newer than the generated parser, regenerate
+    let generated_parser_path = Path::new(&out_dir).join("generated_parser.rs");
+    let should_regenerate = if generated_parser_path.exists() {
+        // Check if any source file is newer than the generated parser
+        let generated_time = fs::metadata(&generated_parser_path)
+            .and_then(|m| m.modified())
+            .ok();
+
+        let binary_time = fs::metadata(&binary_path).and_then(|m| m.modified()).ok();
+
+        // Check if any FMPL source is newer
+        let source_newer = fmpl_sources.iter().any(|source| {
+            let source_path = workspace_root.join(source);
+            if let Ok(source_meta) = fs::metadata(&source_path) {
+                if let Ok(source_time) = source_meta.modified() {
+                    if let Some(gen_time) = generated_time {
+                        return source_time > gen_time;
+                    }
+                }
+            }
+            false
+        });
+
+        // Also check if binary is newer (means fmpl-bootstrap was rebuilt)
+        let binary_newer = if let (Some(bin_time), Some(gen_time)) = (binary_time, generated_time) {
+            bin_time > gen_time
+        } else {
+            true // Can't determine, so regenerate
+        };
+
+        source_newer || binary_newer
+    } else {
+        true // Generated parser doesn't exist
+    };
+
+    if !should_regenerate {
+        // Parser is up to date, skip generation
         return;
     }
 
