@@ -21,6 +21,18 @@ path = "vm_comparison.rs"
 name = "quick_comparison"
 path = "quick_comparison.rs"
 
+[[bin]]
+name = "fmpl_only"
+path = "fmpl_only.rs"
+
+[[bin]]
+name = "simple_comparison"
+path = "simple_comparison.rs"
+
+[[bin]]
+name = "cross_compile_bench"
+path = "cross_compile_bench.rs"
+
 [[-bench]]
 name = "vm_comparison"
 harness = false
