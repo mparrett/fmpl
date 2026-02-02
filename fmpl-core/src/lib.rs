@@ -12,6 +12,8 @@ pub mod ast;
 pub mod builtins;
 pub mod bytecode;
 pub mod compiler;
+#[cfg(feature = "cross_compile")]
+pub mod cross_compile;
 pub mod debug;
 pub mod error;
 pub mod grammar;

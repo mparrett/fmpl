@@ -10,9 +10,12 @@ description = "FMPL language core: lexer, parser, compiler, and VM"
 default = []
 # Use trampolined grammar evaluation for bounded stack usage
 trampolined-grammar = []
+# Enable cross-compilation to execution_tape VM
+cross_compile = ["execution_tape"]
 
 [dependencies]
 curl = "0.4"
+execution_tape = { optional = true, path = "../../execution/execution_tape", package = "execution_tape" }
 fjall = "3"
 logos = { workspace = true }
 rand = "0.8"

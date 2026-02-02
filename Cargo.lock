@@ -770,6 +770,7 @@ name = "fmpl-core"
 version = "0.1.0"
 dependencies = [
  "curl",
+ "execution_tape",
  "fjall 3.0.1",
  "logos",
  "pretty_assertions",
