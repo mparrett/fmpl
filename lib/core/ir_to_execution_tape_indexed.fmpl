@@ -1,0 +1,215 @@
+-- Indexed RPN IR to execution_tape Asm transpiler
+-- Converts FMPL Indexed RPN IR to execution_tape Asm builder calls
+--
+-- Input: Indexed RPN IR format from ast_to_ir_indexed.fmpl
+--   { next_index: N, instructions: [instr, ...], result_index: i }
+-- Output: Rust source code using execution_tape::asm::Asm
+--
+-- Flow: AST → ast_to_ir_indexed → Indexed RPN IR → this file → execution_tape Asm
+
+-- Helper to sanitize identifiers for Rust
+let sanitize_ident = \name
+    if name == "type" then "r#type"
+    else if name == "match" then "r#match"
+    else if name == "loop" then "r#loop"
+    else if name == "move" then "r#move"
+    else if name == "ref" then "r#ref"
+    else if name == "fn" then "r#fn"
+    else if name == "let" then "r#let"
+    else if name == "if" then "r#if"
+    else if name == "else" then "r#else"
+    else if name == "return" then "r#return"
+    else name
+
+-- Join list items with separator
+let join_with = lambda(sep, items)
+    reduce(\acc \item
+        if acc == "" then item
+        else acc ++ sep ++ item, "", items)
+
+-- Convert a single instruction to execution_tape Asm call
+-- Returns: (reg_count, rust_code_string)
+let instr_to_asm = \instr instr @ {
+    -- Literals - const instructions return value in register
+    [:LoadInt, n] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        { reg: reg, code: "a.const_i64(" ++ reg ++ ", " ++ int.to_string(n) ++ ");\n" }
+    }
+    [:LoadBool, b] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        { reg: reg, code: "a.const_bool(" ++ reg ++ ", " ++ b ++ ");\n" }
+    }
+    [:LoadNull] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        { reg: reg, code: "a.const_unit(" ++ reg ++ ");\n" }
+    }
+    [:LoadString, s] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        { reg: reg, code: "a.const_string(" ++ reg ++ ", \"" ++ s ++ "\");\n" }
+    }
+    [:LoadSymbol, s] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        { reg: reg, code: "a.const_string(" ++ reg ++ ", \"" ++ s ++ "\");\n" }
+    }
+
+    -- Variables - load from environment (simplified)
+    [:LoadVar, name] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let var_name = sanitize_ident(symbol.to_string(name))
+        { reg: reg, code: "a.mov(" ++ reg ++ ", " ++ var_name ++ ");\n" }
+    }
+
+    -- Binary arithmetic - operands are index references
+    [:Add, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_add(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:Sub, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_sub(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:Mul, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_mul(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:Div, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_div(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:Mod, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_rem(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+
+    -- Comparisons
+    [:Eq, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.eq(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:NotEq, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.ne(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:Lt, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_lt(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:Gt, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_gt(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:LtEq, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_le(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+    [:GtEq, lhs, rhs] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let lhs_reg = "r" ++ int.to_string(lhs)
+        let rhs_reg = "r" ++ int.to_string(rhs)
+        { reg: reg, code: "a.i64_ge(" ++ reg ++ ", " ++ lhs_reg ++ ", " ++ rhs_reg ++ ");\n" }
+    }
+
+    -- Unary operations
+    [:Neg, operand] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let op_reg = "r" ++ int.to_string(operand)
+        { reg: reg, code: "a.i64_neg(" ++ reg ++ ", " ++ op_reg ++ ");\n" }
+    }
+    [:Not, operand] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let op_reg = "r" ++ int.to_string(operand)
+        { reg: reg, code: "a.not(" ++ reg ++ ", " ++ op_reg ++ ");\n" }
+    }
+
+    -- Lists
+    [:MakeList, elements] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let elem_regs = join_with(", ", map_list(\e "r" ++ int.to_string(e), elements))
+        { reg: reg, code: "a.list_new(" ++ reg ++ ");\n" }
+    }
+
+    -- Function calls
+    [:Call, func, args] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let func_reg = "r" ++ int.to_string(func)
+        let arg_regs = join_with(", ", map_list(\a "r" ++ int.to_string(a), args))
+        { reg: reg, code: "a.call(" ++ reg ++ ", " ++ func_reg ++ ", &[" ++ arg_regs ++ "]);\n" }
+    }
+
+    -- Indexing
+    [:Index, collection, key] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let coll_reg = "r" ++ int.to_string(collection)
+        let key_reg = "r" ++ int.to_string(key)
+        { reg: reg, code: "a.index(" ++ reg ++ ", " ++ coll_reg ++ ", " ++ key_reg ++ ");\n" }
+    }
+
+    -- Control flow (select for if-then-else)
+    [:Select, cond, then_val, else_val] => {
+        let reg = "r" ++ int.to_string(instr.index)
+        let cond_reg = "r" ++ int.to_string(cond)
+        let then_reg = "r" ++ int.to_string(then_val)
+        let else_reg = "r" ++ int.to_string(else_val)
+        { reg: reg, code: "a.select(" ++ reg ++ ", " ++ cond_reg ++ ", " ++ then_reg ++ ", " ++ else_reg ++ ");\n" }
+    }
+}
+
+-- Convert Indexed RPN IR to complete execution_tape Rust source
+let compile_to_execution_tape = \ir_result
+    -- Convert each instruction to Asm calls
+    let with_indices = map_list_with_index(\i \instr
+        instr_to_asm({ index: i, instr: instr }, instr),
+        ir_result.instructions)
+
+    -- Concatenate all the code
+    let asm_code = reduce(\acc \item acc ++ item.code, "", with_indices)
+
+    -- Get result register and total register count
+    let result_reg = if list.length(with_indices) > 0
+        then list.last(with_indices).reg
+        else "r0"
+    let reg_count = ir_result.next_index
+
+    -- Generate complete Rust source
+    "use execution_tape::asm::{Asm, FunctionSig};
+use execution_tape::program_builder::ProgramBuilder;
+
+fn compile() -> (Asm, FunctionSig) {
+    let mut a = Asm::new();
+"
+    ++ asm_code
+    ++ "    a.ret(0, &["
+    ++ result_reg
+    ++ "]);
+    (a, FunctionSig {
+        arg_types: vec![],
+        ret_types: vec![execution_tape::program::ValueType::I64],
+        reg_count: "
+    ++ int.to_string(reg_count)
+    ++ ",
+    })
+}
+"
+
+-- Export the compiler
+io::println("ir_to_execution_tape_indexed.fmpl loaded")
