@@ -1446,8 +1446,6 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
         }
         _ => Err(Error::Runtime(format!("Unknown AST node type: {}", tag))),
     }
-        _ => Err(Error::Runtime(format!("Expected tagged value, got {:?}", value))),
-    }
 }
 "#);
 
