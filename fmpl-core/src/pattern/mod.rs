@@ -65,10 +65,11 @@ pub enum Pattern {
     },
 
     /// Action - pattern => expr
+    /// The `action` field contains an expression string to evaluate on successful match.
     Action {
         pattern: Box<Pattern>,
         action: SmolStr,
-    }, // action is expr string
+    },
 
     /// Rule application - applies named grammar rule
     ApplyRule(SmolStr),
@@ -83,33 +84,48 @@ pub enum LiteralValue {
     Null,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ListPattern {
-    Exact(Vec<Pattern>), // [p1, p2, p3]
+    /// Exact list pattern - matches [p1, p2, p3]
+    Exact(Vec<Pattern>),
+    /// Head-tail pattern - matches [h | t]
     HeadTail {
         head: Box<Pattern>,
         tail: Option<SmolStr>,
-    }, // [h | t]
-    Repeat {
-        element: Box<Pattern>,
-    }, // [p*]
+    },
+    /// Repeat pattern - matches [p*]
+    Repeat { element: Box<Pattern> },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CharPattern {
+    /// Exact character match - 'a'
     Exact(char),
-    Class(Vec<(char, char)>),        // [a-z]
-    NegatedClass(Vec<(char, char)>), // [^a-z]
+    /// Character class match - [a-z]
+    Class(Vec<(char, char)>),
+    /// Negated character class match - [^a-z]
+    NegatedClass(Vec<(char, char)>),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RepeatKind {
-    ZeroOrMore, // p*
-    OneOrMore,  // p+
+    /// Zero or more repetitions - p*
+    ZeroOrMore,
+    /// One or more repetitions - p+
+    OneOrMore,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GuardPredicate {
-    Expr(SmolStr),      // Expression to evaluate
-    TypeCheck(SmolStr), // Check type: is_list, is_map, etc.
+    /// Expression to evaluate as a boolean guard
+    Expr(SmolStr),
+    /// Type check guard - is_list, is_map, is_int, etc.
+    TypeCheck(SmolStr),
 }
+
+// Manual Eq implementation for Pattern since LiteralValue contains Float (f64)
+// which doesn't implement Eq. We use bitwise equality for floats.
+impl Eq for Pattern {}
+
+// Manual Eq implementation for LiteralValue using bitwise float comparison
+impl Eq for LiteralValue {}
