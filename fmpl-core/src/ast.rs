@@ -4,6 +4,11 @@ use crate::grammar::Grammar;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
+// Re-export unified pattern type for new code
+// Note: Old ast::Pattern enum kept for backward compatibility (see Task 6.1 for removal)
+pub use crate::pattern::Pattern as UnifiedPattern;
+pub use crate::pattern::Pattern as AstPattern;
+
 /// A qualified name like `foo::bar::baz`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QualifiedName {
@@ -114,6 +119,15 @@ pub enum Pattern {
 /// A match case (pattern => expression).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MatchCase {
+    pub pattern: Pattern,
+    pub guard: Option<Box<Expr>>,
+    pub body: Box<Expr>,
+}
+
+/// A case in an inline pattern block: pattern [when guard] => body
+/// Used with the @ operator for pattern matching: x @ { %{a: b} => b, _ => default }
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatternCase {
     pub pattern: Pattern,
     pub guard: Option<Box<Expr>>,
     pub body: Box<Expr>,
@@ -277,6 +291,14 @@ pub enum Expr {
         input: Box<Expr>,
         grammar: Box<Expr>,
         rule: SmolStr,
+    },
+
+    /// Inline pattern block for @ operator
+    /// Example: x @ { %{a: b} => b, _ => default }
+    /// This is pattern matching (like match), not grammar parsing.
+    InlinePatternBlock {
+        input: Box<Expr>,
+        cases: Vec<PatternCase>,
     },
 
     /// Anonymous grammar literal: grammar { rules }

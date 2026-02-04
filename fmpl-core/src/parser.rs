@@ -285,16 +285,28 @@ impl<'a> Parser<'a> {
             } else if self.check(&Token::At) {
                 // Grammar application: expr @ grammar_expr.rule
                 // Or anonymous block: expr @ { pattern => action; ... }
+                // Or inline pattern block: expr @ { %{a: b} => b, _ => default }
                 self.advance();
 
                 if self.check(&Token::LBrace) {
-                    // Anonymous grammar block: expr @ { pattern => action; ... }
-                    let anon_grammar = self.parse_anonymous_grammar_block()?;
-                    left = Expr::GrammarApply {
-                        input: Box::new(left),
-                        grammar: Box::new(Expr::GrammarLiteral(anon_grammar)),
-                        rule: SmolStr::new("main"), // Anonymous blocks use "main" rule
-                    };
+                    // Check if this looks like an inline pattern block (AST patterns)
+                    // vs a grammar block (PEG patterns)
+                    if self.is_inline_pattern_block() {
+                        // Inline pattern block: expr @ { %{a: b} => b, _ => default }
+                        let cases = self.parse_inline_pattern_block()?;
+                        left = Expr::InlinePatternBlock {
+                            input: Box::new(left),
+                            cases,
+                        };
+                    } else {
+                        // Anonymous grammar block: expr @ { digit* => result; ... }
+                        let anon_grammar = self.parse_anonymous_grammar_block()?;
+                        left = Expr::GrammarApply {
+                            input: Box::new(left),
+                            grammar: Box::new(Expr::GrammarLiteral(anon_grammar)),
+                            rule: SmolStr::new("main"), // Anonymous blocks use "main" rule
+                        };
+                    }
                 } else {
                     // Named grammar application: expr @ grammar_expr.rule
                     let grammar_expr = self.parse_postfix()?;
@@ -961,6 +973,161 @@ impl<'a> Parser<'a> {
         // Parse using GrammarParser's match block parser
         let mut grammar_parser = GrammarParser::new(grammar_source);
         grammar_parser.parse_match_block()
+    }
+
+    /// Parse inline pattern block for @ operator: `{ pattern => body, ... }`
+    /// Uses AST patterns (like match expressions), not grammar patterns.
+    fn parse_inline_pattern_block(&mut self) -> Result<Vec<PatternCase>> {
+        self.expect(&Token::LBrace)?;
+
+        let mut cases = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            cases.push(self.parse_pattern_case()?);
+            // Allow comma or semicolon as separator
+            if self.check(&Token::Comma) || self.check(&Token::Semi) {
+                self.advance();
+            }
+        }
+        self.expect(&Token::RBrace)?;
+
+        Ok(cases)
+    }
+
+    /// Parse a single pattern case: pattern [when guard] => body
+    fn parse_pattern_case(&mut self) -> Result<PatternCase> {
+        let pattern = self.parse_pattern()?;
+
+        let guard = if self.check(&Token::When) {
+            self.advance();
+            Some(Box::new(self.parse_expr()?))
+        } else {
+            None
+        };
+
+        self.expect(&Token::Arrow)?;
+        let body = self.parse_expr()?;
+
+        Ok(PatternCase {
+            pattern,
+            guard,
+            body: Box::new(body),
+        })
+    }
+
+    /// Check if the next tokens look like an inline pattern block (AST patterns)
+    /// rather than a grammar block. Returns true if we should use inline pattern parsing.
+    ///
+    /// The key challenge is distinguishing:
+    /// - AST patterns: `%{key: x}`, `[a, b]`, `_`, `x`, `42`, `:Symbol`
+    /// - Grammar patterns: `%{key: _:x}`, `[a-z]+`, `_:binding`, `"literal"`, `.`
+    ///
+    /// CONSERVATIVE APPROACH: Only trigger inline pattern parsing for patterns that
+    /// are unambiguously AST patterns. Default to grammar parsing for backward
+    /// compatibility with existing code.
+    ///
+    /// Triggers for inline pattern parsing:
+    /// - `%{key: identifier` where identifier is followed by `}` or `,` (not `:`)
+    /// - `_` followed immediately by `=>` or `when` (not `_:binding`)
+    /// - Identifier followed immediately by `=>` or `when` (simple variable pattern)
+    /// - `:Symbol` followed by `(` (constructor pattern) or `=>` (symbol match)
+    /// - Integer/Float followed by `=>` (literal pattern)
+    /// - `[` followed by identifier and `,` (list pattern, not `[a-z]` char class)
+    ///
+    /// Default: grammar parsing
+    fn is_inline_pattern_block(&self) -> bool {
+        // Look at token after the opening brace
+        let Some(first) = self.peek_ahead(1) else {
+            return false;
+        };
+
+        match &first.token {
+            // %{ could be AST map pattern or grammar map pattern
+            // Be VERY conservative: only treat as AST if value is identifier NOT followed by :
+            // This avoids `%{key: _:binding}` being parsed as AST
+            Token::Percent => {
+                // Token sequence: % { key : value
+                // pos+1: %
+                // pos+2: {
+                // pos+3: key
+                // pos+4: :
+                // pos+5: value_start
+                // pos+6: after_value (} or , for AST, : for grammar _:binding)
+                if let Some(t6) = self.peek_ahead(6) {
+                    // If token after value is `:`, it's grammar _:binding syntax
+                    if matches!(t6.token, Token::Colon) {
+                        return false;
+                    }
+                    // If token after value is `}` or `,`, it's AST pattern
+                    if matches!(t6.token, Token::RBrace | Token::Comma) {
+                        return true;
+                    }
+                }
+                // Default: grammar
+                false
+            }
+
+            // _ (wildcard): For backward compatibility with existing grammar tests,
+            // always use grammar parsing for `_ =>`. The grammar `_` pattern works
+            // correctly via PEG runtime, while Match compilation has a bug that
+            // returns null instead of the case body result.
+            // When Match compilation is fixed (Task 3.2 or later), this can be
+            // changed to trigger inline pattern parsing.
+            Token::Underscore => false,
+
+            // :Symbol patterns:
+            // - `:Symbol =>` is inline pattern (symbol match)
+            // - `:Symbol(...)` is constructor pattern - complex, use grammar for now
+            // Constructor pattern compilation isn't implemented in Match yet.
+            Token::Symbol(_) => self
+                .peek_ahead(2)
+                .map(|t| matches!(t.token, Token::Arrow | Token::When))
+                .unwrap_or(false),
+
+            // Identifier is inline if followed by => or when
+            Token::Ident(_) => self
+                .peek_ahead(2)
+                .map(|t| matches!(t.token, Token::Arrow | Token::When))
+                .unwrap_or(false),
+
+            // [ could be list pattern or character class
+            // List pattern: [a, b] -> has comma after first element
+            // Character class: [a-z] -> has dash for ranges
+            Token::LBracket => {
+                if let Some(second) = self.peek_ahead(2) {
+                    if let Some(third) = self.peek_ahead(3) {
+                        // [a, ...] is list pattern
+                        if matches!(second.token, Token::Ident(_))
+                            && matches!(third.token, Token::Comma)
+                        {
+                            return true;
+                        }
+                        // [a] => is list pattern (single element)
+                        if matches!(second.token, Token::Ident(_))
+                            && matches!(third.token, Token::RBracket)
+                        {
+                            if let Some(fourth) = self.peek_ahead(4) {
+                                if matches!(fourth.token, Token::Arrow | Token::When) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                false
+            }
+
+            // Integer/Float literals followed by => are inline patterns
+            Token::Int(_) | Token::Float(_) => self
+                .peek_ahead(2)
+                .map(|t| matches!(t.token, Token::Arrow | Token::When))
+                .unwrap_or(false),
+
+            // String literals are ambiguous - default to grammar
+            Token::String(_) => false,
+
+            // Everything else: default to grammar parsing
+            _ => false,
+        }
     }
 
     /// Parse list literal or list comprehension.

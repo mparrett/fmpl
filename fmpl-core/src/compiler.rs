@@ -7,6 +7,7 @@
 use crate::ast::*;
 use crate::error::{Error, Result};
 use crate::grammar::Grammar;
+use crate::pattern::{self, PatternMode};
 use crate::value::Value;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
@@ -75,6 +76,22 @@ pub enum MapValuePattern {
     MatchLiteral(ConstIndex),
     /// Execute a full pattern instruction.
     Pattern(InstrIndex),
+}
+
+/// Stream coercion mode for @ operator.
+///
+/// The @ operator works polymorphically on different input types by coercing
+/// them to appropriate stream forms for pattern matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StreamMode {
+    /// String -> character stream (each char becomes an input element)
+    Chars,
+    /// List -> element stream (each element becomes an input element)
+    Items,
+    /// Single value -> single-element stream (for pattern matching)
+    Once,
+    /// Detect from input type at runtime
+    Auto,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -317,6 +334,16 @@ pub enum Instruction {
         source: InstrIndex,
         grammar: InstrIndex,
         rule: SmolStr,
+    },
+    /// Coerce value to stream based on type for @ operator polymorphism.
+    ///
+    /// - Chars: String -> list of single-char strings
+    /// - Items: List -> pass through as-is
+    /// - Once: Any value -> wrap in single-element list
+    /// - Auto: Detect type at runtime (String->Chars, List->Items, Other->Once)
+    CoerceStream {
+        value: InstrIndex,
+        mode: StreamMode,
     },
 
     // Pattern matching (explicit operand indices) - For destructuring in let/match
@@ -593,14 +620,14 @@ impl CompiledCode {
     }
 
     /// Emit an instruction and return its index.
-    fn emit(&mut self, instr: Instruction) -> InstrIndex {
+    pub fn emit(&mut self, instr: Instruction) -> InstrIndex {
         let idx = InstrIndex(self.instructions.len());
         self.instructions.push(instr);
         idx
     }
 
     /// Get the next instruction index (where the next emit will go).
-    fn next_index(&self) -> InstrIndex {
+    pub fn next_index(&self) -> InstrIndex {
         InstrIndex(self.instructions.len())
     }
 
@@ -766,6 +793,16 @@ impl Compiler {
             loaded_vars: std::collections::HashSet::new(),
             bound_vars: std::collections::HashSet::new(),
         }
+    }
+
+    /// Get a reference to the compiled code (for testing/inspection).
+    pub fn code(&self) -> &CompiledCode {
+        &self.code
+    }
+
+    /// Get a mutable reference to the compiled code (for testing/advanced usage).
+    pub fn code_mut(&mut self) -> &mut CompiledCode {
+        &mut self.code
     }
 
     /// Generate a unique temporary variable name.
@@ -1000,6 +1037,16 @@ impl Compiler {
                 rule,
             } => {
                 let input_idx = self.compile_expr(input)?;
+                // NOTE: CoerceStream is NOT emitted here because the PegRuntime
+                // (used by GrammarApply's VM implementation) already handles
+                // polymorphic input coercion internally:
+                // - String -> character stream (text parsing)
+                // - List -> element stream (each element is one input position)
+                // - Other -> single-element stream (pattern matching)
+                //
+                // CoerceStream will be used in Phase 4 when patterns are compiled
+                // directly to bytecode (instead of using PegRuntime), allowing
+                // explicit control over input coercion mode.
                 let grammar_idx = match grammar.as_ref() {
                     Expr::Qualified(qn) => self
                         .code
@@ -1035,6 +1082,21 @@ impl Compiler {
                 let value = self.compile_expr(expr)?;
                 // YieldToSink sends the value to the current sink and continues execution
                 Ok(self.code.emit(Instruction::YieldToSink { value }))
+            }
+            Expr::InlinePatternBlock { input, cases } => {
+                // InlinePatternBlock is semantically equivalent to Match expression
+                // Convert PatternCase to MatchCase and compile as Match
+                // Task 3.2 will add optimized compilation path
+                let match_cases: Vec<crate::ast::MatchCase> = cases
+                    .iter()
+                    .map(|pc| crate::ast::MatchCase {
+                        pattern: pc.pattern.clone(),
+                        guard: pc.guard.clone(),
+                        body: pc.body.clone(),
+                    })
+                    .collect();
+                let match_expr = Expr::Match(input.clone(), match_cases);
+                self.compile_expr(&match_expr)
             }
             Expr::TryCatch {
                 body,
@@ -2335,8 +2397,12 @@ impl Compiler {
     fn compile_match(&mut self, scrutinee: &Expr, cases: &[MatchCase]) -> Result<InstrIndex> {
         let scrutinee_idx = self.compile_expr(scrutinee)?;
 
+        // Use a temporary variable to hold the result from whichever case matches.
+        // This follows the same pattern as compile_if to handle the phi-node problem
+        // in Indexed RPN where we need to collect results from different branches.
+        let result_var = self.gen_temp_name("match");
+
         let mut end_jumps = Vec::new();
-        let mut last_body_idx = InstrIndex(0);
 
         for case in cases {
             // TODO: proper pattern compilation with failure jumps
@@ -2371,31 +2437,42 @@ impl Compiler {
                 None
             };
 
-            // Compile case body (shared between guarded and unguarded cases)
-            let _ = last_body_idx;
-            last_body_idx = self.compile_expr(&case.body)?;
+            // Compile case body
+            let body_idx = self.compile_expr(&case.body)?;
+            // Pop the case scope BEFORE storing, so result goes to outer scope
             self.code.emit(Instruction::PopScope);
+            // Now store result in temp var (in outer scope)
+            self.code.emit(Instruction::StoreVar {
+                name: result_var.clone(),
+                value: body_idx,
+            });
             end_jumps.push(self.code.emit(Instruction::Jump {
                 target: InstrIndex(0), // placeholder
             }));
 
-            // Patch guard jump to skip to after PopScope
+            // Patch guard jump to skip to after the jump (next case or end)
             if let Some(skip) = skip_jump {
                 let skip_target = self.code.next_index();
                 self.code.patch_jump_target(skip, skip_target);
+                // Need to pop scope for the failed guard case too
                 self.code.emit(Instruction::PopScope);
             }
         }
 
         // If no pattern matched, result is null
         let null_idx = self.code.emit(Instruction::LoadNull);
+        self.code.emit(Instruction::StoreVar {
+            name: result_var.clone(),
+            value: null_idx,
+        });
 
         let end_target = self.code.next_index();
         for jump in end_jumps {
             self.code.patch_jump_target(jump, end_target);
         }
 
-        Ok(self.code.emit(Instruction::Copy { source: null_idx }))
+        // Load the result from temp var - this is the match expression's value
+        Ok(self.code.emit(Instruction::LoadVar(result_var)))
     }
 
     /// Compile try-catch.
@@ -2685,6 +2762,623 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+
+    // ========================================================================
+    // Mode-aware pattern compilation using unified Pattern type
+    // ========================================================================
+
+    /// Compile a unified pattern with the specified mode.
+    ///
+    /// This is the main entry point for mode-aware pattern compilation:
+    /// - **Fast mode**: Direct extraction without backtracking (for let bindings)
+    /// - **Full mode**: Grammar-style matching with backtracking/guards (for @ operator)
+    ///
+    /// # Arguments
+    /// * `pattern` - The unified pattern to compile
+    /// * `source` - The instruction index containing the value to match against
+    /// * `mode` - Compilation mode (Fast or Full)
+    ///
+    /// # Returns
+    /// * In Fast mode: `Ok(())` after emitting extraction/binding instructions
+    /// * In Full mode: `Ok(result_idx)` where result_idx points to the match result
+    pub fn compile_pattern_with_mode(
+        &mut self,
+        pattern: &pattern::Pattern,
+        source: InstrIndex,
+        mode: PatternMode,
+    ) -> Result<InstrIndex> {
+        match mode {
+            PatternMode::Fast => {
+                self.compile_pattern_fast(pattern, source)?;
+                // Fast mode returns the source unchanged (bindings are side effects)
+                Ok(source)
+            }
+            PatternMode::Full => self.compile_pattern_full(pattern, source),
+        }
+    }
+
+    /// Compile a pattern in Fast mode for direct extraction.
+    ///
+    /// Fast mode uses:
+    /// - `ExtractMapKey` for map patterns
+    /// - `ExtractListIndex` for list patterns
+    /// - `ExtractTaggedChild` for tagged/constructor patterns
+    /// - Direct `Bind` for variable patterns
+    ///
+    /// This mode does NOT generate:
+    /// - Backtracking checkpoints
+    /// - Guard evaluation code
+    /// - Pattern matching failure branches
+    ///
+    /// # Panics
+    /// Patterns that require full mode (Seq, Choice, Repeat, Guard, etc.) will
+    /// return an error.
+    pub fn compile_pattern_fast(
+        &mut self,
+        pattern: &pattern::Pattern,
+        source: InstrIndex,
+    ) -> Result<()> {
+        use pattern::{ListPattern, Pattern as UP};
+
+        match pattern {
+            UP::Any => {
+                // Wildcard - matches anything, binds nothing
+            }
+
+            UP::Var(name) => {
+                // Variable binding - bind source value to name
+                self.bound_vars.insert(name.clone());
+                self.code.emit(Instruction::Bind {
+                    name: name.clone(),
+                    value: source,
+                });
+            }
+
+            UP::Literal(_lit) => {
+                // Literal patterns in fast mode just succeed without checking
+                // (let bindings assume the pattern matches)
+            }
+
+            UP::Map(entries) => {
+                // Map pattern - extract each key and recursively bind
+                for (key, value_pattern) in entries {
+                    let extracted = self.code.emit(Instruction::ExtractMapKey {
+                        source,
+                        key: key.clone(),
+                    });
+                    self.compile_pattern_fast(value_pattern, extracted)?;
+                }
+            }
+
+            UP::List(list_pattern) => {
+                match list_pattern {
+                    ListPattern::Exact(patterns) => {
+                        // Exact list - extract by index
+                        for (i, pat) in patterns.iter().enumerate() {
+                            let extracted = self
+                                .code
+                                .emit(Instruction::ExtractListIndex { source, index: i });
+                            self.compile_pattern_fast(pat, extracted)?;
+                        }
+                    }
+                    ListPattern::HeadTail { head, tail } => {
+                        // Head-tail pattern: extract first element and rest
+                        let head_extracted = self
+                            .code
+                            .emit(Instruction::ExtractListIndex { source, index: 0 });
+                        self.compile_pattern_fast(head, head_extracted)?;
+
+                        if let Some(tail_name) = tail {
+                            // Bind tail to the rest of the list (slice from index 1)
+                            let start_idx = self.code.emit(Instruction::LoadInt(1));
+                            let tail_val = self.code.emit(Instruction::Slice {
+                                collection: source,
+                                start: Some(start_idx),
+                                end: None,
+                            });
+                            self.bound_vars.insert(tail_name.clone());
+                            self.code.emit(Instruction::Bind {
+                                name: tail_name.clone(),
+                                value: tail_val,
+                            });
+                        }
+                    }
+                    ListPattern::Repeat { .. } => {
+                        return Err(Error::Compiler(
+                            "List repeat pattern requires full mode (use @ operator)".to_string(),
+                        ));
+                    }
+                }
+            }
+
+            UP::Tagged { tag: _, patterns } => {
+                // Tagged/constructor pattern - extract children positionally
+                // Note: Fast mode doesn't check the tag (let bindings assume match)
+                for (i, pat) in patterns.iter().enumerate() {
+                    let extracted = self
+                        .code
+                        .emit(Instruction::ExtractTaggedChild { source, index: i });
+                    self.compile_pattern_fast(pat, extracted)?;
+                }
+            }
+
+            UP::Bind {
+                name,
+                pattern: inner,
+            } => {
+                // Named binding: first bind the source, then process inner pattern
+                self.bound_vars.insert(name.clone());
+                self.code.emit(Instruction::Bind {
+                    name: name.clone(),
+                    value: source,
+                });
+                self.compile_pattern_fast(inner, source)?;
+            }
+
+            UP::Optional(inner) => {
+                // Optional in fast mode: try to extract, bind null if absent
+                // For now, just process the inner pattern (assuming it matches)
+                self.compile_pattern_fast(inner, source)?;
+            }
+
+            UP::ApplyRule(_rule_name) => {
+                // Rule application in fast mode is a no-op (assumes match)
+                // The pattern is expected to be used in full mode for actual matching
+            }
+
+            // Patterns that require full mode
+            UP::Seq(_) | UP::Choice(_) | UP::Repeat { .. } => {
+                return Err(Error::Compiler(format!(
+                    "Pattern {:?} requires full mode (backtracking/guards)",
+                    pattern
+                )));
+            }
+
+            UP::Lookahead { .. } | UP::Guard { .. } | UP::Action { .. } => {
+                return Err(Error::Compiler(format!(
+                    "Pattern {:?} requires full mode (backtracking/guards)",
+                    pattern
+                )));
+            }
+
+            UP::Char(_) => {
+                return Err(Error::Compiler(
+                    "Char pattern requires full mode (string parsing)".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Compile a pattern in Full mode with backtracking and guards.
+    ///
+    /// Full mode uses grammar-style matching instructions:
+    /// - `MatchSeq`, `MatchChoice` for sequences/alternatives
+    /// - `MatchGuard` for guard predicates
+    /// - `ParseCheckpoint`/`ParseRestore` for backtracking
+    ///
+    /// This is used by the @ operator for pattern matching expressions.
+    pub fn compile_pattern_full(
+        &mut self,
+        pattern: &pattern::Pattern,
+        source: InstrIndex,
+    ) -> Result<InstrIndex> {
+        use pattern::{
+            CharPattern, GuardPredicate, ListPattern, LiteralValue, Pattern as UP, RepeatKind,
+        };
+
+        Ok(match pattern {
+            UP::Any => {
+                // Match any - just return the source (always succeeds)
+                self.code.emit(Instruction::MatchAny)
+            }
+
+            UP::Var(name) => {
+                // Variable binding in full mode: bind and succeed
+                self.bound_vars.insert(name.clone());
+                self.code.emit(Instruction::Bind {
+                    name: name.clone(),
+                    value: source,
+                });
+                source
+            }
+
+            UP::Literal(lit) => {
+                // Literal match - emit match instruction
+                let const_idx = match lit {
+                    LiteralValue::String(s) => self.code.add_constant(s.clone()),
+                    LiteralValue::Int(n) => self.code.add_constant(SmolStr::new(n.to_string())),
+                    LiteralValue::Float(f) => self.code.add_constant(SmolStr::new(f.to_string())),
+                    LiteralValue::Bool(b) => self.code.add_constant(SmolStr::new(b.to_string())),
+                    LiteralValue::Null => self.code.add_constant(SmolStr::new("null")),
+                };
+                self.code.emit(Instruction::MatchLiteral { const_idx })
+            }
+
+            UP::Map(entries) => {
+                // Map pattern in full mode - compile to MatchMap
+                let mut map_entries = Vec::new();
+                for (key, value_pattern) in entries {
+                    let key_const = self.code.add_constant(key.clone());
+                    let key_pattern = MapKeyPattern::Specific(key_const);
+
+                    // Compile the value pattern
+                    let value_idx = self.compile_pattern_full(value_pattern, source)?;
+                    let value_pattern_ir = MapValuePattern::Pattern(value_idx);
+
+                    map_entries.push((key_pattern, value_pattern_ir));
+                }
+                self.code.emit(Instruction::MatchMap {
+                    entries: map_entries,
+                })
+            }
+
+            UP::List(list_pattern) => {
+                match list_pattern {
+                    ListPattern::Exact(patterns) => {
+                        // Compile each element pattern
+                        let compiled: Vec<InstrIndex> = patterns
+                            .iter()
+                            .enumerate()
+                            .map(|(i, p)| {
+                                let extracted = self
+                                    .code
+                                    .emit(Instruction::ExtractListIndex { source, index: i });
+                                self.compile_pattern_full(p, extracted)
+                            })
+                            .collect::<Result<Vec<_>>>()?;
+                        self.code.emit(Instruction::MatchList {
+                            patterns: compiled,
+                            rest: None,
+                        })
+                    }
+                    ListPattern::HeadTail { head, tail } => {
+                        // Head-tail pattern
+                        let head_extracted = self
+                            .code
+                            .emit(Instruction::ExtractListIndex { source, index: 0 });
+                        let head_result = self.compile_pattern_full(head, head_extracted)?;
+
+                        let rest_idx = if let Some(tail_name) = tail {
+                            let start_idx = self.code.emit(Instruction::LoadInt(1));
+                            let tail_val = self.code.emit(Instruction::Slice {
+                                collection: source,
+                                start: Some(start_idx),
+                                end: None,
+                            });
+                            self.bound_vars.insert(tail_name.clone());
+                            self.code.emit(Instruction::Bind {
+                                name: tail_name.clone(),
+                                value: tail_val,
+                            });
+                            Some(tail_val)
+                        } else {
+                            None
+                        };
+                        // Return the MatchList with head pattern and optional rest
+                        self.code.emit(Instruction::MatchList {
+                            patterns: vec![head_result],
+                            rest: rest_idx,
+                        })
+                    }
+                    ListPattern::Repeat { element } => {
+                        // List repeat pattern [p*] - lower to loop with MatchOptional
+                        // Use similar pattern to Star compilation in compile_grammar_pattern
+                        let var_name =
+                            SmolStr::new(format!("__list_repeat_{}", self.code.next_index().0));
+                        let empty_list_idx =
+                            self.code.emit(Instruction::MakeList { elements: vec![] });
+                        self.code.emit(Instruction::StoreVar {
+                            name: var_name.clone(),
+                            value: empty_list_idx,
+                        });
+
+                        let loop_start = self.code.next_index();
+                        let element_idx = self.compile_pattern_full(element, source)?;
+
+                        let jump_if_null = self.code.emit(Instruction::JumpIfNull {
+                            cond: element_idx,
+                            target: InstrIndex(0),
+                        });
+
+                        let current_results_idx =
+                            self.code.emit(Instruction::LoadVar(var_name.clone()));
+                        let new_results_idx = self.code.emit(Instruction::ListAppend {
+                            list: current_results_idx,
+                            item: element_idx,
+                        });
+                        self.code.emit(Instruction::StoreVar {
+                            name: var_name.clone(),
+                            value: new_results_idx,
+                        });
+                        self.code.emit(Instruction::Jump { target: loop_start });
+
+                        let loop_end = self.code.next_index();
+                        self.code.patch_jump_target(jump_if_null, loop_end);
+
+                        self.code.emit(Instruction::LoadVar(var_name))
+                    }
+                }
+            }
+
+            UP::Tagged { tag, patterns } => {
+                // Tagged pattern in full mode - check tag and match children
+                let tag_const = self.code.add_constant(tag.clone());
+                let compiled: Vec<InstrIndex> = patterns
+                    .iter()
+                    .enumerate()
+                    .map(|(i, p)| {
+                        let extracted = self
+                            .code
+                            .emit(Instruction::ExtractTaggedChild { source, index: i });
+                        self.compile_pattern_full(p, extracted)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                self.code.emit(Instruction::MatchTagged {
+                    tag_idx: tag_const,
+                    patterns: compiled,
+                })
+            }
+
+            UP::Char(char_pattern) => match char_pattern {
+                CharPattern::Exact(c) => self.code.emit(Instruction::MatchChar { char: *c }),
+                CharPattern::Class(ranges) => {
+                    let range_tuples: Vec<(char, char)> = ranges.clone();
+                    self.code.emit(Instruction::MatchCharClass {
+                        ranges: range_tuples,
+                    })
+                }
+                CharPattern::NegatedClass(ranges) => {
+                    let range_tuples: Vec<(char, char)> = ranges.clone();
+                    self.code.emit(Instruction::MatchNegCharClass {
+                        ranges: range_tuples,
+                    })
+                }
+            },
+
+            UP::Seq(patterns) => {
+                // Sequence - all patterns must match in order
+                let compiled: Vec<InstrIndex> = patterns
+                    .iter()
+                    .map(|p| self.compile_pattern_full(p, source))
+                    .collect::<Result<Vec<_>>>()?;
+                self.code.emit(Instruction::MatchSeq { patterns: compiled })
+            }
+
+            UP::Choice(patterns) => {
+                // Choice - try alternatives with backtracking
+                // Generate checkpoint/restore pattern
+                let result_var =
+                    SmolStr::new(format!("__choice_result_{}", self.code.next_index().0));
+                let null_idx = self.code.emit(Instruction::LoadNull);
+                self.code.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: null_idx,
+                });
+
+                let checkpoint_idx = self.code.emit(Instruction::ParseCheckpoint);
+                let mut jump_to_done: Vec<InstrIndex> = Vec::new();
+                let patterns_len = patterns.len();
+
+                for (i, pattern) in patterns.iter().enumerate() {
+                    let is_last = i == patterns_len - 1;
+                    let case_result_idx = self.compile_pattern_full(pattern, source)?;
+
+                    if !is_last {
+                        let jump_to_next = self.code.emit(Instruction::JumpIfNull {
+                            cond: case_result_idx,
+                            target: InstrIndex(0),
+                        });
+                        self.code.emit(Instruction::StoreVar {
+                            name: result_var.clone(),
+                            value: case_result_idx,
+                        });
+                        let jump_done = self.code.emit(Instruction::Jump {
+                            target: InstrIndex(0),
+                        });
+                        jump_to_done.push(jump_done);
+
+                        let next_case_label = self.code.next_index();
+                        self.code.patch_jump_target(jump_to_next, next_case_label);
+                        self.code.emit(Instruction::ParseRestore {
+                            checkpoint: checkpoint_idx,
+                        });
+                    } else {
+                        self.code.emit(Instruction::StoreVar {
+                            name: result_var.clone(),
+                            value: case_result_idx,
+                        });
+                    }
+                }
+
+                let done_label = self.code.next_index();
+                for jump_idx in jump_to_done {
+                    self.code.patch_jump_target(jump_idx, done_label);
+                }
+                self.code.emit(Instruction::LoadVar(result_var))
+            }
+
+            UP::Repeat {
+                pattern: inner,
+                kind,
+            } => {
+                // Repetition pattern - lower to IR loop (same pattern as Star/Plus in compile_grammar_pattern)
+                let var_name =
+                    SmolStr::new(format!("__repeat_results_{}", self.code.next_index().0));
+                let empty_list_idx = self.code.emit(Instruction::MakeList { elements: vec![] });
+                self.code.emit(Instruction::StoreVar {
+                    name: var_name.clone(),
+                    value: empty_list_idx,
+                });
+
+                let loop_start = self.code.next_index();
+                let start_pos_idx = self.code.emit(Instruction::ParsePosition);
+                let result_idx = self.compile_pattern_full(inner, source)?;
+
+                let jump_if_null = self.code.emit(Instruction::JumpIfNull {
+                    cond: result_idx,
+                    target: InstrIndex(0),
+                });
+
+                let current_results_idx = self.code.emit(Instruction::LoadVar(var_name.clone()));
+                let new_results_idx = self.code.emit(Instruction::ListAppend {
+                    list: current_results_idx,
+                    item: result_idx,
+                });
+                self.code.emit(Instruction::StoreVar {
+                    name: var_name.clone(),
+                    value: new_results_idx,
+                });
+
+                // Zero-length guard to prevent infinite loops
+                let end_pos_idx = self.code.emit(Instruction::ParsePosition);
+                let cmp_idx = self.code.emit(Instruction::Eq {
+                    lhs: start_pos_idx,
+                    rhs: end_pos_idx,
+                });
+                let jump_if_zero_length = self.code.emit(Instruction::JumpIfTrue {
+                    cond: cmp_idx,
+                    target: InstrIndex(0),
+                });
+
+                self.code.emit(Instruction::Jump { target: loop_start });
+
+                let loop_end = self.code.next_index();
+                self.code.patch_jump_target(jump_if_null, loop_end);
+                self.code.patch_jump_target(jump_if_zero_length, loop_end);
+
+                // For OneOrMore, check that we got at least one result
+                let results_idx = self.code.emit(Instruction::LoadVar(var_name.clone()));
+                if matches!(kind, RepeatKind::OneOrMore) {
+                    // Check length > 0
+                    let len_idx = self.code.emit(Instruction::MethodCall {
+                        receiver: results_idx,
+                        method: SmolStr::new("len"),
+                        args: vec![],
+                    });
+                    let zero_idx = self.code.emit(Instruction::LoadInt(0));
+                    let is_empty = self.code.emit(Instruction::Eq {
+                        lhs: len_idx,
+                        rhs: zero_idx,
+                    });
+                    let fail_target_placeholder = self.code.emit(Instruction::JumpIfTrue {
+                        cond: is_empty,
+                        target: InstrIndex(0),
+                    });
+                    // Return results
+                    let _final_result = self.code.emit(Instruction::Copy {
+                        source: results_idx,
+                    });
+                    // Jump over failure case
+                    let success_jump = self.code.emit(Instruction::Jump {
+                        target: InstrIndex(0),
+                    });
+                    // Failure case: return null
+                    let fail_target = self.code.next_index();
+                    self.code
+                        .patch_jump_target(fail_target_placeholder, fail_target);
+                    let _null_result = self.code.emit(Instruction::LoadNull);
+                    let end_target = self.code.next_index();
+                    self.code.patch_jump_target(success_jump, end_target);
+                    // Return the accumulated results (contains either results or empty list for fail)
+                    self.code.emit(Instruction::LoadVar(var_name))
+                } else {
+                    results_idx
+                }
+            }
+
+            UP::Optional(inner) => {
+                // Optional pattern - match zero or one
+                let inner_idx = self.compile_pattern_full(inner, source)?;
+                self.code
+                    .emit(Instruction::MatchOptional { pattern: inner_idx })
+            }
+
+            UP::Lookahead {
+                pattern: inner,
+                positive,
+            } => {
+                let inner_idx = self.compile_pattern_full(inner, source)?;
+                if *positive {
+                    self.code
+                        .emit(Instruction::MatchLookahead { pattern: inner_idx })
+                } else {
+                    self.code.emit(Instruction::MatchNot { pattern: inner_idx })
+                }
+            }
+
+            UP::Bind {
+                name,
+                pattern: inner,
+            } => {
+                // Named binding in full mode
+                let inner_result = self.compile_pattern_full(inner, source)?;
+                self.bound_vars.insert(name.clone());
+                self.code.emit(Instruction::Bind {
+                    name: name.clone(),
+                    value: inner_result,
+                });
+                inner_result
+            }
+
+            UP::Guard {
+                pattern: inner,
+                predicate,
+            } => {
+                // Guard pattern - match inner, then check predicate
+                let inner_result = self.compile_pattern_full(inner, source)?;
+
+                // Compile the guard predicate
+                match predicate {
+                    GuardPredicate::Expr(expr_str) => {
+                        // Parse and compile the guard expression
+                        // For now, load the expression as a string that will be evaluated
+                        // TODO: Properly parse and compile the expression string
+                        let predicate_idx =
+                            self.code.emit(Instruction::LoadString(expr_str.clone()));
+                        self.code.emit(Instruction::MatchGuard {
+                            pattern: inner_result,
+                            predicate: predicate_idx,
+                        })
+                    }
+                    GuardPredicate::TypeCheck(type_name) => {
+                        // Type check guard - compile as a type check expression
+                        // Create an expression that checks the type
+                        let predicate_idx = self.code.emit(Instruction::LoadString(SmolStr::new(
+                            format!("is_{}", type_name),
+                        )));
+                        self.code.emit(Instruction::MatchGuard {
+                            pattern: inner_result,
+                            predicate: predicate_idx,
+                        })
+                    }
+                }
+            }
+
+            UP::Action {
+                pattern: inner,
+                action,
+            } => {
+                // Action pattern - match inner, then execute action
+                let inner_result = self.compile_pattern_full(inner, source)?;
+                // Parse and compile the action expression
+                // TODO: Properly parse the action string
+                let action_idx = self.code.emit(Instruction::LoadString(action.clone()));
+                self.code.emit(Instruction::MatchAction {
+                    pattern: inner_result,
+                    action: action_idx,
+                })
+            }
+
+            UP::ApplyRule(rule_name) => {
+                // Apply a named grammar rule
+                let const_idx = self.code.add_constant(rule_name.clone());
+                self.code.emit(Instruction::ApplyRule {
+                    rule_idx: const_idx,
+                })
+            }
+        })
     }
 
     /// Extract the nested binding path and variable name from a pattern.

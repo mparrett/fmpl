@@ -94,6 +94,11 @@ use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+// Re-export unified pattern type for new code
+// Note: Old grammar::Pattern enum kept for backward compatibility (see Task 6.1 for removal)
+pub use crate::pattern::Pattern as UnifiedPattern;
+pub use crate::pattern::Pattern as GrammarPattern;
+
 /// A grammar definition with rules and optional parent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Grammar {

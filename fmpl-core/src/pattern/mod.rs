@@ -122,3 +122,38 @@ pub enum GuardPredicate {
     /// Type check guard - is_list, is_map, is_int, etc.
     TypeCheck(SmolStr),
 }
+
+/// Compilation mode for patterns - determines strategy
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatternMode {
+    /// Fast path: direct extraction, no backtracking (for let bindings)
+    /// Uses ExtractMapKey, ExtractListIndex, ExtractTaggedChild
+    Fast,
+
+    /// Full path: grammar matching with backtracking (for @ operator)
+    /// Uses MatchSeq, MatchChoice, MatchGuard, etc.
+    Full,
+}
+
+impl Pattern {
+    /// Determine if pattern requires full matching (backtracking/guards)
+    pub fn requires_full_mode(&self) -> bool {
+        match self {
+            Pattern::Seq(_) | Pattern::Choice(_) | Pattern::Repeat { .. } => true,
+            Pattern::Lookahead { .. } | Pattern::Guard { .. } => true,
+            Pattern::Action { .. } => true,
+            Pattern::Char(_) => true, // Only for string parsing
+            Pattern::List(ListPattern::Repeat { .. }) => true,
+            _ => false,
+        }
+    }
+
+    /// Get recommended compilation mode for this pattern
+    pub fn recommended_mode(&self) -> PatternMode {
+        if self.requires_full_mode() {
+            PatternMode::Full
+        } else {
+            PatternMode::Fast
+        }
+    }
+}

@@ -994,6 +994,69 @@ impl Vm {
                     let grammar_val = frame.get(grammar);
                     self.push_stream_parse(source_val, grammar_val, rule)?;
                 }
+                Instruction::CoerceStream { value, mode } => {
+                    use crate::compiler::StreamMode;
+                    let val = frame.get(value);
+                    let result = match mode {
+                        StreamMode::Chars => {
+                            // String -> list of single-char strings
+                            match val {
+                                Value::String(s) => {
+                                    let chars: Vec<Value> = s
+                                        .chars()
+                                        .map(|c| Value::String(SmolStr::new(c.to_string())))
+                                        .collect();
+                                    Value::List(Arc::new(chars))
+                                }
+                                _ => {
+                                    return Err(Error::Type {
+                                        expected: "string".to_string(),
+                                        got: val.type_name().to_string(),
+                                    });
+                                }
+                            }
+                        }
+                        StreamMode::Items => {
+                            // List -> pass through as-is
+                            match val {
+                                Value::List(_) => val,
+                                _ => {
+                                    return Err(Error::Type {
+                                        expected: "list".to_string(),
+                                        got: val.type_name().to_string(),
+                                    });
+                                }
+                            }
+                        }
+                        StreamMode::Once => {
+                            // Any value -> wrap in single-element list
+                            Value::List(Arc::new(vec![val]))
+                        }
+                        StreamMode::Auto => {
+                            // Detect type at runtime
+                            match val {
+                                Value::String(s) => {
+                                    // String -> list of single-char strings
+                                    let chars: Vec<Value> = s
+                                        .chars()
+                                        .map(|c| Value::String(SmolStr::new(c.to_string())))
+                                        .collect();
+                                    Value::List(Arc::new(chars))
+                                }
+                                Value::List(_) => {
+                                    // List -> pass through as-is
+                                    val
+                                }
+                                _ => {
+                                    // Map, Tagged, or other -> wrap in single-element list
+                                    Value::List(Arc::new(vec![val]))
+                                }
+                            }
+                        }
+                    };
+                    let frame = self.frames.last_mut().unwrap();
+                    frame.set_current(result);
+                }
                 Instruction::StreamCollect { source } => {
                     let source_val = frame.get(source);
                     // When StreamCollect is encountered, execute the entire stream pipeline

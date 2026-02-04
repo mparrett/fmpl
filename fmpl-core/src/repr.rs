@@ -445,6 +445,22 @@ impl Display for Expr {
             Expr::StreamLiteral(expr) => write!(f, "stream {{ {} }}", expr),
 
             Expr::Yield(expr) => write!(f, "yield {}", expr),
+
+            Expr::InlinePatternBlock { input, cases } => {
+                write!(f, "{} @ {{ ", input)?;
+                for (i, case) in cases.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    // Use Pattern's Display implementation directly
+                    write!(f, "{}", case.pattern)?;
+                    if let Some(guard) = &case.guard {
+                        write!(f, " when {}", guard)?;
+                    }
+                    write!(f, " => {}", case.body)?;
+                }
+                write!(f, " }}")
+            }
         }
     }
 }

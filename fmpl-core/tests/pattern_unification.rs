@@ -135,3 +135,219 @@ fn test_pattern_apply_rule() {
     let p = Pattern::ApplyRule(SmolStr::new("digit"));
     assert!(matches!(p, Pattern::ApplyRule(name) if name == "digit"));
 }
+
+#[test]
+fn test_fast_mode_patterns() {
+    assert_eq!(Pattern::Any.recommended_mode(), PatternMode::Fast);
+    assert_eq!(
+        Pattern::Var(SmolStr::new("x")).recommended_mode(),
+        PatternMode::Fast
+    );
+
+    let map_p = Pattern::Map(vec![(SmolStr::new("x"), Pattern::Var(SmolStr::new("y")))]);
+    assert_eq!(map_p.recommended_mode(), PatternMode::Fast);
+
+    // Literal patterns use fast mode
+    let lit_p = Pattern::Literal(LiteralValue::Int(42));
+    assert_eq!(lit_p.recommended_mode(), PatternMode::Fast);
+
+    // Exact list patterns use fast mode
+    let list_p = Pattern::List(ListPattern::Exact(vec![Pattern::Any]));
+    assert_eq!(list_p.recommended_mode(), PatternMode::Fast);
+
+    // Tagged patterns use fast mode
+    let tagged_p = Pattern::Tagged {
+        tag: SmolStr::new("Some"),
+        patterns: vec![Pattern::Var(SmolStr::new("x"))],
+    };
+    assert_eq!(tagged_p.recommended_mode(), PatternMode::Fast);
+
+    // Optional uses fast mode
+    let opt_p = Pattern::Optional(Box::new(Pattern::Any));
+    assert_eq!(opt_p.recommended_mode(), PatternMode::Fast);
+
+    // Bind uses fast mode
+    let bind_p = Pattern::Bind {
+        name: SmolStr::new("x"),
+        pattern: Box::new(Pattern::Any),
+    };
+    assert_eq!(bind_p.recommended_mode(), PatternMode::Fast);
+
+    // ApplyRule uses fast mode
+    let apply_p = Pattern::ApplyRule(SmolStr::new("digit"));
+    assert_eq!(apply_p.recommended_mode(), PatternMode::Fast);
+}
+
+#[test]
+fn test_full_mode_patterns() {
+    // Seq requires full mode
+    let seq_p = Pattern::Seq(vec![Pattern::Any, Pattern::Any]);
+    assert_eq!(seq_p.recommended_mode(), PatternMode::Full);
+
+    // Choice requires full mode
+    let choice_p = Pattern::Choice(vec![Pattern::Any, Pattern::Any]);
+    assert_eq!(choice_p.recommended_mode(), PatternMode::Full);
+
+    // Guard requires full mode
+    let guard_p = Pattern::Guard {
+        pattern: Box::new(Pattern::Any),
+        predicate: GuardPredicate::Expr(SmolStr::new("true")),
+    };
+    assert_eq!(guard_p.recommended_mode(), PatternMode::Full);
+
+    // Repeat requires full mode
+    let repeat_p = Pattern::Repeat {
+        pattern: Box::new(Pattern::Any),
+        kind: RepeatKind::ZeroOrMore,
+    };
+    assert_eq!(repeat_p.recommended_mode(), PatternMode::Full);
+
+    // Lookahead requires full mode
+    let lookahead_p = Pattern::Lookahead {
+        pattern: Box::new(Pattern::Any),
+        positive: true,
+    };
+    assert_eq!(lookahead_p.recommended_mode(), PatternMode::Full);
+
+    // Action requires full mode
+    let action_p = Pattern::Action {
+        pattern: Box::new(Pattern::Any),
+        action: SmolStr::new("x * 2"),
+    };
+    assert_eq!(action_p.recommended_mode(), PatternMode::Full);
+
+    // Char patterns require full mode (string parsing)
+    let char_p = Pattern::Char(CharPattern::Exact('a'));
+    assert_eq!(char_p.recommended_mode(), PatternMode::Full);
+
+    // List repeat patterns require full mode
+    let list_repeat_p = Pattern::List(ListPattern::Repeat {
+        element: Box::new(Pattern::Any),
+    });
+    assert_eq!(list_repeat_p.recommended_mode(), PatternMode::Full);
+}
+
+#[test]
+fn test_requires_full_mode() {
+    // Fast patterns should not require full mode
+    assert!(!Pattern::Any.requires_full_mode());
+    assert!(!Pattern::Var(SmolStr::new("x")).requires_full_mode());
+    assert!(!Pattern::Literal(LiteralValue::Bool(true)).requires_full_mode());
+
+    // Full patterns should require full mode
+    assert!(Pattern::Seq(vec![]).requires_full_mode());
+    assert!(Pattern::Choice(vec![]).requires_full_mode());
+    assert!(
+        Pattern::Repeat {
+            pattern: Box::new(Pattern::Any),
+            kind: RepeatKind::OneOrMore
+        }
+        .requires_full_mode()
+    );
+}
+
+// ============================================================================
+// Migration tests: Verify unified pattern is accessible from ast and grammar
+// ============================================================================
+
+#[test]
+fn test_unified_pattern_accessible_from_ast() {
+    // Verify that UnifiedPattern is re-exported from ast module
+    use fmpl_core::ast::UnifiedPattern;
+
+    let p = UnifiedPattern::Var(SmolStr::new("x"));
+    assert!(matches!(p, UnifiedPattern::Var(name) if name == "x"));
+
+    // Verify it's the same type as pattern::Pattern
+    let p2: Pattern = UnifiedPattern::Any;
+    assert_eq!(p2, Pattern::Any);
+}
+
+#[test]
+fn test_unified_pattern_accessible_from_grammar() {
+    // Verify that UnifiedPattern is re-exported from grammar module
+    use fmpl_core::grammar::UnifiedPattern;
+
+    let p = UnifiedPattern::Var(SmolStr::new("y"));
+    assert!(matches!(p, UnifiedPattern::Var(name) if name == "y"));
+
+    // Verify it's the same type as pattern::Pattern
+    let p2: Pattern = UnifiedPattern::Any;
+    assert_eq!(p2, Pattern::Any);
+}
+
+#[test]
+fn test_ast_and_grammar_unified_patterns_are_same_type() {
+    use fmpl_core::ast::UnifiedPattern as AstUnified;
+    use fmpl_core::grammar::UnifiedPattern as GrammarUnified;
+
+    // Both re-exports should be the exact same type
+    let ast_p = AstUnified::Var(SmolStr::new("x"));
+    let grammar_p = GrammarUnified::Var(SmolStr::new("x"));
+
+    // These should be equal since they're the same type
+    assert_eq!(ast_p, grammar_p);
+
+    // Verify they can be assigned to pattern::Pattern
+    let _p1: Pattern = ast_p;
+    let _p2: Pattern = grammar_p;
+}
+
+#[test]
+fn test_unified_pattern_from_crate_root() {
+    // Verify that Pattern is exported at crate root level
+    use fmpl_core::Pattern;
+
+    let p = Pattern::Tagged {
+        tag: SmolStr::new("Some"),
+        patterns: vec![Pattern::Var(SmolStr::new("x"))],
+    };
+
+    assert!(matches!(p, Pattern::Tagged { tag, .. } if tag == "Some"));
+}
+
+#[test]
+fn test_pattern_unification_ast_grammar_same() {
+    // Test per spec: AstPattern and GrammarPattern should be the same type
+    use fmpl_core::ast::AstPattern;
+    use fmpl_core::grammar::GrammarPattern;
+
+    let ast_p = AstPattern::Var(SmolStr::new("x"));
+    let grammar_p = GrammarPattern::Var(SmolStr::new("x"));
+
+    // They should be the same type and equal
+    assert_eq!(ast_p, grammar_p);
+}
+
+#[test]
+fn test_map_pattern_both_contexts() {
+    // Pattern that works in both ast and grammar context
+    use fmpl_core::ast::AstPattern;
+    use fmpl_core::pattern::PatternMode;
+
+    let p = AstPattern::Map(vec![
+        (SmolStr::new("type"), AstPattern::Var(SmolStr::new("t"))),
+        (SmolStr::new("value"), AstPattern::Var(SmolStr::new("v"))),
+    ]);
+
+    // Should use fast mode (no guards/backtracking)
+    assert_eq!(p.recommended_mode(), PatternMode::Fast);
+}
+
+#[test]
+fn test_guarded_pattern_requires_full() {
+    use fmpl_core::grammar::GrammarPattern;
+    use fmpl_core::pattern::{GuardPredicate, PatternMode};
+
+    // Pattern with guard only works in grammar context
+    let p = GrammarPattern::Guard {
+        pattern: Box::new(GrammarPattern::Map(vec![(
+            SmolStr::new("x"),
+            GrammarPattern::Var(SmolStr::new("v")),
+        )])),
+        predicate: GuardPredicate::Expr(SmolStr::new("v > 0")),
+    };
+
+    // Should require full mode
+    assert_eq!(p.recommended_mode(), PatternMode::Full);
+}
