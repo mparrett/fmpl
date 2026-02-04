@@ -84,7 +84,7 @@ pub enum LiteralValue {
     Null,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ListPattern {
     /// Exact list pattern - matches [p1, p2, p3]
     Exact(Vec<Pattern>),
@@ -122,10 +122,3 @@ pub enum GuardPredicate {
     /// Type check guard - is_list, is_map, is_int, etc.
     TypeCheck(SmolStr),
 }
-
-// Manual Eq implementation for Pattern since LiteralValue contains Float (f64)
-// which doesn't implement Eq. We use bitwise equality for floats.
-impl Eq for Pattern {}
-
-// Manual Eq implementation for LiteralValue using bitwise float comparison
-impl Eq for LiteralValue {}
