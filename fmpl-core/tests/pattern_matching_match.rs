@@ -8,8 +8,18 @@
 //! 2. Value pattern matching: `value @ { %{key: val} => ... }` (✅ IMPLEMENTED)
 //!
 //! This test file focuses on case #2 - map and list destructuring in match expressions.
+//!
+//! Note: Uses legacy parser for map/list patterns in @ blocks which the
+//! generated parser treats as inline pattern blocks (not yet supported in compiler).
 
-use fmpl_core::{Value, Vm, eval};
+use fmpl_core::{Compiler, Lexer, Parser, Result, Value, Vm};
+
+fn eval(vm: &mut Vm, source: &str) -> Result<Value> {
+    let tokens = Lexer::new(source).tokenize()?;
+    let ast = Parser::with_source(&tokens, source).parse()?;
+    let code = Compiler::new().compile(&ast)?;
+    vm.run(&code)
+}
 
 // =============================================================================
 // Map pattern matching tests

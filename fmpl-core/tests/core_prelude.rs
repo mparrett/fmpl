@@ -1,4 +1,16 @@
-use fmpl_core::{Value, Vm, eval};
+use fmpl_core::{Compiler, Lexer, Parser, Result, Value, Vm};
+
+fn eval(vm: &mut Vm, source: &str) -> Result<Value> {
+    let tokens = Lexer::new(source).tokenize()?;
+    let ast = Parser::with_source(&tokens, source).parse()?;
+    let code = Compiler::new().compile(&ast)?;
+    vm.run(&code)
+}
+
+fn load_prelude(vm: &mut Vm) {
+    let prelude_source = std::fs::read_to_string(PRELUDE_PATH).expect("read prelude");
+    let _ = eval(vm, &prelude_source).expect("load prelude");
+}
 
 // Tests run from fmpl-core/ directory, so use relative path to workspace root
 const PRELUDE_PATH: &str = "../lib/core/prelude.fmpl";
@@ -6,136 +18,64 @@ const PRELUDE_PATH: &str = "../lib/core/prelude.fmpl";
 #[test]
 fn test_join_empty_list() {
     let mut vm = Vm::new();
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        join([])
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "join([])").unwrap();
     assert_eq!(result, Value::String("".into()));
 }
 
 #[test]
 fn test_join_single_char() {
     let mut vm = Vm::new();
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        join(["a"])
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "join([\"a\"])").unwrap();
     assert_eq!(result, Value::String("a".into()));
 }
 
 #[test]
 fn test_join_multiple_chars() {
     let mut vm = Vm::new();
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        join(["h", "e", "l", "l", "o"])
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "join([\"h\", \"e\", \"l\", \"l\", \"o\"])").unwrap();
     assert_eq!(result, Value::String("hello".into()));
 }
 
 #[test]
 fn test_to_int_digit_0() {
     let mut vm = Vm::new();
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        to_int("0")
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "to_int(\"0\")").unwrap();
     assert_eq!(result, Value::Int(0));
 }
 
 #[test]
 fn test_to_int_digit_9() {
     let mut vm = Vm::new();
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        to_int("9")
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "to_int(\"9\")").unwrap();
     assert_eq!(result, Value::Int(9));
 }
 
 #[test]
 fn test_to_int_digit_5() {
     let mut vm = Vm::new();
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        to_int("5")
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "to_int(\"5\")").unwrap();
     assert_eq!(result, Value::Int(5));
 }
 
 #[test]
 fn test_reduce_sum() {
     let mut vm = Vm::new();
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        reduce(\acc \x acc + x, 0, [1, 2, 3, 4])
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "reduce(\\acc \\x acc + x, 0, [1, 2, 3, 4])").unwrap();
     assert_eq!(result, Value::Int(10));
 }
 
 #[test]
 fn test_reduce_empty() {
     let mut vm = Vm::new();
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        reduce(\acc \x acc + x, 0, [])
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "reduce(\\acc \\x acc + x, 0, [])").unwrap();
     assert_eq!(result, Value::Int(0));
 }
 
@@ -144,17 +84,8 @@ fn test_reduce_digits_to_int() {
     let mut vm = Vm::new();
     // Use integers directly since to_int() returns streams that need binding
     // reduce(\acc \d acc * 10 + d, 0, [1, 2, 3]) => 123
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        reduce(\acc \d acc * 10 + d, 0, [1, 2, 3])
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "reduce(\\acc \\d acc * 10 + d, 0, [1, 2, 3])").unwrap();
     assert_eq!(result, Value::Int(123));
 }
 
@@ -162,17 +93,8 @@ fn test_reduce_digits_to_int() {
 fn test_fold_binary_empty_rest() {
     let mut vm = Vm::new();
     // fold_binary(:Int(1), []) => :Int(1)
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        fold_binary(:Int(1), [])
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "fold_binary(:Int(1), [])").unwrap();
     if let Value::Tagged(tag, children) = result {
         assert_eq!(tag.as_str(), "Int");
         assert_eq!(children[0], Value::Int(1));
@@ -185,17 +107,8 @@ fn test_fold_binary_empty_rest() {
 fn test_fold_binary_single_op() {
     let mut vm = Vm::new();
     // fold_binary(:Int(1), [[:+, :Int(2)]]) => :Binary(:+, :Int(1), :Int(2))
-    let result = eval(
-        &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        fold_binary(:Int(1), [[:+, :Int(2)]])
-    "#,
-            PRELUDE_PATH
-        ),
-    )
-    .unwrap();
+    load_prelude(&mut vm);
+    let result = eval(&mut vm, "fold_binary(:Int(1), [[:+, :Int(2)]])").unwrap();
     if let Value::Tagged(tag, children) = result {
         assert_eq!(tag.as_str(), "Binary");
         assert_eq!(children[0], Value::Symbol("+".into()));
@@ -209,15 +122,10 @@ fn test_fold_binary_multiple_ops() {
     let mut vm = Vm::new();
     // fold_binary(:Int(1), [[:+, :Int(2)], [:+, :Int(3)]])
     // => :Binary(:+, :Binary(:+, :Int(1), :Int(2)), :Int(3))
+    load_prelude(&mut vm);
     let result = eval(
         &mut vm,
-        &format!(
-            r#"
-        io::load("{}")
-        fold_binary(:Int(1), [[:+, :Int(2)], [:+, :Int(3)]])
-    "#,
-            PRELUDE_PATH
-        ),
+        "fold_binary(:Int(1), [[:+, :Int(2)], [:+, :Int(3)]])",
     )
     .unwrap();
     if let Value::Tagged(tag, children) = result {

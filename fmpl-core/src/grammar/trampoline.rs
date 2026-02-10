@@ -23,9 +23,10 @@
 
 use super::input::{BinaryInput, InputItem, MemoEntry, PegInput, TextInput, ValueInput};
 use super::runtime::ActionEvaluator;
-use super::{Grammar, GrammarRegistry, ParseResult, Pattern, Rule};
+use super::{CharRange, Grammar, GrammarRegistry, ParseResult, Pattern, Rule};
 use crate::ast::Expr;
 use crate::error::{Error, Result};
+use crate::pattern::{BinaryPattern, CharPattern, RepeatKind};
 use crate::value::Value;
 use smol_str::SmolStr;
 use std::collections::HashMap;
@@ -611,7 +612,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 }
             }
 
-            Pattern::Char(expected) => {
+            Pattern::Char(ref cp) => {
                 if !self.input.supports_text_patterns() {
                     return Err(Error::Runtime(
                         "text patterns not supported for this input type".to_string(),
@@ -619,7 +620,12 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 }
                 let pos_obj = self.input.position_at(pos);
                 if let Some(InputItem::Char(c)) = self.input.head(&pos_obj) {
-                    if c == expected {
+                    let matched = match cp {
+                        CharPattern::Exact(expected) => c == *expected,
+                        CharPattern::Class(ranges) => ranges.iter().any(|r| r.matches(c)),
+                        CharPattern::NegatedClass(ranges) => !ranges.iter().any(|r| r.matches(c)),
+                    };
+                    if matched {
                         let new_pos = self.input.tail(&pos_obj);
                         self.result_stack.push(WorkResult::Success(
                             Value::String(SmolStr::new(c.to_string())),
@@ -631,7 +637,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 self.result_stack.push(WorkResult::Failure);
             }
 
-            Pattern::Literal(ref s) => {
+            Pattern::StringLiteral(ref s) => {
                 if !self.input.supports_text_patterns() {
                     return Err(Error::Runtime(
                         "text patterns not supported for this input type".to_string(),
@@ -647,47 +653,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 }
             }
 
-            Pattern::CharClass(ref ranges) => {
-                if !self.input.supports_text_patterns() {
-                    return Err(Error::Runtime(
-                        "text patterns not supported for this input type".to_string(),
-                    ));
-                }
-                let pos_obj = self.input.position_at(pos);
-                if let Some(InputItem::Char(c)) = self.input.head(&pos_obj) {
-                    if ranges.iter().any(|r| r.matches(c)) {
-                        let new_pos = self.input.tail(&pos_obj);
-                        self.result_stack.push(WorkResult::Success(
-                            Value::String(SmolStr::new(c.to_string())),
-                            self.input.index(&new_pos),
-                        ));
-                        return Ok(());
-                    }
-                }
-                self.result_stack.push(WorkResult::Failure);
-            }
-
-            Pattern::NegCharClass(ref ranges) => {
-                if !self.input.supports_text_patterns() {
-                    return Err(Error::Runtime(
-                        "text patterns not supported for this input type".to_string(),
-                    ));
-                }
-                let pos_obj = self.input.position_at(pos);
-                if let Some(InputItem::Char(c)) = self.input.head(&pos_obj) {
-                    if !ranges.iter().any(|r| r.matches(c)) {
-                        let new_pos = self.input.tail(&pos_obj);
-                        self.result_stack.push(WorkResult::Success(
-                            Value::String(SmolStr::new(c.to_string())),
-                            self.input.index(&new_pos),
-                        ));
-                        return Ok(());
-                    }
-                }
-                self.result_stack.push(WorkResult::Failure);
-            }
-
-            Pattern::Rule(ref name) => {
+            Pattern::ApplyRule(ref name) => {
                 self.work_stack.push(WorkItem::ApplyRule {
                     rule_name: name.clone(),
                     pos,
@@ -791,28 +757,17 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 }
             }
 
-            Pattern::Star(inner) => {
+            Pattern::Repeat {
+                pattern: inner,
+                kind,
+            } => {
                 // Push initial repeat work
+                let require_one = matches!(kind, RepeatKind::OneOrMore);
                 self.work_stack.push(WorkItem::RepeatContinue {
                     inner: (*inner).clone(),
                     collected: Vec::new(),
                     current_pos: pos,
-                    require_one: false,
-                    checking_progress: false,
-                });
-                self.work_stack.push(WorkItem::MatchPattern {
-                    pattern: (*inner).clone(),
-                    pos,
-                });
-            }
-
-            Pattern::Plus(inner) => {
-                // Push initial repeat work (require at least one)
-                self.work_stack.push(WorkItem::RepeatContinue {
-                    inner: (*inner).clone(),
-                    collected: Vec::new(),
-                    current_pos: pos,
-                    require_one: true,
+                    require_one,
                     checking_progress: false,
                 });
                 self.work_stack.push(WorkItem::MatchPattern {
@@ -830,144 +785,150 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 });
             }
 
-            Pattern::Lookahead(inner) => {
+            Pattern::Lookahead(ref inner) => {
                 self.work_stack.push(WorkItem::LookaheadContinue {
                     start_pos: pos,
                     is_negative: false,
                 });
                 self.work_stack.push(WorkItem::MatchPattern {
-                    pattern: (*inner).clone(),
+                    pattern: (**inner).clone(),
                     pos,
                 });
             }
 
-            Pattern::Not(inner) => {
+            Pattern::Not(ref inner) => {
                 self.work_stack.push(WorkItem::LookaheadContinue {
                     start_pos: pos,
                     is_negative: true,
                 });
                 self.work_stack.push(WorkItem::MatchPattern {
-                    pattern: (*inner).clone(),
+                    pattern: (**inner).clone(),
                     pos,
                 });
             }
 
-            Pattern::Bind(inner, name, is_choice) => {
+            Pattern::Bind {
+                pattern: ref inner,
+                ref name,
+                is_choice,
+            } => {
                 let was_forced = self.force_choice_backtracking;
                 if is_choice {
                     self.force_choice_backtracking = true;
                 }
                 self.work_stack.push(WorkItem::BindContinue {
-                    name,
+                    name: name.clone(),
                     is_choice,
                     was_forced,
                 });
                 self.work_stack.push(WorkItem::MatchPattern {
-                    pattern: (*inner).clone(),
+                    pattern: (**inner).clone(),
                     pos,
                 });
             }
 
-            Pattern::Predicate(expr) => {
-                self.work_stack
-                    .push(WorkItem::PredicateContinue { expr, pos });
+            Pattern::Predicate(ref expr) => {
+                self.work_stack.push(WorkItem::PredicateContinue {
+                    expr: expr.clone(),
+                    pos,
+                });
             }
 
-            Pattern::Guard(inner, guard_expr) => {
+            Pattern::Guard {
+                pattern: ref inner,
+                predicate: ref guard_expr,
+            } => {
                 self.work_stack.push(WorkItem::GuardContinue {
-                    guard_expr,
+                    guard_expr: guard_expr.clone(),
                     saved_bindings: self.bindings.clone(),
                     start_pos: pos,
-                    pattern: (*inner).clone(),
+                    pattern: (**inner).clone(),
                 });
                 self.work_stack.push(WorkItem::MatchPattern {
-                    pattern: (*inner).clone(),
+                    pattern: (**inner).clone(),
                     pos,
                 });
             }
 
-            Pattern::Action(inner, action) => {
-                self.work_stack.push(WorkItem::ActionContinue { action });
+            Pattern::Action {
+                pattern: ref inner,
+                action: ref action,
+            } => {
+                self.work_stack.push(WorkItem::ActionContinue {
+                    action: action.clone(),
+                });
                 self.work_stack.push(WorkItem::MatchPattern {
-                    pattern: (*inner).clone(),
+                    pattern: (**inner).clone(),
                     pos,
                 });
             }
 
             // === Binary Patterns ===
-            Pattern::Byte(expected) => {
+            Pattern::Binary(ref bp) => {
                 if !self.input.supports_binary_patterns() {
                     return Err(Error::Runtime(
                         "binary patterns not supported for this input type".to_string(),
                     ));
                 }
-                let pos_obj = self.input.position_at(pos);
-                if let Some(item) = self.input.head(&pos_obj) {
-                    if let Some(b) = item.as_byte() {
-                        if b == expected {
-                            let new_pos = self.input.tail(&pos_obj);
+                match bp {
+                    BinaryPattern::Byte(expected) => {
+                        let pos_obj = self.input.position_at(pos);
+                        if let Some(item) = self.input.head(&pos_obj) {
+                            if let Some(b) = item.as_byte() {
+                                if b == *expected {
+                                    let new_pos = self.input.tail(&pos_obj);
+                                    self.result_stack.push(WorkResult::Success(
+                                        Value::Int(b as i64),
+                                        self.input.index(&new_pos),
+                                    ));
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        self.result_stack.push(WorkResult::Failure);
+                    }
+                    BinaryPattern::ByteRange(lo, hi) => {
+                        let pos_obj = self.input.position_at(pos);
+                        if let Some(item) = self.input.head(&pos_obj) {
+                            if let Some(b) = item.as_byte() {
+                                if b >= *lo && b <= *hi {
+                                    let new_pos = self.input.tail(&pos_obj);
+                                    self.result_stack.push(WorkResult::Success(
+                                        Value::Int(b as i64),
+                                        self.input.index(&new_pos),
+                                    ));
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        self.result_stack.push(WorkResult::Failure);
+                    }
+                    BinaryPattern::Bytes(n) => {
+                        let pos_obj = self.input.position_at(pos);
+                        if let Some(bytes) = self.input.bytes_at(&pos_obj, *n) {
+                            let values: Vec<Value> =
+                                bytes.iter().map(|b| Value::Int(*b as i64)).collect();
+                            let end_index = pos + n;
                             self.result_stack.push(WorkResult::Success(
-                                Value::Int(b as i64),
-                                self.input.index(&new_pos),
+                                Value::List(Arc::new(values)),
+                                end_index,
                             ));
-                            return Ok(());
+                        } else {
+                            self.result_stack.push(WorkResult::Failure);
                         }
                     }
-                }
-                self.result_stack.push(WorkResult::Failure);
-            }
-
-            Pattern::ByteRange(lo, hi) => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                let pos_obj = self.input.position_at(pos);
-                if let Some(item) = self.input.head(&pos_obj) {
-                    if let Some(b) = item.as_byte() {
-                        if b >= lo && b <= hi {
-                            let new_pos = self.input.tail(&pos_obj);
-                            self.result_stack.push(WorkResult::Success(
-                                Value::Int(b as i64),
-                                self.input.index(&new_pos),
-                            ));
-                            return Ok(());
-                        }
-                    }
-                }
-                self.result_stack.push(WorkResult::Failure);
-            }
-
-            Pattern::Bytes(n) => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                let pos_obj = self.input.position_at(pos);
-                if let Some(bytes) = self.input.bytes_at(&pos_obj, n) {
-                    let values: Vec<Value> = bytes.iter().map(|b| Value::Int(*b as i64)).collect();
-                    let end_index = pos + n;
-                    self.result_stack.push(WorkResult::Success(
-                        Value::List(Arc::new(values)),
-                        end_index,
-                    ));
-                } else {
-                    self.result_stack.push(WorkResult::Failure);
+                    BinaryPattern::UInt8 => self.handle_uint8(pos)?,
+                    BinaryPattern::UInt16BE => self.handle_uint16be(pos)?,
+                    BinaryPattern::UInt16LE => self.handle_uint16le(pos)?,
+                    BinaryPattern::UInt32BE => self.handle_uint32be(pos)?,
+                    BinaryPattern::UInt32LE => self.handle_uint32le(pos)?,
+                    BinaryPattern::Int8 => self.handle_int8(pos)?,
+                    BinaryPattern::Int16BE => self.handle_int16be(pos)?,
+                    BinaryPattern::Int16LE => self.handle_int16le(pos)?,
+                    BinaryPattern::Int32BE => self.handle_int32be(pos)?,
+                    BinaryPattern::Int32LE => self.handle_int32le(pos)?,
                 }
             }
-
-            Pattern::UInt8 => self.handle_uint8(pos)?,
-            Pattern::UInt16BE => self.handle_uint16be(pos)?,
-            Pattern::UInt16LE => self.handle_uint16le(pos)?,
-            Pattern::UInt32BE => self.handle_uint32be(pos)?,
-            Pattern::UInt32LE => self.handle_uint32le(pos)?,
-            Pattern::Int8 => self.handle_int8(pos)?,
-            Pattern::Int16BE => self.handle_int16be(pos)?,
-            Pattern::Int16LE => self.handle_int16le(pos)?,
-            Pattern::Int32BE => self.handle_int32be(pos)?,
-            Pattern::Int32LE => self.handle_int32le(pos)?,
 
             // === Object/Value Patterns ===
             Pattern::MatchValue(ref expected) => {
@@ -1208,6 +1169,17 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 } else {
                     self.result_stack.push(WorkResult::Failure);
                 }
+            }
+
+            // Let-binding patterns - not used in grammar context
+            Pattern::Var(_)
+            | Pattern::Literal(_)
+            | Pattern::List(_)
+            | Pattern::Map(_)
+            | Pattern::Tagged { .. } => {
+                return Err(Error::Runtime(
+                    "Let-binding patterns not supported in grammar context".to_string(),
+                ));
             }
         }
         Ok(())
@@ -1873,8 +1845,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
             // `any` matches any single value/element (like _ but as a rule)
             return Ok(Rule {
                 pattern: Pattern::Any,
-                action: None,
-                backtracking: false,
+                ..Default::default()
             });
         }
 
@@ -2391,9 +2362,10 @@ mod tests {
         // Add a rule: number = digit+
         grammar.add_rule(
             SmolStr::new("number"),
-            Rule::new(Pattern::Plus(Box::new(Pattern::Rule(SmolStr::new(
-                "digit",
-            ))))),
+            Rule::new(Pattern::Repeat {
+                pattern: Box::new(Pattern::ApplyRule(SmolStr::new("digit"))),
+                kind: RepeatKind::OneOrMore,
+            }),
         );
         registry.register(grammar);
 
@@ -2411,9 +2383,9 @@ mod tests {
         grammar.add_rule(
             SmolStr::new("abc"),
             Rule::new(Pattern::Seq(vec![
-                Pattern::Char('a'),
-                Pattern::Char('b'),
-                Pattern::Char('c'),
+                Pattern::Char(CharPattern::Exact('a')),
+                Pattern::Char(CharPattern::Exact('b')),
+                Pattern::Char(CharPattern::Exact('c')),
             ])),
         );
         registry.register(grammar);
@@ -2435,9 +2407,9 @@ mod tests {
         grammar.add_rule(
             SmolStr::new("abc"),
             Rule::new(Pattern::Choice(vec![
-                (Pattern::Char('a'), false),
-                (Pattern::Char('b'), false),
-                (Pattern::Char('c'), false),
+                (Pattern::Char(CharPattern::Exact('a')), false),
+                (Pattern::Char(CharPattern::Exact('b')), false),
+                (Pattern::Char(CharPattern::Exact('c')), false),
             ])),
         );
         registry.register(grammar);
@@ -2473,7 +2445,9 @@ mod tests {
         // match: "a"?
         grammar.add_rule(
             SmolStr::new("maybe_a"),
-            Rule::new(Pattern::Optional(Box::new(Pattern::Char('a')))),
+            Rule::new(Pattern::Optional(Box::new(Pattern::Char(
+                CharPattern::Exact('a'),
+            )))),
         );
         registry.register(grammar);
 
@@ -2494,8 +2468,8 @@ mod tests {
         grammar.add_rule(
             SmolStr::new("lookahead_a"),
             Rule::new(Pattern::Seq(vec![
-                Pattern::Lookahead(Box::new(Pattern::Char('a'))),
-                Pattern::Char('a'),
+                Pattern::Lookahead(Box::new(Pattern::Char(CharPattern::Exact('a')))),
+                Pattern::Char(CharPattern::Exact('a')),
             ])),
         );
         registry.register(grammar);
@@ -2517,7 +2491,7 @@ mod tests {
         grammar.add_rule(
             SmolStr::new("not_a"),
             Rule::new(Pattern::Seq(vec![
-                Pattern::Not(Box::new(Pattern::Char('a'))),
+                Pattern::Not(Box::new(Pattern::Char(CharPattern::Exact('a')))),
                 Pattern::Any,
             ])),
         );

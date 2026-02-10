@@ -4393,7 +4393,14 @@ impl Default for Vm {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eval;
+    use crate::{Compiler, Lexer, Parser};
+
+    fn eval(vm: &mut Vm, source: &str) -> crate::Result<Value> {
+        let tokens = Lexer::new(source).tokenize()?;
+        let ast = Parser::with_source(&tokens, source).parse()?;
+        let code = Compiler::new().compile(&ast)?;
+        vm.run(&code)
+    }
 
     #[test]
     fn test_debug_if() {

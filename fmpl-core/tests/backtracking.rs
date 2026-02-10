@@ -1,6 +1,13 @@
 //! Tests for Prolog-style backtracking with grammars.
 
-use fmpl_core::{Value, Vm, eval};
+use fmpl_core::{Compiler, Lexer, Parser, Result, Value, Vm};
+
+fn eval(vm: &mut Vm, source: &str) -> Result<Value> {
+    let tokens = Lexer::new(source).tokenize()?;
+    let ast = Parser::with_source(&tokens, source).parse()?;
+    let code = Compiler::new().compile(&ast)?;
+    vm.run(&code)
+}
 
 #[test]
 fn test_grammar_with_multiple_alternatives() {

@@ -23,7 +23,8 @@
 
 use crate::ast::{Arg, BinOp, LetBinding, MapEntry, UnaryOp};
 use crate::error::{Error, Result};
-use crate::grammar::{CharRange, Grammar, Pattern, Rule};
+use crate::grammar::{Grammar, Rule};
+use crate::pattern::{BinaryPattern, CharPattern, CharRange, Pattern, RepeatKind};
 use crate::value::Value;
 use smol_str::SmolStr;
 use std::sync::Arc;
@@ -76,7 +77,7 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             ))
         }
 
-        Pattern::Literal(s) => {
+        Pattern::StringLiteral(s) => {
             if s.len() == 1 {
                 Ok(Value::Tagged(
                     SmolStr::new("ParseChar"),
@@ -90,39 +91,41 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             }
         }
 
-        Pattern::Char(c) => Ok(Value::Tagged(
-            SmolStr::new("ParseChar"),
-            Arc::new(vec![Value::String(SmolStr::new(&c.to_string()))]),
-        )),
+        Pattern::Char(cp) => {
+            match cp {
+                CharPattern::Exact(c) => Ok(Value::Tagged(
+                    SmolStr::new("ParseChar"),
+                    Arc::new(vec![Value::String(SmolStr::new(&c.to_string()))]),
+                )),
+                CharPattern::Class(ranges) => {
+                    let range_values: Vec<Value> = ranges
+                        .iter()
+                        .map(|range| char_range_to_value(range))
+                        .collect();
 
-        Pattern::CharClass(ranges) => {
-            let range_values: Vec<Value> = ranges
-                .iter()
-                .map(|range| char_range_to_value(range))
-                .collect();
+                    Ok(Value::Tagged(
+                        SmolStr::new("ParseCharClass"),
+                        Arc::new(vec![
+                            Value::List(Arc::new(range_values)),
+                            Value::Bool(false), // not negated
+                        ]),
+                    ))
+                }
+                CharPattern::NegatedClass(ranges) => {
+                    let range_values: Vec<Value> = ranges
+                        .iter()
+                        .map(|range| char_range_to_value(range))
+                        .collect();
 
-            Ok(Value::Tagged(
-                SmolStr::new("ParseCharClass"),
-                Arc::new(vec![
-                    Value::List(Arc::new(range_values)),
-                    Value::Bool(false), // not negated
-                ]),
-            ))
-        }
-
-        Pattern::NegCharClass(ranges) => {
-            let range_values: Vec<Value> = ranges
-                .iter()
-                .map(|range| char_range_to_value(range))
-                .collect();
-
-            Ok(Value::Tagged(
-                SmolStr::new("ParseCharClass"),
-                Arc::new(vec![
-                    Value::List(Arc::new(range_values)),
-                    Value::Bool(true), // negated
-                ]),
-            ))
+                    Ok(Value::Tagged(
+                        SmolStr::new("ParseCharClass"),
+                        Arc::new(vec![
+                            Value::List(Arc::new(range_values)),
+                            Value::Bool(true), // negated
+                        ]),
+                    ))
+                }
+            }
         }
 
         Pattern::Any => Ok(Value::Tagged(SmolStr::new("ParseAny"), Arc::new(vec![]))),
@@ -149,34 +152,22 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             ))
         }
 
-        Pattern::Star(inner) => {
+        Pattern::Repeat {
+            pattern: inner,
+            kind,
+        } => {
             let inner_ir = pattern_to_ir(inner)?;
-            Ok(Value::Tagged(
-                SmolStr::new("ParseStar"),
-                Arc::new(vec![inner_ir]),
-            ))
-        }
-
-        Pattern::Plus(inner) => {
-            let inner_ir = pattern_to_ir(inner)?;
-            Ok(Value::Tagged(
-                SmolStr::new("ParsePlus"),
-                Arc::new(vec![inner_ir]),
-            ))
+            let tag = match kind {
+                RepeatKind::ZeroOrMore => "ParseStar",
+                RepeatKind::OneOrMore => "ParsePlus",
+            };
+            Ok(Value::Tagged(SmolStr::new(tag), Arc::new(vec![inner_ir])))
         }
 
         Pattern::Optional(inner) => {
             let inner_ir = pattern_to_ir(inner)?;
             Ok(Value::Tagged(
                 SmolStr::new("ParseOptional"),
-                Arc::new(vec![inner_ir]),
-            ))
-        }
-
-        Pattern::Not(inner) => {
-            let inner_ir = pattern_to_ir(inner)?;
-            Ok(Value::Tagged(
-                SmolStr::new("ParseNot"),
                 Arc::new(vec![inner_ir]),
             ))
         }
@@ -189,7 +180,15 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             ))
         }
 
-        Pattern::Rule(name) => Ok(Value::Tagged(
+        Pattern::Not(inner) => {
+            let inner_ir = pattern_to_ir(inner)?;
+            Ok(Value::Tagged(
+                SmolStr::new("ParseNot"),
+                Arc::new(vec![inner_ir]),
+            ))
+        }
+
+        Pattern::ApplyRule(name) => Ok(Value::Tagged(
             SmolStr::new("ParseRule"),
             Arc::new(vec![Value::Symbol(name.clone())]),
         )),
@@ -202,7 +201,11 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             ))
         }
 
-        Pattern::Bind(inner, name, _is_choice_point) => {
+        Pattern::Bind {
+            pattern: inner,
+            name,
+            is_choice: _,
+        } => {
             let inner_ir = pattern_to_ir(inner)?;
             Ok(Value::Tagged(
                 SmolStr::new("ParseBind"),
@@ -210,7 +213,10 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             ))
         }
 
-        Pattern::Action(inner, action) => {
+        Pattern::Action {
+            pattern: inner,
+            action,
+        } => {
             let inner_ir = pattern_to_ir(inner)?;
             let action_ir = expr_to_ir(action)?;
             Ok(Value::Tagged(
@@ -228,9 +234,12 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             ))
         }
 
-        Pattern::Guard(inner, guard_expr) => {
+        Pattern::Guard {
+            pattern: inner,
+            predicate,
+        } => {
             let inner_ir = pattern_to_ir(inner)?;
-            let guard_ir = expr_to_ir(guard_expr)?;
+            let guard_ir = expr_to_ir(predicate)?;
             Ok(Value::Tagged(
                 SmolStr::new("ParseGuard"),
                 Arc::new(vec![inner_ir, guard_ir]),
@@ -246,20 +255,8 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             ))
         }
 
-        // Binary patterns (not yet supported)
-        Pattern::Byte(_)
-        | Pattern::ByteRange(_, _)
-        | Pattern::Bytes(_)
-        | Pattern::UInt8
-        | Pattern::UInt16BE
-        | Pattern::UInt16LE
-        | Pattern::UInt32BE
-        | Pattern::UInt32LE
-        | Pattern::Int8
-        | Pattern::Int16BE
-        | Pattern::Int16LE
-        | Pattern::Int32BE
-        | Pattern::Int32LE => Err(Error::Runtime(
+        // Binary patterns (not yet supported in IR)
+        Pattern::Binary(_) => Err(Error::Runtime(
             "Binary patterns not yet supported in grammar_to_ir".to_string(),
         )),
 
@@ -273,6 +270,15 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
         | Pattern::SymbolMatch(_)
         | Pattern::SymbolLiteral(_) => Err(Error::Runtime(
             "Pattern type not yet supported in grammar_to_ir".to_string(),
+        )),
+
+        // Patterns from let bindings that shouldn't appear in grammars
+        Pattern::Var(_)
+        | Pattern::Literal(_)
+        | Pattern::Map(_)
+        | Pattern::List(_)
+        | Pattern::Tagged { .. } => Err(Error::Runtime(
+            "Let binding patterns not supported in grammar_to_ir".to_string(),
         )),
     }
 }
@@ -603,7 +609,7 @@ mod tests {
 
     #[test]
     fn test_literal_to_ir() {
-        let pattern = Pattern::Literal(SmolStr::new("hello"));
+        let pattern = Pattern::StringLiteral(SmolStr::new("hello"));
         let ir = pattern_to_ir(&pattern).unwrap();
 
         if let Value::Tagged(tag, children) = ir {
@@ -621,7 +627,7 @@ mod tests {
 
     #[test]
     fn test_char_to_ir() {
-        let pattern = Pattern::Char('x');
+        let pattern = Pattern::Char(CharPattern::Exact('x'));
         let ir = pattern_to_ir(&pattern).unwrap();
 
         if let Value::Tagged(tag, _) = ir {
@@ -633,7 +639,10 @@ mod tests {
 
     #[test]
     fn test_seq_to_ir() {
-        let pattern = Pattern::Seq(vec![Pattern::Char('a'), Pattern::Char('b')]);
+        let pattern = Pattern::Seq(vec![
+            Pattern::Char(CharPattern::Exact('a')),
+            Pattern::Char(CharPattern::Exact('b')),
+        ]);
         let ir = pattern_to_ir(&pattern).unwrap();
 
         if let Value::Tagged(tag, children) = ir {

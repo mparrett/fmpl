@@ -2,8 +2,9 @@
 //!
 //! Transforms FMPL grammar patterns into Rust parsing functions.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::grammar::{CharRange, Grammar, Pattern, Rule};
+use crate::pattern::{CharPattern, RepeatKind};
 use smol_str::SmolStr;
 use std::collections::HashSet;
 
@@ -133,23 +134,75 @@ impl GrammarToRust {
                     .to_string(),
             ),
 
-            Pattern::Char(c) => {
-                let char_escaped = escape_char_for_char_literal(*c);
-                let str_escaped = escape_char_for_string_literal(*c);
-                Ok(format!(
-                    "if input[pos..].starts_with('{}') {{\n\
-                         Ok((Value::String(SmolStr::new(\"{}\")), pos + {}))\n\
-                     }} else {{\n\
-                         Err(Error::Parser {{ token: pos, message: \"expected '{}'\".to_string() }})\n\
-                     }}",
-                    char_escaped,
-                    str_escaped,
-                    c.len_utf8(),
-                    str_escaped
-                ))
+            Pattern::Char(cp) => match cp {
+                CharPattern::Exact(c) => {
+                    let char_escaped = escape_char_for_char_literal(*c);
+                    let str_escaped = escape_char_for_string_literal(*c);
+                    Ok(format!(
+                        "if input[pos..].starts_with('{}') {{\n\
+                             Ok((Value::String(SmolStr::new(\"{}\")), pos + {}))\n\
+                         }} else {{\n\
+                             Err(Error::Parser {{ token: pos, message: \"expected '{}'\".to_string() }})\n\
+                         }}",
+                        char_escaped,
+                        str_escaped,
+                        c.len_utf8(),
+                        str_escaped
+                    ))
+                }
+                CharPattern::Class(ranges) => {
+                    let checks: Vec<String> = ranges
+                        .iter()
+                        .map(|r| match r {
+                            CharRange::Char(c) => format!("c == '{}'", escape_char_for_char_literal(*c)),
+                            CharRange::Range(lo, hi) => {
+                                format!("(c >= '{}' && c <= '{}')", escape_char_for_char_literal(*lo), escape_char_for_char_literal(*hi))
+                            }
+                        })
+                        .collect();
+
+                    Ok(format!(
+                        "if pos < input.len() {{\n\
+                             let c = input[pos..].chars().next().unwrap();\n\
+                             if {} {{\n\
+                                 Ok((Value::String(SmolStr::from_iter([c])), pos + c.len_utf8()))\n\
+                             }} else {{\n\
+                                 Err(Error::Parser {{ token: pos, message: \"character class mismatch\".to_string() }})\n\
+                             }}\n\
+                         }} else {{\n\
+                             Err(Error::Parser {{ token: pos, message: \"unexpected end of input\".to_string() }})\n\
+                         }}",
+                        checks.join(" || ")
+                    ))
+                }
+                CharPattern::NegatedClass(ranges) => {
+                    let checks: Vec<String> = ranges
+                        .iter()
+                        .map(|r| match r {
+                            CharRange::Char(c) => format!("c == '{}'", escape_char_for_char_literal(*c)),
+                            CharRange::Range(lo, hi) => {
+                                format!("(c >= '{}' && c <= '{}')", escape_char_for_char_literal(*lo), escape_char_for_char_literal(*hi))
+                            }
+                        })
+                        .collect();
+
+                    Ok(format!(
+                        "if pos < input.len() {{\n\
+                             let c = input[pos..].chars().next().unwrap();\n\
+                             if !({}) {{\n\
+                                 Ok((Value::String(SmolStr::from_iter([c])), pos + c.len_utf8()))\n\
+                             }} else {{\n\
+                                 Err(Error::Parser {{ token: pos, message: \"negated character class matched\".to_string() }})\n\
+                             }}\n\
+                         }} else {{\n\
+                             Err(Error::Parser {{ token: pos, message: \"unexpected end of input\".to_string() }})\n\
+                         }}",
+                        checks.join(" || ")
+                    ))
+                }
             }
 
-            Pattern::Literal(s) => {
+            Pattern::StringLiteral(s) => {
                 let escaped = escape_string(s);
                 Ok(format!(
                     "if input[pos..].starts_with(\"{}\") {{\n\
@@ -164,59 +217,7 @@ impl GrammarToRust {
                 ))
             }
 
-            Pattern::CharClass(ranges) => {
-                let checks: Vec<String> = ranges
-                    .iter()
-                    .map(|r| match r {
-                        CharRange::Char(c) => format!("c == '{}'", escape_char_for_char_literal(*c)),
-                        CharRange::Range(lo, hi) => {
-                            format!("(c >= '{}' && c <= '{}')", escape_char_for_char_literal(*lo), escape_char_for_char_literal(*hi))
-                        }
-                    })
-                    .collect();
-
-                Ok(format!(
-                    "if pos < input.len() {{\n\
-                         let c = input[pos..].chars().next().unwrap();\n\
-                         if {} {{\n\
-                             Ok((Value::String(SmolStr::from_iter([c])), pos + c.len_utf8()))\n\
-                         }} else {{\n\
-                             Err(Error::Parser {{ token: pos, message: \"character class mismatch\".to_string() }})\n\
-                         }}\n\
-                     }} else {{\n\
-                         Err(Error::Parser {{ token: pos, message: \"unexpected end of input\".to_string() }})\n\
-                     }}",
-                    checks.join(" || ")
-                ))
-            }
-
-            Pattern::NegCharClass(ranges) => {
-                let checks: Vec<String> = ranges
-                    .iter()
-                    .map(|r| match r {
-                        CharRange::Char(c) => format!("c == '{}'", escape_char_for_char_literal(*c)),
-                        CharRange::Range(lo, hi) => {
-                            format!("(c >= '{}' && c <= '{}')", escape_char_for_char_literal(*lo), escape_char_for_char_literal(*hi))
-                        }
-                    })
-                    .collect();
-
-                Ok(format!(
-                    "if pos < input.len() {{\n\
-                         let c = input[pos..].chars().next().unwrap();\n\
-                         if !({}) {{\n\
-                             Ok((Value::String(SmolStr::from_iter([c])), pos + c.len_utf8()))\n\
-                         }} else {{\n\
-                             Err(Error::Parser {{ token: pos, message: \"negated character class matched\".to_string() }})\n\
-                         }}\n\
-                     }} else {{\n\
-                         Err(Error::Parser {{ token: pos, message: \"unexpected end of input\".to_string() }})\n\
-                     }}",
-                    checks.join(" || ")
-                ))
-            }
-
-            Pattern::Rule(name) => {
+            Pattern::ApplyRule(name) => {
                 let fn_name = format!("parse_{}", sanitize_ident(name));
                 Ok(format!("{}(input, pos)", fn_name))
             }
@@ -281,53 +282,51 @@ impl GrammarToRust {
                 Ok(code)
             }
 
-            Pattern::Star(inner) => {
+            Pattern::Repeat { pattern: inner, kind } => {
                 let inner_code = self.generate_pattern(inner)?;
-                Ok(format!(
-                    "{{\n\
-                         let mut results: Vec<Value> = Vec::new();\n\
-                         let mut current_pos = pos;\n\
-                         loop {{\n\
-                             match {{ let pos = current_pos; {} }} {{\n\
-                                 Ok((v, new_pos)) => {{\n\
-                                     if new_pos == current_pos {{ break; }}\n\
-                                     results.push(v);\n\
-                                     current_pos = new_pos;\n\
-                                 }}\n\
-                                 Err(_) => break,\n\
-                             }}\n\
-                         }}\n\
-                         Ok((Value::List(Arc::new(results)), current_pos))\n\
-                     }}",
-                    inner_code
-                ))
-            }
-
-            Pattern::Plus(inner) => {
-                let inner_code = self.generate_pattern(inner)?;
-                Ok(format!(
-                    "{{\n\
-                         match {{ let pos = pos; {} }} {{\n\
-                             Ok((first, first_pos)) => {{\n\
-                                 let mut results = vec![first];\n\
-                                 let mut current_pos = first_pos;\n\
-                                 loop {{\n\
-                                     match {{ let pos = current_pos; {} }} {{\n\
-                                         Ok((v, new_pos)) => {{\n\
-                                             if new_pos == current_pos {{ break; }}\n\
-                                             results.push(v);\n\
-                                             current_pos = new_pos;\n\
-                                         }}\n\
-                                         Err(_) => break,\n\
+                match kind {
+                    RepeatKind::ZeroOrMore => Ok(format!(
+                        "{{\n\
+                             let mut results: Vec<Value> = Vec::new();\n\
+                             let mut current_pos = pos;\n\
+                             loop {{\n\
+                                 match {{ let pos = current_pos; {} }} {{\n\
+                                     Ok((v, new_pos)) => {{\n\
+                                         if new_pos == current_pos {{ break; }}\n\
+                                         results.push(v);\n\
+                                         current_pos = new_pos;\n\
                                      }}\n\
+                                     Err(_) => break,\n\
                                  }}\n\
-                                 Ok((Value::List(Arc::new(results)), current_pos))\n\
                              }}\n\
-                             Err(e) => Err(e),\n\
-                         }}\n\
-                     }}",
-                    inner_code, inner_code
-                ))
+                             Ok((Value::List(Arc::new(results)), current_pos))\n\
+                         }}",
+                        inner_code
+                    )),
+                    RepeatKind::OneOrMore => Ok(format!(
+                        "{{\n\
+                             match {{ let pos = pos; {} }} {{\n\
+                                 Ok((first, first_pos)) => {{\n\
+                                     let mut results = vec![first];\n\
+                                     let mut current_pos = first_pos;\n\
+                                     loop {{\n\
+                                         match {{ let pos = current_pos; {} }} {{\n\
+                                             Ok((v, new_pos)) => {{\n\
+                                                 if new_pos == current_pos {{ break; }}\n\
+                                                 results.push(v);\n\
+                                                 current_pos = new_pos;\n\
+                                             }}\n\
+                                             Err(_) => break,\n\
+                                         }}\n\
+                                     }}\n\
+                                     Ok((Value::List(Arc::new(results)), current_pos))\n\
+                                 }}\n\
+                                 Err(e) => Err(e),\n\
+                             }}\n\
+                         }}",
+                        inner_code, inner_code
+                    )),
+                }
             }
 
             Pattern::Optional(inner) => {
@@ -363,7 +362,7 @@ impl GrammarToRust {
                 ))
             }
 
-            Pattern::Bind(inner, name, _is_choice) => {
+            Pattern::Bind { pattern: inner, name, is_choice: _ } => {
                 let inner_code = self.generate_pattern(inner)?;
                 let var_name = sanitize_ident(name);
                 Ok(format!(
@@ -375,7 +374,7 @@ impl GrammarToRust {
                 ))
             }
 
-            Pattern::Action(inner, _action) => {
+            Pattern::Action { pattern: inner, action: _ } => {
                 // For now, just return the matched value
                 // TODO: Compile the action expression to Rust
                 let inner_code = self.generate_pattern(inner)?;
@@ -465,7 +464,7 @@ mod tests {
     #[test]
     fn test_generate_literal() {
         let generator = GrammarToRust::new();
-        let pattern = Pattern::Literal(SmolStr::new("hello"));
+        let pattern = Pattern::StringLiteral(SmolStr::new("hello"));
         let code = generator.generate_pattern(&pattern).unwrap();
         assert!(code.contains("starts_with"));
         assert!(code.contains("hello"));
@@ -474,7 +473,7 @@ mod tests {
     #[test]
     fn test_generate_char_class() {
         let generator = GrammarToRust::new();
-        let pattern = Pattern::CharClass(vec![CharRange::Range('a', 'z')]);
+        let pattern = Pattern::Char(CharPattern::Class(vec![CharRange::Range('a', 'z')]));
         let code = generator.generate_pattern(&pattern).unwrap();
         assert!(code.contains(">= 'a'"));
         assert!(code.contains("<= 'z'"));
@@ -483,7 +482,7 @@ mod tests {
     #[test]
     fn test_generate_rule() {
         let generator = GrammarToRust::new();
-        let pattern = Pattern::Rule(SmolStr::new("digit"));
+        let pattern = Pattern::ApplyRule(SmolStr::new("digit"));
         let code = generator.generate_pattern(&pattern).unwrap();
         assert!(code.contains("parse_digit"));
     }
@@ -493,7 +492,9 @@ mod tests {
         let mut grammar = Grammar::new(SmolStr::new("test"));
         grammar.add_rule(
             SmolStr::new("digit"),
-            Rule::new(Pattern::CharClass(vec![CharRange::Range('0', '9')])),
+            Rule::new(Pattern::Char(CharPattern::Class(vec![CharRange::Range(
+                '0', '9',
+            )]))),
         );
 
         let mut generator = GrammarToRust::new();

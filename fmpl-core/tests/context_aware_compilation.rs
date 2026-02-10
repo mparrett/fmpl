@@ -4,9 +4,10 @@
 //! - Fast mode: Uses ExtractMapKey, ExtractListIndex, ExtractTaggedChild (no backtracking)
 //! - Full mode: Uses grammar-style matching with backtracking/guards support
 
+use fmpl_core::ast::Expr;
 use fmpl_core::compiler::{Compiler, Instruction};
 use fmpl_core::pattern::{
-    CharPattern, GuardPredicate, ListPattern, LiteralValue, Pattern, PatternMode, RepeatKind,
+    CharPattern, CharRange, ListPattern, LiteralValue, Pattern, PatternMode, RepeatKind,
 };
 use smol_str::SmolStr;
 
@@ -228,7 +229,7 @@ fn test_fast_mode_rejects_seq_pattern() {
 #[test]
 fn test_fast_mode_rejects_choice_pattern() {
     // Pattern: Choice requires backtracking
-    let pattern = Pattern::Choice(vec![Pattern::Any, Pattern::Any]);
+    let pattern = Pattern::Choice(vec![(Pattern::Any, false), (Pattern::Any, false)]);
 
     let mut compiler = Compiler::new();
     let source_idx = compiler.code_mut().emit(Instruction::LoadNull);
@@ -246,7 +247,7 @@ fn test_fast_mode_rejects_guard_pattern() {
     // Pattern: Guard requires runtime check
     let pattern = Pattern::Guard {
         pattern: Box::new(Pattern::Any),
-        predicate: GuardPredicate::Expr(SmolStr::new("x > 0")),
+        predicate: Expr::Bool(true),
     };
 
     let mut compiler = Compiler::new();
@@ -374,8 +375,14 @@ fn test_full_mode_seq_pattern_uses_match_seq() {
 fn test_full_mode_choice_pattern_with_backtracking() {
     // Pattern: a | b (choice)
     let pattern = Pattern::Choice(vec![
-        Pattern::Literal(LiteralValue::String(SmolStr::new("a"))),
-        Pattern::Literal(LiteralValue::String(SmolStr::new("b"))),
+        (
+            Pattern::Literal(LiteralValue::String(SmolStr::new("a"))),
+            false,
+        ),
+        (
+            Pattern::Literal(LiteralValue::String(SmolStr::new("b"))),
+            false,
+        ),
     ]);
 
     let instructions = compile_pattern_with_mode(&pattern, PatternMode::Full);
@@ -404,7 +411,7 @@ fn test_full_mode_guard_pattern_uses_match_guard() {
     // Pattern: _ when x > 0
     let pattern = Pattern::Guard {
         pattern: Box::new(Pattern::Var(SmolStr::new("x"))),
-        predicate: GuardPredicate::Expr(SmolStr::new("x > 0")),
+        predicate: Expr::Bool(true),
     };
 
     let instructions = compile_pattern_with_mode(&pattern, PatternMode::Full);
@@ -439,10 +446,7 @@ fn test_full_mode_optional_pattern_uses_match_optional() {
 #[test]
 fn test_full_mode_lookahead_positive() {
     // Pattern: &p (positive lookahead)
-    let pattern = Pattern::Lookahead {
-        pattern: Box::new(Pattern::Any),
-        positive: true,
-    };
+    let pattern = Pattern::Lookahead(Box::new(Pattern::Any));
 
     let instructions = compile_pattern_with_mode(&pattern, PatternMode::Full);
 
@@ -459,10 +463,7 @@ fn test_full_mode_lookahead_positive() {
 #[test]
 fn test_full_mode_lookahead_negative() {
     // Pattern: !p (negative lookahead)
-    let pattern = Pattern::Lookahead {
-        pattern: Box::new(Pattern::Any),
-        positive: false,
-    };
+    let pattern = Pattern::Not(Box::new(Pattern::Any));
 
     let instructions = compile_pattern_with_mode(&pattern, PatternMode::Full);
 
@@ -496,7 +497,7 @@ fn test_full_mode_char_pattern() {
 #[test]
 fn test_full_mode_char_class_pattern() {
     // Pattern: [a-z]
-    let pattern = Pattern::Char(CharPattern::Class(vec![('a', 'z')]));
+    let pattern = Pattern::Char(CharPattern::Class(vec![CharRange::Range('a', 'z')]));
 
     let instructions = compile_pattern_with_mode(&pattern, PatternMode::Full);
 
@@ -559,7 +560,7 @@ fn test_mode_auto_selection_full_patterns() {
     // These patterns should recommend Full mode
     assert_eq!(Pattern::Seq(vec![]).recommended_mode(), PatternMode::Full);
     assert_eq!(
-        Pattern::Choice(vec![]).recommended_mode(),
+        Pattern::Choice(vec![(Pattern::Any, false)]).recommended_mode(),
         PatternMode::Full
     );
     assert_eq!(
@@ -573,7 +574,7 @@ fn test_mode_auto_selection_full_patterns() {
     assert_eq!(
         Pattern::Guard {
             pattern: Box::new(Pattern::Any),
-            predicate: GuardPredicate::Expr(SmolStr::new("true"))
+            predicate: Expr::Bool(true)
         }
         .recommended_mode(),
         PatternMode::Full

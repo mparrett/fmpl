@@ -13,6 +13,7 @@ use crate::ast::Expr;
 use crate::error::{Error, Result};
 use crate::lexer::Lexer;
 use crate::parser::Parser as ExprParser;
+use crate::pattern::{CharPattern, RepeatKind};
 use crate::value::Value;
 use smol_str::SmolStr;
 
@@ -116,7 +117,10 @@ impl<'a> GrammarParser<'a> {
 
                 // The guard is an FMPL expression that should evaluate to a boolean
                 // We wrap the pattern with a Guard that matches first, then checks the guard
-                Pattern::Guard(Box::new(pattern), guard_expr)
+                Pattern::Guard {
+                    pattern: Box::new(pattern),
+                    predicate: guard_expr,
+                }
             } else {
                 pattern
             };
@@ -133,7 +137,10 @@ impl<'a> GrammarParser<'a> {
             self.skip_whitespace();
 
             let action = self.parse_match_action()?;
-            cases.push(Pattern::Action(Box::new(final_pattern), action));
+            cases.push(Pattern::Action {
+                pattern: Box::new(final_pattern),
+                action,
+            });
 
             // Optional semicolon or comma between cases
             self.skip_whitespace();
@@ -188,7 +195,7 @@ impl<'a> GrammarParser<'a> {
         Ok(())
     }
 
-    /// Parse a single rule: `?name = pattern (=> action)?`
+    /// Parse a single rule: `?name = pattern (=> action)?` or `name(params) = expr`
     fn parse_rule(&mut self) -> Result<(SmolStr, Rule)> {
         // Check for `?` backtracking marker
         let backtracking = if self.peek_char() == Some('?') {
@@ -201,8 +208,55 @@ impl<'a> GrammarParser<'a> {
 
         let name = self.parse_ident()?;
         self.skip_whitespace();
+
+        // Check for function-style rule: name(params) = expr
+        if self.peek_char() == Some('(') {
+            self.advance(); // consume '('
+            self.skip_whitespace();
+
+            // Parse parameter list
+            let mut params = Vec::new();
+            if self.peek_char() != Some(')') {
+                params.push(self.parse_ident()?);
+                self.skip_whitespace();
+
+                while self.peek_char() == Some(',') {
+                    self.advance();
+                    self.skip_whitespace();
+                    params.push(self.parse_ident()?);
+                    self.skip_whitespace();
+                }
+            }
+
+            self.expect_char(')')?;
+            self.skip_whitespace();
+            self.expect_char('=')?;
+            self.skip_whitespace();
+
+            // Parse the body as an FMPL expression
+            let body = self.parse_action()?;
+
+            let rule = Rule::function(params.into_iter().map(SmolStr::from).collect(), body);
+
+            return Ok((name, rule));
+        }
+
         self.expect_char('=')?;
         self.skip_whitespace();
+
+        // Check if RHS is a lambda expression (starts with \)
+        // In this case, the rule is a helper function that returns the lambda
+        if self.peek_char() == Some('\\') {
+            // Parse the lambda as an FMPL expression
+            let body = self.parse_action()?;
+            let rule = Rule {
+                pattern: Pattern::Empty, // Empty pattern always succeeds
+                action: Some(body),
+                backtracking,
+                ..Default::default()
+            };
+            return Ok((name, rule));
+        }
 
         // Parse pattern with optional when guard
         let pattern = self.parse_pattern()?;
@@ -212,8 +266,8 @@ impl<'a> GrammarParser<'a> {
         // so Rule.action is no longer used. Actions are embedded in Pattern::Action.
         let rule = Rule {
             pattern,
-            action: None,
             backtracking,
+            ..Default::default()
         };
 
         Ok((name, rule))
@@ -307,7 +361,10 @@ impl<'a> GrammarParser<'a> {
             let mut expr_parser = ExprParser::new(&tokens);
             let guard_expr = expr_parser.parse()?;
 
-            Pattern::Guard(Box::new(pattern), guard_expr)
+            Pattern::Guard {
+                pattern: Box::new(pattern),
+                predicate: guard_expr,
+            }
         } else {
             pattern
         };
@@ -319,7 +376,10 @@ impl<'a> GrammarParser<'a> {
             self.advance_by(2);
             self.skip_whitespace();
             let action = self.parse_alternative_action()?;
-            Ok(Pattern::Action(Box::new(pattern), action))
+            Ok(Pattern::Action {
+                pattern: Box::new(pattern),
+                action,
+            })
         } else {
             Ok(pattern)
         }
@@ -563,7 +623,10 @@ impl<'a> GrammarParser<'a> {
                     let mut expr_parser = ExprParser::new(&tokens);
                     let guard_expr = expr_parser.parse()?;
 
-                    elem = Pattern::Guard(Box::new(elem), guard_expr);
+                    elem = Pattern::Guard {
+                        pattern: Box::new(elem),
+                        predicate: guard_expr,
+                    };
                 }
             }
 
@@ -612,11 +675,17 @@ impl<'a> GrammarParser<'a> {
             match self.peek_char() {
                 Some('*') => {
                     self.advance();
-                    pattern = Pattern::Star(Box::new(pattern));
+                    pattern = Pattern::Repeat {
+                        pattern: Box::new(pattern),
+                        kind: RepeatKind::ZeroOrMore,
+                    };
                 }
                 Some('+') => {
                     self.advance();
-                    pattern = Pattern::Plus(Box::new(pattern));
+                    pattern = Pattern::Repeat {
+                        pattern: Box::new(pattern),
+                        kind: RepeatKind::OneOrMore,
+                    };
                 }
                 Some('?') => {
                     self.advance();
@@ -632,7 +701,11 @@ impl<'a> GrammarParser<'a> {
                         false
                     };
                     let name = self.parse_ident()?;
-                    pattern = Pattern::Bind(Box::new(pattern), name, is_choice);
+                    pattern = Pattern::Bind {
+                        name: name,
+                        pattern: Box::new(pattern),
+                        is_choice: is_choice,
+                    };
                 }
                 _ => break,
             }
@@ -653,14 +726,14 @@ impl<'a> GrammarParser<'a> {
             Some('"') => {
                 let s = self.parse_string()?;
                 if s.len() == 1 {
-                    Ok(Pattern::Char(s.chars().next().unwrap()))
+                    Ok(Pattern::Char(CharPattern::Exact(s.chars().next().unwrap())))
                 } else {
-                    Ok(Pattern::Literal(SmolStr::new(s)))
+                    Ok(Pattern::StringLiteral(SmolStr::new(s)))
                 }
             }
             Some('\'') => {
                 let s = self.parse_char_literal()?;
-                Ok(Pattern::Char(s))
+                Ok(Pattern::Char(CharPattern::Exact(s)))
             }
             Some('[') => {
                 // Check if this is a list pattern (for value matching) or char class
@@ -674,13 +747,16 @@ impl<'a> GrammarParser<'a> {
                 self.skip_whitespace();
 
                 // Distinguish between char class [a-z] and list pattern [x, y]
-                // - Char class: has ranges with '-' (e.g., [0-9], [a-z])
+                // - Char class: has ranges with '-' (e.g., [0-9], [a-z]), or just chars [abc]
+                //   Also includes escaped chars and quotes: ["\\] matches " or \
                 // - List pattern: has comma-separated values (e.g., [x, y], [1, 2])
                 // - Ambiguous: [123] could be "char class with 3 chars" or "list with 1 element"
-                //   We treat single digits/chars as list patterns for value matching
+                //   We treat single digits/chars without commas as char classes in grammar context
+                // Note: " and ' inside [...] are character class members, not list pattern indicators
+                // E.g., ["\\] matches the character " or \, and ['] matches the character '
                 let is_list_pattern = if let Some(next) = self.peek_char() {
                     match next {
-                        ']' | '[' | '%' | '_' | ':' | '"' | '\'' | '|' => true, // | indicates rest pattern
+                        ']' | '[' | '%' | '_' | ':' | '|' => true, // | indicates rest pattern
                         c if c.is_alphabetic() => {
                             // Check for range pattern [a-z] vs list [x, y]
                             let mut lookahead_pos = self.pos;
@@ -789,12 +865,12 @@ impl<'a> GrammarParser<'a> {
                             break;
                         }
                     }
-                    Ok(Pattern::Rule(SmolStr::new(&name)))
+                    Ok(Pattern::ApplyRule(SmolStr::new(&name)))
                 }
             }
             Some(c) if c.is_alphabetic() => {
                 let name = self.parse_ident()?;
-                Ok(Pattern::Rule(name))
+                Ok(Pattern::ApplyRule(name))
             }
             Some(':') => {
                 // Constructor pattern: :Tag(patterns...) or symbol literal :Tag/:+
@@ -880,9 +956,9 @@ impl<'a> GrammarParser<'a> {
         self.expect_char(']')?;
 
         if negated {
-            Ok(Pattern::NegCharClass(ranges))
+            Ok(Pattern::Char(CharPattern::NegatedClass(ranges)))
         } else {
-            Ok(Pattern::CharClass(ranges))
+            Ok(Pattern::Char(CharPattern::Class(ranges)))
         }
     }
 
@@ -988,11 +1064,11 @@ impl<'a> GrammarParser<'a> {
                 self.advance();
                 self.skip_whitespace();
                 let rest_ident = self.parse_ident()?;
-                rest_pattern = Some(Box::new(Pattern::Bind(
-                    Box::new(Pattern::Any),
-                    rest_ident,
-                    false,
-                )));
+                rest_pattern = Some(Box::new(Pattern::Bind {
+                    name: rest_ident,
+                    pattern: Box::new(Pattern::Any),
+                    is_choice: false,
+                }));
                 break;
             }
 
@@ -1010,11 +1086,11 @@ impl<'a> GrammarParser<'a> {
                 self.advance();
                 self.skip_whitespace();
                 let rest_ident = self.parse_ident()?;
-                rest_pattern = Some(Box::new(Pattern::Bind(
-                    Box::new(Pattern::Any),
-                    rest_ident,
-                    false,
-                )));
+                rest_pattern = Some(Box::new(Pattern::Bind {
+                    name: rest_ident,
+                    pattern: Box::new(Pattern::Any),
+                    is_choice: false,
+                }));
                 break;
             }
         }
@@ -1076,7 +1152,11 @@ impl<'a> GrammarParser<'a> {
             Some(c) if c.is_alphabetic() => {
                 // Bare identifier - treat as binding (not rule reference)
                 let name = self.parse_ident()?;
-                Ok(Pattern::Bind(Box::new(Pattern::Any), name, false))
+                Ok(Pattern::Bind {
+                    name: name,
+                    pattern: Box::new(Pattern::Any),
+                    is_choice: false,
+                })
             }
             Some('"') => {
                 let s = self.parse_string()?;
@@ -1137,16 +1217,22 @@ impl<'a> GrammarParser<'a> {
                             break;
                         }
                     }
-                    let rule_pattern = Pattern::Rule(SmolStr::new(&name));
+                    let rule_pattern = Pattern::ApplyRule(SmolStr::new(&name));
                     // Check for * or + suffix (repetition)
                     match self.peek_char() {
                         Some('*') => {
                             self.advance();
-                            Pattern::Star(Box::new(rule_pattern))
+                            Pattern::Repeat {
+                                pattern: Box::new(rule_pattern),
+                                kind: RepeatKind::ZeroOrMore,
+                            }
                         }
                         Some('+') => {
                             self.advance();
-                            Pattern::Plus(Box::new(rule_pattern))
+                            Pattern::Repeat {
+                                pattern: Box::new(rule_pattern),
+                                kind: RepeatKind::OneOrMore,
+                            }
                         }
                         _ => rule_pattern,
                     }
@@ -1155,11 +1241,17 @@ impl<'a> GrammarParser<'a> {
                     match self.peek_char() {
                         Some('*') => {
                             self.advance();
-                            Pattern::Star(Box::new(Pattern::Any))
+                            Pattern::Repeat {
+                                pattern: Box::new(Pattern::Any),
+                                kind: RepeatKind::ZeroOrMore,
+                            }
                         }
                         Some('+') => {
                             self.advance();
-                            Pattern::Plus(Box::new(Pattern::Any))
+                            Pattern::Repeat {
+                                pattern: Box::new(Pattern::Any),
+                                kind: RepeatKind::OneOrMore,
+                            }
                         }
                         _ => Pattern::Any,
                     }
@@ -1190,16 +1282,22 @@ impl<'a> GrammarParser<'a> {
                 } else if name.as_str() == "null" {
                     Pattern::MatchValue(Value::Null)
                 } else {
-                    let rule_pattern = Pattern::Rule(name);
+                    let rule_pattern = Pattern::ApplyRule(name);
                     // Check for * or + suffix (repetition)
                     match self.peek_char() {
                         Some('*') => {
                             self.advance();
-                            Pattern::Star(Box::new(rule_pattern))
+                            Pattern::Repeat {
+                                pattern: Box::new(rule_pattern),
+                                kind: RepeatKind::ZeroOrMore,
+                            }
                         }
                         Some('+') => {
                             self.advance();
-                            Pattern::Plus(Box::new(rule_pattern))
+                            Pattern::Repeat {
+                                pattern: Box::new(rule_pattern),
+                                kind: RepeatKind::OneOrMore,
+                            }
                         }
                         _ => rule_pattern,
                     }
@@ -1249,7 +1347,11 @@ impl<'a> GrammarParser<'a> {
             self.advance();
             self.skip_whitespace();
             let binding_name = self.parse_ident()?;
-            Ok(Pattern::Bind(Box::new(pattern), binding_name, false))
+            Ok(Pattern::Bind {
+                name: binding_name,
+                pattern: Box::new(pattern),
+                is_choice: false,
+            })
         } else {
             Ok(pattern)
         }
@@ -1779,7 +1881,7 @@ mod tests {
         let rule = grammar.rules.get("hex").unwrap();
 
         match &rule.pattern {
-            Pattern::CharClass(ranges) => assert_eq!(ranges.len(), 3),
+            Pattern::Char(CharPattern::Class(ranges)) => assert_eq!(ranges.len(), 3),
             _ => panic!("expected CharClass pattern"),
         }
     }
@@ -1834,9 +1936,12 @@ mod tests {
 
         // Actions are now embedded in Pattern::Action, not in Rule.action
         match &rule.pattern {
-            Pattern::Action(_, Expr::GrammarLiteral(inner)) => {
-                assert!(inner.rules.contains_key("inner"));
-            }
+            Pattern::Action { pattern: _, action } => match action {
+                Expr::GrammarLiteral(inner) => {
+                    assert!(inner.rules.contains_key("inner"));
+                }
+                _ => panic!("expected grammar literal action, got {:?}", action),
+            },
             _ => panic!(
                 "expected Pattern::Action with grammar literal, got {:?}",
                 rule.pattern

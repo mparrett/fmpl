@@ -2,11 +2,16 @@
 //!
 //! Tests variable mutation using the assignment operator.
 
-use fmpl_core::{Value, Vm, eval};
+use fmpl_core::{Compiler, Lexer, Parser, Value, Vm};
 
 fn run(src: &str) -> Result<Value, String> {
     let mut vm = Vm::new();
-    eval(&mut vm, src).map_err(|e| e.to_string())
+    let tokens = Lexer::new(src).tokenize().map_err(|e| e.to_string())?;
+    let ast = Parser::with_source(&tokens, src)
+        .parse()
+        .map_err(|e| e.to_string())?;
+    let code = Compiler::new().compile(&ast).map_err(|e| e.to_string())?;
+    vm.run(&code).map_err(|e| e.to_string())
 }
 
 /// Test basic variable assignment

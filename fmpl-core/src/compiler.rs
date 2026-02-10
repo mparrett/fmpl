@@ -2822,6 +2822,10 @@ impl Compiler {
         use pattern::{ListPattern, Pattern as UP};
 
         match pattern {
+            UP::Empty => {
+                // Empty pattern always succeeds.
+            }
+
             UP::Any => {
                 // Wildcard - matches anything, binds nothing
             }
@@ -2906,6 +2910,7 @@ impl Compiler {
             UP::Bind {
                 name,
                 pattern: inner,
+                ..
             } => {
                 // Named binding: first bind the source, then process inner pattern
                 self.bound_vars.insert(name.clone());
@@ -2935,7 +2940,11 @@ impl Compiler {
                 )));
             }
 
-            UP::Lookahead { .. } | UP::Guard { .. } | UP::Action { .. } => {
+            UP::Lookahead(_)
+            | UP::Not(_)
+            | UP::Guard { .. }
+            | UP::Action { .. }
+            | UP::Predicate(_) => {
                 return Err(Error::Compiler(format!(
                     "Pattern {:?} requires full mode (backtracking/guards)",
                     pattern
@@ -2946,6 +2955,13 @@ impl Compiler {
                 return Err(Error::Compiler(
                     "Char pattern requires full mode (string parsing)".to_string(),
                 ));
+            }
+
+            _ => {
+                return Err(Error::Compiler(format!(
+                    "Pattern {:?} requires full mode",
+                    pattern
+                )));
             }
         }
         Ok(())
@@ -2965,7 +2981,7 @@ impl Compiler {
         source: InstrIndex,
     ) -> Result<InstrIndex> {
         use pattern::{
-            CharPattern, GuardPredicate, ListPattern, LiteralValue, Pattern as UP, RepeatKind,
+            CharPattern, CharRange, ListPattern, LiteralValue, Pattern as UP, RepeatKind,
         };
 
         Ok(match pattern {
@@ -2988,10 +3004,10 @@ impl Compiler {
                 // Literal match - emit match instruction
                 let const_idx = match lit {
                     LiteralValue::String(s) => self.code.add_constant(s.clone()),
-                    LiteralValue::Int(n) => self.code.add_constant(SmolStr::new(n.to_string())),
-                    LiteralValue::Float(f) => self.code.add_constant(SmolStr::new(f.to_string())),
-                    LiteralValue::Bool(b) => self.code.add_constant(SmolStr::new(b.to_string())),
-                    LiteralValue::Null => self.code.add_constant(SmolStr::new("null")),
+                    LiteralValue::Int(n) => self.code.add_constant(*n),
+                    LiteralValue::Float(f) => self.code.add_constant(*f),
+                    LiteralValue::Bool(b) => self.code.add_constant(*b),
+                    LiteralValue::Null => self.code.add_constant(Value::Null),
                 };
                 self.code.emit(Instruction::MatchLiteral { const_idx })
             }
@@ -3124,13 +3140,25 @@ impl Compiler {
             UP::Char(char_pattern) => match char_pattern {
                 CharPattern::Exact(c) => self.code.emit(Instruction::MatchChar { char: *c }),
                 CharPattern::Class(ranges) => {
-                    let range_tuples: Vec<(char, char)> = ranges.clone();
+                    let range_tuples: Vec<(char, char)> = ranges
+                        .iter()
+                        .map(|range| match range {
+                            CharRange::Char(c) => (*c, *c),
+                            CharRange::Range(lo, hi) => (*lo, *hi),
+                        })
+                        .collect();
                     self.code.emit(Instruction::MatchCharClass {
                         ranges: range_tuples,
                     })
                 }
                 CharPattern::NegatedClass(ranges) => {
-                    let range_tuples: Vec<(char, char)> = ranges.clone();
+                    let range_tuples: Vec<(char, char)> = ranges
+                        .iter()
+                        .map(|range| match range {
+                            CharRange::Char(c) => (*c, *c),
+                            CharRange::Range(lo, hi) => (*lo, *hi),
+                        })
+                        .collect();
                     self.code.emit(Instruction::MatchNegCharClass {
                         ranges: range_tuples,
                     })
@@ -3161,7 +3189,7 @@ impl Compiler {
                 let mut jump_to_done: Vec<InstrIndex> = Vec::new();
                 let patterns_len = patterns.len();
 
-                for (i, pattern) in patterns.iter().enumerate() {
+                for (i, (pattern, _uses_backtracking)) in patterns.iter().enumerate() {
                     let is_last = i == patterns_len - 1;
                     let case_result_idx = self.compile_pattern_full(pattern, source)?;
 
@@ -3295,22 +3323,21 @@ impl Compiler {
                     .emit(Instruction::MatchOptional { pattern: inner_idx })
             }
 
-            UP::Lookahead {
-                pattern: inner,
-                positive,
-            } => {
+            UP::Lookahead(inner) => {
                 let inner_idx = self.compile_pattern_full(inner, source)?;
-                if *positive {
-                    self.code
-                        .emit(Instruction::MatchLookahead { pattern: inner_idx })
-                } else {
-                    self.code.emit(Instruction::MatchNot { pattern: inner_idx })
-                }
+                self.code
+                    .emit(Instruction::MatchLookahead { pattern: inner_idx })
+            }
+
+            UP::Not(inner) => {
+                let inner_idx = self.compile_pattern_full(inner, source)?;
+                self.code.emit(Instruction::MatchNot { pattern: inner_idx })
             }
 
             UP::Bind {
                 name,
                 pattern: inner,
+                ..
             } => {
                 // Named binding in full mode
                 let inner_result = self.compile_pattern_full(inner, source)?;
@@ -3329,31 +3356,11 @@ impl Compiler {
                 // Guard pattern - match inner, then check predicate
                 let inner_result = self.compile_pattern_full(inner, source)?;
 
-                // Compile the guard predicate
-                match predicate {
-                    GuardPredicate::Expr(expr_str) => {
-                        // Parse and compile the guard expression
-                        // For now, load the expression as a string that will be evaluated
-                        // TODO: Properly parse and compile the expression string
-                        let predicate_idx =
-                            self.code.emit(Instruction::LoadString(expr_str.clone()));
-                        self.code.emit(Instruction::MatchGuard {
-                            pattern: inner_result,
-                            predicate: predicate_idx,
-                        })
-                    }
-                    GuardPredicate::TypeCheck(type_name) => {
-                        // Type check guard - compile as a type check expression
-                        // Create an expression that checks the type
-                        let predicate_idx = self.code.emit(Instruction::LoadString(SmolStr::new(
-                            format!("is_{}", type_name),
-                        )));
-                        self.code.emit(Instruction::MatchGuard {
-                            pattern: inner_result,
-                            predicate: predicate_idx,
-                        })
-                    }
-                }
+                let predicate_idx = self.compile_expr(predicate)?;
+                self.code.emit(Instruction::MatchGuard {
+                    pattern: inner_result,
+                    predicate: predicate_idx,
+                })
             }
 
             UP::Action {
@@ -3362,14 +3369,65 @@ impl Compiler {
             } => {
                 // Action pattern - match inner, then execute action
                 let inner_result = self.compile_pattern_full(inner, source)?;
-                // Parse and compile the action expression
-                // TODO: Properly parse the action string
-                let action_idx = self.code.emit(Instruction::LoadString(action.clone()));
+                let action_idx = self.compile_expr(action)?;
                 self.code.emit(Instruction::MatchAction {
                     pattern: inner_result,
                     action: action_idx,
                 })
             }
+
+            UP::Predicate(expr) => {
+                let predicate_idx = self.compile_expr(expr)?;
+                let jump_to_fail = self.code.emit(Instruction::JumpIfFalse {
+                    cond: predicate_idx,
+                    target: InstrIndex(0),
+                });
+                let _success = self.code.emit(Instruction::LoadBool(true));
+                let jump_to_end = self.code.emit(Instruction::Jump {
+                    target: InstrIndex(0),
+                });
+
+                let fail_idx = self.code.next_index();
+                self.code.patch_jump_target(jump_to_fail, fail_idx);
+                let _fail = self.code.emit(Instruction::LoadNull);
+
+                let end_idx = self.code.next_index();
+                self.code.patch_jump_target(jump_to_end, end_idx);
+                end_idx
+            }
+
+            UP::Empty => {
+                let const_idx = self.code.add_constant(SmolStr::new(""));
+                self.code.emit(Instruction::MatchLiteral { const_idx })
+            }
+
+            UP::StringLiteral(s) => {
+                let const_idx = self.code.add_constant(s.clone());
+                self.code.emit(Instruction::MatchLiteral { const_idx })
+            }
+
+            UP::Super(_) => self.code.emit(Instruction::MatchAny),
+
+            UP::Binary(binary_pattern) => match binary_pattern {
+                pattern::BinaryPattern::Byte(b) => {
+                    self.code.emit(Instruction::MatchByte { byte: *b })
+                }
+                _ => self.code.emit(Instruction::MatchAny),
+            },
+
+            UP::MatchValue(value) => {
+                let const_idx = self.code.add_constant(value.clone());
+                self.code.emit(Instruction::MatchLiteral { const_idx })
+            }
+
+            UP::MatchType(_)
+            | UP::ListMatch(_, _)
+            | UP::MapMatch(_)
+            | UP::TagMatch(_, _)
+            | UP::SymbolMatch(_)
+            | UP::SymbolLiteral(_)
+            | UP::Apply(_)
+            | UP::End => self.code.emit(Instruction::MatchAny),
 
             UP::ApplyRule(rule_name) => {
                 // Apply a named grammar rule
@@ -3390,7 +3448,7 @@ impl Compiler {
         use crate::grammar::Pattern as GP;
 
         match pattern {
-            GP::Bind(_, name, _) => {
+            GP::Bind { name, .. } => {
                 // Direct binding - path is just [key]
                 Some((vec![key.clone()], name.clone()))
             }
@@ -3429,11 +3487,116 @@ impl Compiler {
 
             GP::Any => self.code.emit(Instruction::MatchAny),
 
-            GP::Char(c) => self.code.emit(Instruction::MatchChar { char: *c }),
+            GP::Var(name) => {
+                let any_pattern = self.code.emit(Instruction::MatchAny);
+                let name_const = self.code.add_constant(name.clone());
+                self.code.emit(Instruction::MatchBind {
+                    pattern: any_pattern,
+                    name: name_const,
+                })
+            }
 
-            GP::Literal(s) => {
+            GP::StringLiteral(s) => {
                 let const_idx = self.code.add_constant(s.clone());
                 self.code.emit(Instruction::MatchLiteral { const_idx })
+            }
+
+            GP::Char(cp) => match cp {
+                pattern::CharPattern::Exact(c) => {
+                    self.code.emit(Instruction::MatchChar { char: *c })
+                }
+                pattern::CharPattern::Class(ranges) => {
+                    let range_tuples: Vec<(char, char)> = ranges
+                        .iter()
+                        .map(|range| match range {
+                            pattern::CharRange::Char(c) => (*c, *c),
+                            pattern::CharRange::Range(lo, hi) => (*lo, *hi),
+                        })
+                        .collect();
+                    self.code.emit(Instruction::MatchCharClass {
+                        ranges: range_tuples,
+                    })
+                }
+                pattern::CharPattern::NegatedClass(ranges) => {
+                    let range_tuples: Vec<(char, char)> = ranges
+                        .iter()
+                        .map(|range| match range {
+                            pattern::CharRange::Char(c) => (*c, *c),
+                            pattern::CharRange::Range(lo, hi) => (*lo, *hi),
+                        })
+                        .collect();
+                    self.code.emit(Instruction::MatchNegCharClass {
+                        ranges: range_tuples,
+                    })
+                }
+            },
+
+            GP::Literal(lit) => {
+                let const_idx = match lit {
+                    pattern::LiteralValue::String(s) => self.code.add_constant(s.clone()),
+                    pattern::LiteralValue::Int(n) => self.code.add_constant(*n),
+                    pattern::LiteralValue::Float(f) => self.code.add_constant(*f),
+                    pattern::LiteralValue::Bool(b) => self.code.add_constant(*b),
+                    pattern::LiteralValue::Null => self.code.add_constant(Value::Null),
+                };
+                self.code.emit(Instruction::MatchLiteral { const_idx })
+            }
+
+            GP::Map(entries) => {
+                let map_entries = entries
+                    .iter()
+                    .map(|(key, value_pattern)| {
+                        let key_pattern =
+                            MapKeyPattern::Specific(self.code.add_constant(key.clone()));
+                        let value_idx = self.compile_grammar_pattern(value_pattern)?;
+                        Ok((key_pattern, MapValuePattern::Pattern(value_idx)))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                self.code.emit(Instruction::MatchMap {
+                    entries: map_entries,
+                })
+            }
+
+            GP::List(list_pattern) => match list_pattern {
+                pattern::ListPattern::Exact(patterns) => {
+                    let compiled_patterns = patterns
+                        .iter()
+                        .map(|p| self.compile_grammar_pattern(p))
+                        .collect::<Result<Vec<_>>>()?;
+                    self.code.emit(Instruction::MatchList {
+                        patterns: compiled_patterns,
+                        rest: None,
+                    })
+                }
+                pattern::ListPattern::HeadTail { head, tail } => {
+                    let head_pattern = self.compile_grammar_pattern(head)?;
+                    let rest = tail
+                        .as_ref()
+                        .map(|name| self.code.add_constant(name.clone()));
+                    self.code.emit(Instruction::MatchListWithBindings {
+                        patterns: vec![None],
+                        rest,
+                    });
+                    head_pattern
+                }
+                pattern::ListPattern::Repeat { element } => {
+                    self.compile_grammar_pattern(&GP::Repeat {
+                        pattern: element.clone(),
+                        kind: pattern::RepeatKind::ZeroOrMore,
+                    })?
+                }
+            },
+
+            GP::Tagged { tag, patterns } => {
+                let tag_idx = self.code.add_constant(tag.clone());
+                let compiled_patterns = patterns
+                    .iter()
+                    .map(|p| self.compile_grammar_pattern(p))
+                    .collect::<Result<Vec<_>>>()?;
+                self.code.emit(Instruction::MatchTagged {
+                    tag_idx,
+                    patterns: compiled_patterns,
+                })
             }
 
             GP::Seq(patterns) => {
@@ -3441,7 +3604,7 @@ impl Compiler {
                 let len = patterns.len();
                 if len > 0 {
                     let last = &patterns[len - 1];
-                    if let GP::Action(_pattern, action) = last {
+                    if let GP::Action { action, .. } = last {
                         // Clone the action expression to avoid borrow issues
                         let action_clone = action.clone();
 
@@ -3597,7 +3760,7 @@ impl Compiler {
                 self.code.emit(Instruction::LoadVar(result_var))
             }
 
-            GP::Star(p) => {
+            GP::Repeat { pattern: p, kind } => {
                 // Star(p) compiles differently based on pattern type:
                 // - Char-based patterns (Char, CharClass, Literal): use specialized instructions
                 //   that join results into a string (for backward compatibility)
@@ -3605,37 +3768,61 @@ impl Compiler {
                 // - Other patterns: lower to IR loop
 
                 match p.as_ref() {
-                    GP::Rule(name) => {
-                        // Rule reference - use rule-based repetition
+                    GP::ApplyRule(name) => {
                         let const_idx = self.code.add_constant(name.clone());
-                        self.code
-                            .emit(Instruction::MatchStarRule { rule: const_idx })
+                        match kind {
+                            pattern::RepeatKind::ZeroOrMore => self
+                                .code
+                                .emit(Instruction::MatchStarRule { rule: const_idx }),
+                            pattern::RepeatKind::OneOrMore => self
+                                .code
+                                .emit(Instruction::MatchPlusRule { rule: const_idx }),
+                        }
                     }
-                    GP::Char(c) => self.code.emit(Instruction::MatchStarChar { c: *c }),
-                    GP::CharClass(ranges) => {
-                        use crate::grammar::CharRange;
+                    GP::Char(pattern::CharPattern::Exact(c)) => match kind {
+                        pattern::RepeatKind::ZeroOrMore => {
+                            self.code.emit(Instruction::MatchStarChar { c: *c })
+                        }
+                        pattern::RepeatKind::OneOrMore => {
+                            self.code.emit(Instruction::MatchPlusChar { c: *c })
+                        }
+                    },
+                    GP::Char(pattern::CharPattern::Class(ranges)) => {
                         let range_tuples: Vec<(char, char)> = ranges
                             .iter()
                             .map(|r| match r {
-                                CharRange::Char(c) => (*c, *c),
-                                CharRange::Range(lo, hi) => (*lo, *hi),
+                                pattern::CharRange::Char(c) => (*c, *c),
+                                pattern::CharRange::Range(lo, hi) => (*lo, *hi),
                             })
                             .collect();
-                        self.code.emit(Instruction::MatchStarCharClass {
-                            ranges: range_tuples,
-                        })
+                        match kind {
+                            pattern::RepeatKind::ZeroOrMore => {
+                                self.code.emit(Instruction::MatchStarCharClass {
+                                    ranges: range_tuples,
+                                })
+                            }
+                            pattern::RepeatKind::OneOrMore => {
+                                self.code.emit(Instruction::MatchPlusCharClass {
+                                    ranges: range_tuples,
+                                })
+                            }
+                        }
                     }
-                    GP::Literal(s) => {
+                    GP::Literal(pattern::LiteralValue::String(s)) => {
                         let const_idx = self.code.add_constant(s.clone());
-                        self.code.emit(Instruction::MatchStarLiteral { const_idx })
+                        match kind {
+                            pattern::RepeatKind::ZeroOrMore => {
+                                self.code.emit(Instruction::MatchStarLiteral { const_idx })
+                            }
+                            pattern::RepeatKind::OneOrMore => {
+                                self.code.emit(Instruction::MatchPlusLiteral { const_idx })
+                            }
+                        }
                     }
                     _ => {
-                        // Other patterns - lower to IR loop
-                        // Uses a local variable to accumulate results across loop iterations.
                         let var_name =
-                            SmolStr::new(format!("__star_results_{}", self.code.next_index().0));
+                            SmolStr::new(format!("__repeat_results_{}", self.code.next_index().0));
 
-                        // Create empty results list and store in variable
                         let empty_list_idx =
                             self.code.emit(Instruction::MakeList { elements: vec![] });
                         self.code.emit(Instruction::StoreVar {
@@ -3643,177 +3830,70 @@ impl Compiler {
                             value: empty_list_idx,
                         });
 
-                        // Loop start label
                         let loop_start = self.code.next_index();
-
-                        // Record start position for zero-length guard
                         let start_pos_idx = self.code.emit(Instruction::ParsePosition);
 
-                        // Compile the inner pattern
                         let result_idx = self.compile_grammar_pattern(p)?;
-
-                        // If pattern failed (null), exit loop
                         let jump_if_null = self.code.emit(Instruction::JumpIfNull {
                             cond: result_idx,
-                            target: InstrIndex(0), // placeholder, will patch
-                        });
-
-                        // Load current results, append, and store back
-                        let current_results_idx =
-                            self.code.emit(Instruction::LoadVar(var_name.clone()));
-                        let new_results_idx = self.code.emit(Instruction::ListAppend {
-                            list: current_results_idx,
-                            item: result_idx,
-                        });
-                        self.code.emit(Instruction::StoreVar {
-                            name: var_name.clone(),
-                            value: new_results_idx,
-                        });
-
-                        // Record end position for zero-length guard
-                        let end_pos_idx = self.code.emit(Instruction::ParsePosition);
-
-                        // Zero-length guard
-                        let cmp_idx = self.code.emit(Instruction::Eq {
-                            lhs: start_pos_idx,
-                            rhs: end_pos_idx,
-                        });
-                        let jump_if_zero_length = self.code.emit(Instruction::JumpIfTrue {
-                            cond: cmp_idx,
-                            target: InstrIndex(0), // placeholder, will patch
-                        });
-
-                        // Jump back to loop start
-                        self.code.emit(Instruction::Jump { target: loop_start });
-
-                        // Loop end - patch forward jumps
-                        let loop_end = self.code.next_index();
-                        self.code.patch_jump_target(jump_if_null, loop_end);
-                        self.code.patch_jump_target(jump_if_zero_length, loop_end);
-
-                        // Return the accumulated results
-                        self.code.emit(Instruction::LoadVar(var_name))
-                    }
-                }
-            }
-
-            GP::Plus(p) => {
-                // Plus(p) compiles differently based on pattern type:
-                // - Char-based patterns: use specialized instructions that join into string
-                // - Rule patterns: use MatchPlusRule
-                // - Other patterns: lower to IR loop
-
-                match p.as_ref() {
-                    GP::Rule(name) => {
-                        let const_idx = self.code.add_constant(name.clone());
-                        self.code
-                            .emit(Instruction::MatchPlusRule { rule: const_idx })
-                    }
-                    GP::Char(c) => self.code.emit(Instruction::MatchPlusChar { c: *c }),
-                    GP::CharClass(ranges) => {
-                        use crate::grammar::CharRange;
-                        let range_tuples: Vec<(char, char)> = ranges
-                            .iter()
-                            .map(|r| match r {
-                                CharRange::Char(c) => (*c, *c),
-                                CharRange::Range(lo, hi) => (*lo, *hi),
-                            })
-                            .collect();
-                        self.code.emit(Instruction::MatchPlusCharClass {
-                            ranges: range_tuples,
-                        })
-                    }
-                    GP::Literal(s) => {
-                        let const_idx = self.code.add_constant(s.clone());
-                        self.code.emit(Instruction::MatchPlusLiteral { const_idx })
-                    }
-                    _ => {
-                        // Other patterns - lower to IR loop
-                        // Same as Star but requires at least one match.
-                        let var_name =
-                            SmolStr::new(format!("__plus_results_{}", self.code.next_index().0));
-
-                        // First match - must succeed
-                        let first_result_idx = self.compile_grammar_pattern(p)?;
-                        let jump_if_first_null = self.code.emit(Instruction::JumpIfNull {
-                            cond: first_result_idx,
-                            target: InstrIndex(0), // placeholder: will patch to fail label
-                        });
-
-                        // Create results list with first match and store in variable
-                        let initial_list_idx = self.code.emit(Instruction::MakeList {
-                            elements: vec![first_result_idx],
-                        });
-                        self.code.emit(Instruction::StoreVar {
-                            name: var_name.clone(),
-                            value: initial_list_idx,
-                        });
-
-                        // Loop start label
-                        let loop_start = self.code.next_index();
-
-                        // Record start position for zero-length guard
-                        let start_pos_idx = self.code.emit(Instruction::ParsePosition);
-
-                        // Compile the inner pattern again (for subsequent matches)
-                        let result_idx = self.compile_grammar_pattern(p)?;
-
-                        // If pattern failed (null), exit loop
-                        let jump_if_null = self.code.emit(Instruction::JumpIfNull {
-                            cond: result_idx,
-                            target: InstrIndex(0), // placeholder, will patch
-                        });
-
-                        // Load current results, append, and store back
-                        let current_results_idx =
-                            self.code.emit(Instruction::LoadVar(var_name.clone()));
-                        let new_results_idx = self.code.emit(Instruction::ListAppend {
-                            list: current_results_idx,
-                            item: result_idx,
-                        });
-                        self.code.emit(Instruction::StoreVar {
-                            name: var_name.clone(),
-                            value: new_results_idx,
-                        });
-
-                        // Record end position for zero-length guard
-                        let end_pos_idx = self.code.emit(Instruction::ParsePosition);
-
-                        // Zero-length guard
-                        let cmp_idx = self.code.emit(Instruction::Eq {
-                            lhs: start_pos_idx,
-                            rhs: end_pos_idx,
-                        });
-                        let jump_if_zero_length = self.code.emit(Instruction::JumpIfTrue {
-                            cond: cmp_idx,
-                            target: InstrIndex(0), // placeholder, will patch
-                        });
-
-                        // Jump back to loop start
-                        self.code.emit(Instruction::Jump { target: loop_start });
-
-                        // Fail label - no matches (should return Null)
-                        let fail_label = self.code.next_index();
-                        self.code.patch_jump_target(jump_if_first_null, fail_label);
-                        let _null_idx = self.code.emit(Instruction::LoadNull);
-                        let jump_to_done = self.code.emit(Instruction::Jump {
                             target: InstrIndex(0),
-                        }); // placeholder
+                        });
 
-                        // Loop end - patch forward jumps
+                        let current_results_idx =
+                            self.code.emit(Instruction::LoadVar(var_name.clone()));
+                        let new_results_idx = self.code.emit(Instruction::ListAppend {
+                            list: current_results_idx,
+                            item: result_idx,
+                        });
+                        self.code.emit(Instruction::StoreVar {
+                            name: var_name.clone(),
+                            value: new_results_idx,
+                        });
+
+                        let end_pos_idx = self.code.emit(Instruction::ParsePosition);
+                        let cmp_idx = self.code.emit(Instruction::Eq {
+                            lhs: start_pos_idx,
+                            rhs: end_pos_idx,
+                        });
+                        let jump_if_zero_length = self.code.emit(Instruction::JumpIfTrue {
+                            cond: cmp_idx,
+                            target: InstrIndex(0),
+                        });
+
+                        self.code.emit(Instruction::Jump { target: loop_start });
+
                         let loop_end = self.code.next_index();
                         self.code.patch_jump_target(jump_if_null, loop_end);
                         self.code.patch_jump_target(jump_if_zero_length, loop_end);
-                        let final_result_idx = self.code.emit(Instruction::LoadVar(var_name));
 
-                        // Done label - patch jump from fail path
-                        let done_label = self.code.next_index();
-                        self.code.patch_jump_target(jump_to_done, done_label);
-
-                        // Copy the appropriate result
-                        self.code.emit(Instruction::Copy {
-                            source: final_result_idx,
-                        })
+                        let results_idx = self.code.emit(Instruction::LoadVar(var_name.clone()));
+                        if matches!(kind, pattern::RepeatKind::OneOrMore) {
+                            let len_idx = self.code.emit(Instruction::MethodCall {
+                                receiver: results_idx,
+                                method: SmolStr::new("len"),
+                                args: vec![],
+                            });
+                            let zero_idx = self.code.emit(Instruction::LoadInt(0));
+                            let is_empty = self.code.emit(Instruction::Eq {
+                                lhs: len_idx,
+                                rhs: zero_idx,
+                            });
+                            let jump_to_fail = self.code.emit(Instruction::JumpIfTrue {
+                                cond: is_empty,
+                                target: InstrIndex(0),
+                            });
+                            let jump_to_end = self.code.emit(Instruction::Jump {
+                                target: InstrIndex(0),
+                            });
+                            let fail_idx = self.code.next_index();
+                            self.code.patch_jump_target(jump_to_fail, fail_idx);
+                            let _null_idx = self.code.emit(Instruction::LoadNull);
+                            let end_idx = self.code.next_index();
+                            self.code.patch_jump_target(jump_to_end, end_idx);
+                            self.code.emit(Instruction::LoadVar(var_name))
+                        } else {
+                            results_idx
+                        }
                     }
                 }
             }
@@ -3835,7 +3915,9 @@ impl Compiler {
                 self.code.emit(Instruction::MatchNot { pattern: inner })
             }
 
-            GP::Bind(p, name, _) => {
+            GP::Bind {
+                pattern: p, name, ..
+            } => {
                 let pattern_idx = self.compile_grammar_pattern(p)?;
                 let const_idx = self.code.add_constant(name.clone());
                 self.code.emit(Instruction::MatchBind {
@@ -3844,7 +3926,7 @@ impl Compiler {
                 })
             }
 
-            GP::Action(p, action) => {
+            GP::Action { pattern: p, action } => {
                 let pattern_idx = self.compile_grammar_pattern(p)?;
                 let action_idx = self.compile_expr(action)?;
                 let match_action_idx = self.code.emit(Instruction::MatchAction {
@@ -3856,7 +3938,10 @@ impl Compiler {
                 match_action_idx
             }
 
-            GP::Guard(p, guard) => {
+            GP::Guard {
+                pattern: p,
+                predicate: guard,
+            } => {
                 let pattern_idx = self.compile_grammar_pattern(p)?;
                 let guard_idx = self.compile_expr(guard)?;
                 self.code.emit(Instruction::MatchGuard {
@@ -3865,45 +3950,21 @@ impl Compiler {
                 })
             }
 
-            GP::Rule(name) => {
+            GP::ApplyRule(name) => {
                 let const_idx = self.code.add_constant(name.clone());
                 self.code.emit(Instruction::ApplyRule {
                     rule_idx: const_idx,
                 })
             }
 
-            GP::Byte(b) => self.code.emit(Instruction::MatchByte { byte: *b }),
+            GP::Binary(binary_pattern) => match binary_pattern {
+                pattern::BinaryPattern::Byte(b) => {
+                    self.code.emit(Instruction::MatchByte { byte: *b })
+                }
+                _ => self.code.emit(Instruction::MatchAny),
+            },
 
             GP::End => self.code.emit(Instruction::MatchEnd),
-
-            // Character classes
-            GP::CharClass(ranges) => {
-                use crate::grammar::CharRange;
-                let range_tuples: Vec<(char, char)> = ranges
-                    .iter()
-                    .map(|r| match r {
-                        CharRange::Char(c) => (*c, *c),
-                        CharRange::Range(lo, hi) => (*lo, *hi),
-                    })
-                    .collect();
-                self.code.emit(Instruction::MatchCharClass {
-                    ranges: range_tuples,
-                })
-            }
-
-            GP::NegCharClass(ranges) => {
-                use crate::grammar::CharRange;
-                let range_tuples: Vec<(char, char)> = ranges
-                    .iter()
-                    .map(|r| match r {
-                        CharRange::Char(c) => (*c, *c),
-                        CharRange::Range(lo, hi) => (*lo, *hi),
-                    })
-                    .collect();
-                self.code.emit(Instruction::MatchNegCharClass {
-                    ranges: range_tuples,
-                })
-            }
 
             GP::Super(_) => {
                 // For now, compile as MatchAny - TODO: implement proper grammar inheritance
@@ -3943,33 +4004,16 @@ impl Compiler {
                 end_idx
             }
 
-            // Binary patterns
-            GP::ByteRange(_, _)
-            | GP::Bytes(_)
-            | GP::UInt8
-            | GP::UInt16BE
-            | GP::UInt16LE
-            | GP::UInt32BE
-            | GP::UInt32LE
-            | GP::Int8
-            | GP::Int16BE
-            | GP::Int16LE
-            | GP::Int32BE
-            | GP::Int32LE => {
-                // For now, compile as MatchAny
-                self.code.emit(Instruction::MatchAny)
-            }
-
             // Object/value patterns - For simple patterns use MatchListWithBindings,
             // for complex patterns use OMeta-style tree descent
             GP::ListMatch(patterns, rest) => {
                 // Check if any pattern is complex (not just Bind or Any)
                 let has_complex_patterns = patterns
                     .iter()
-                    .any(|p| !matches!(p, GP::Bind(_, _, _) | GP::Any))
-                    || rest.as_ref().map_or(false, |r| {
-                        !matches!(r.as_ref(), GP::Bind(_, _, _) | GP::Any)
-                    });
+                    .any(|p| !matches!(p, GP::Bind { .. } | GP::Any))
+                    || rest
+                        .as_ref()
+                        .map_or(false, |r| !matches!(r.as_ref(), GP::Bind { .. } | GP::Any));
 
                 if has_complex_patterns {
                     // OMeta-style list matching with tree descent for complex patterns:
@@ -4008,7 +4052,7 @@ impl Compiler {
                     let pattern_bindings: Vec<Option<SmolStr>> = patterns
                         .iter()
                         .map(|p| match p {
-                            GP::Bind(_, name, _) => Some(name.clone()),
+                            GP::Bind { name, .. } => Some(name.clone()),
                             GP::Any => None,
                             _ => None,
                         })
@@ -4026,7 +4070,7 @@ impl Compiler {
                     // Extract rest binding if present
                     let rest_binding = match rest {
                         Some(rest_pat) => match rest_pat.as_ref() {
-                            GP::Bind(_, name, _) => Some(self.code.add_constant(name.clone())),
+                            GP::Bind { name, .. } => Some(self.code.add_constant(name.clone())),
                             GP::Any => None,
                             _ => None,
                         },
@@ -4052,12 +4096,22 @@ impl Compiler {
                         // Compile value pattern
                         let value_pattern = match pattern {
                             GP::Any => MapValuePattern::Wildcard,
-                            GP::Bind(_, name, _) => {
+                            GP::Bind { name, .. } => {
                                 MapValuePattern::Bind(self.code.add_constant(name.clone()))
                             }
-                            GP::Literal(s) => {
-                                // String literal - match as literal value
-                                MapValuePattern::MatchLiteral(self.code.add_constant(s.clone()))
+                            GP::Literal(lit) => {
+                                let const_idx = match lit {
+                                    pattern::LiteralValue::String(s) => {
+                                        self.code.add_constant(s.clone())
+                                    }
+                                    pattern::LiteralValue::Int(n) => self.code.add_constant(*n),
+                                    pattern::LiteralValue::Float(f) => self.code.add_constant(*f),
+                                    pattern::LiteralValue::Bool(b) => self.code.add_constant(*b),
+                                    pattern::LiteralValue::Null => {
+                                        self.code.add_constant(Value::Null)
+                                    }
+                                };
+                                MapValuePattern::MatchLiteral(const_idx)
                             }
                             GP::MatchValue(value) => {
                                 // Match a literal value (int, bool, etc.)
@@ -4093,7 +4147,7 @@ impl Compiler {
             GP::TagMatch(tag, child_patterns) => {
                 // Check if all patterns are simple (Bind or Any)
                 let all_simple = child_patterns.iter().all(|p| {
-                    matches!(p, GP::Bind(inner, _, _) if matches!(inner.as_ref(), GP::Any))
+                    matches!(p, GP::Bind { pattern: inner, .. } if matches!(inner.as_ref(), GP::Any))
                         || matches!(p, GP::Any)
                 });
 
@@ -4104,7 +4158,7 @@ impl Compiler {
                     let bindings: Vec<Option<ConstIndex>> = child_patterns
                         .iter()
                         .map(|p| match p {
-                            GP::Bind(_, name, _) => Some(self.code.add_constant(name.clone())),
+                            GP::Bind { name, .. } => Some(self.code.add_constant(name.clone())),
                             GP::Any => None,
                             _ => unreachable!(),
                         })

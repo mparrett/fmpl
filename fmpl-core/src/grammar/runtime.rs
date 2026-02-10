@@ -11,6 +11,7 @@
 
 use super::{Grammar, GrammarRegistry, ParseResult, Pattern, Rule};
 use crate::error::{Error, Result};
+use crate::pattern::{BinaryPattern, CharPattern, RepeatKind};
 use crate::value::Value;
 
 /// Stack size threshold for stacker to grow the stack.
@@ -210,8 +211,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             // `any` matches any single value/element (like _ but as a rule)
             return Ok(Rule {
                 pattern: Pattern::Any,
-                action: None,
-                backtracking: false,
+                ..Default::default()
             });
         }
 
@@ -306,25 +306,53 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 }
             }
 
-            Pattern::Char(expected) => {
+            Pattern::Char(cp) => {
                 if !self.input.supports_text_patterns() {
                     return Err(Error::Runtime(
                         "text patterns not supported for this input type".to_string(),
                     ));
                 }
-                if let Some(InputItem::Char(c)) = self.input.head(&pos)
-                    && c == *expected
-                {
-                    let new_pos = self.input.tail(&pos);
-                    return Ok(ParseResult::Success(
-                        Value::String(SmolStr::new(c.to_string())),
-                        self.input.index(&new_pos),
-                    ));
+                match cp {
+                    CharPattern::Exact(expected) => {
+                        if let Some(InputItem::Char(c)) = self.input.head(&pos)
+                            && c == *expected
+                        {
+                            let new_pos = self.input.tail(&pos);
+                            return Ok(ParseResult::Success(
+                                Value::String(SmolStr::new(c.to_string())),
+                                self.input.index(&new_pos),
+                            ));
+                        }
+                        Ok(ParseResult::Failure)
+                    }
+                    CharPattern::Class(ranges) => {
+                        if let Some(InputItem::Char(c)) = self.input.head(&pos)
+                            && ranges.iter().any(|r| r.matches(c))
+                        {
+                            let new_pos = self.input.tail(&pos);
+                            return Ok(ParseResult::Success(
+                                Value::String(SmolStr::new(c.to_string())),
+                                self.input.index(&new_pos),
+                            ));
+                        }
+                        Ok(ParseResult::Failure)
+                    }
+                    CharPattern::NegatedClass(ranges) => {
+                        if let Some(InputItem::Char(c)) = self.input.head(&pos)
+                            && !ranges.iter().any(|r| r.matches(c))
+                        {
+                            let new_pos = self.input.tail(&pos);
+                            return Ok(ParseResult::Success(
+                                Value::String(SmolStr::new(c.to_string())),
+                                self.input.index(&new_pos),
+                            ));
+                        }
+                        Ok(ParseResult::Failure)
+                    }
                 }
-                Ok(ParseResult::Failure)
             }
 
-            Pattern::Literal(s) => {
+            Pattern::StringLiteral(s) => {
                 if !self.input.supports_text_patterns() {
                     return Err(Error::Runtime(
                         "text patterns not supported for this input type".to_string(),
@@ -337,43 +365,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 Ok(ParseResult::Failure)
             }
 
-            Pattern::CharClass(ranges) => {
-                if !self.input.supports_text_patterns() {
-                    return Err(Error::Runtime(
-                        "text patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(InputItem::Char(c)) = self.input.head(&pos)
-                    && ranges.iter().any(|r| r.matches(c))
-                {
-                    let new_pos = self.input.tail(&pos);
-                    return Ok(ParseResult::Success(
-                        Value::String(SmolStr::new(c.to_string())),
-                        self.input.index(&new_pos),
-                    ));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::NegCharClass(ranges) => {
-                if !self.input.supports_text_patterns() {
-                    return Err(Error::Runtime(
-                        "text patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(InputItem::Char(c)) = self.input.head(&pos)
-                    && !ranges.iter().any(|r| r.matches(c))
-                {
-                    let new_pos = self.input.tail(&pos);
-                    return Ok(ParseResult::Success(
-                        Value::String(SmolStr::new(c.to_string())),
-                        self.input.index(&new_pos),
-                    ));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::Rule(name) => self.apply_rule(name, pos),
+            Pattern::ApplyRule(name) => self.apply_rule(name, pos),
 
             Pattern::Super(name) => {
                 let rule = self.find_parent_rule(name)?;
@@ -520,60 +512,27 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 }
             }
 
-            Pattern::Star(inner) => {
-                let mut current_pos = pos;
-                let mut values = Vec::new();
-
-                loop {
-                    let current_index = self.input.index(&current_pos);
-                    match self.match_pattern(inner, current_pos.clone())? {
-                        ParseResult::Success(v, new_index) if new_index > current_index => {
-                            values.push(v);
-                            current_pos = self.input.position_at(new_index);
-                        }
-                        _ => break,
-                    }
-                }
-
-                // Return concatenated string or list
-                let result = if values.iter().all(|v| matches!(v, Value::String(_))) {
-                    let s: String = values
-                        .iter()
-                        .filter_map(|v| {
-                            if let Value::String(s) = v {
-                                Some(s.as_str())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    Value::String(SmolStr::new(s))
-                } else {
-                    Value::List(Arc::new(values))
-                };
-
-                Ok(ParseResult::Success(result, self.input.index(&current_pos)))
-            }
-
-            Pattern::Plus(inner) => {
-                // Must match at least once
-                let first = self.match_pattern(inner, pos.clone())?;
-                match first {
-                    ParseResult::Failure => Ok(ParseResult::Failure),
-                    ParseResult::Success(v, mut current_index) => {
-                        let mut values = vec![v];
+            Pattern::Repeat {
+                pattern: inner,
+                kind,
+            } => {
+                match kind {
+                    RepeatKind::ZeroOrMore => {
+                        let mut current_pos = pos;
+                        let mut values = Vec::new();
 
                         loop {
-                            let current_pos = self.input.position_at(current_index);
-                            match self.match_pattern(inner, current_pos)? {
+                            let current_index = self.input.index(&current_pos);
+                            match self.match_pattern(inner, current_pos.clone())? {
                                 ParseResult::Success(v, new_index) if new_index > current_index => {
                                     values.push(v);
-                                    current_index = new_index;
+                                    current_pos = self.input.position_at(new_index);
                                 }
                                 _ => break,
                             }
                         }
 
+                        // Return concatenated string or list
                         let result = if values.iter().all(|v| matches!(v, Value::String(_))) {
                             let s: String = values
                                 .iter()
@@ -590,7 +549,49 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                             Value::List(Arc::new(values))
                         };
 
-                        Ok(ParseResult::Success(result, current_index))
+                        Ok(ParseResult::Success(result, self.input.index(&current_pos)))
+                    }
+                    RepeatKind::OneOrMore => {
+                        // Must match at least once
+                        let first = self.match_pattern(inner, pos.clone())?;
+                        match first {
+                            ParseResult::Failure => Ok(ParseResult::Failure),
+                            ParseResult::Success(v, mut current_index) => {
+                                let mut values = vec![v];
+
+                                loop {
+                                    let current_pos = self.input.position_at(current_index);
+                                    match self.match_pattern(inner, current_pos)? {
+                                        ParseResult::Success(v, new_index)
+                                            if new_index > current_index =>
+                                        {
+                                            values.push(v);
+                                            current_index = new_index;
+                                        }
+                                        _ => break,
+                                    }
+                                }
+
+                                let result = if values.iter().all(|v| matches!(v, Value::String(_)))
+                                {
+                                    let s: String = values
+                                        .iter()
+                                        .filter_map(|v| {
+                                            if let Value::String(s) = v {
+                                                Some(s.as_str())
+                                            } else {
+                                                None
+                                            }
+                                        })
+                                        .collect();
+                                    Value::String(SmolStr::new(s))
+                                } else {
+                                    Value::List(Arc::new(values))
+                                };
+
+                                Ok(ParseResult::Success(result, current_index))
+                            }
+                        }
                     }
                 }
             }
@@ -603,7 +604,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             },
 
             Pattern::Lookahead(inner) => {
-                // Match but don't consume
+                // Positive lookahead: succeed if pattern matches, don't consume
                 match self.match_pattern(inner, pos.clone())? {
                     ParseResult::Success(_, _) => {
                         Ok(ParseResult::Success(Value::Null, self.input.index(&pos)))
@@ -613,7 +614,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             }
 
             Pattern::Not(inner) => {
-                // Succeed if inner fails, don't consume
+                // Negative lookahead: succeed if pattern doesn't match, don't consume
                 match self.match_pattern(inner, pos.clone())? {
                     ParseResult::Success(_, _) => Ok(ParseResult::Failure),
                     ParseResult::Failure => {
@@ -622,7 +623,11 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 }
             }
 
-            Pattern::Bind(inner, name, is_choice) => {
+            Pattern::Bind {
+                pattern: inner,
+                name,
+                is_choice,
+            } => {
                 // If is_choice is true (digit:?s syntax), set force_choice_backtracking
                 // so that any Choice patterns in the inner pattern will treat ALL
                 // alternatives as choice points for backtracking.
@@ -653,7 +658,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 }
             }
 
-            Pattern::Guard(pattern, guard_expr) => {
+            Pattern::Guard { pattern, predicate } => {
                 // Match the pattern first, then check the guard
                 // In backtracking mode, if the guard fails, try backtracking to get
                 // a different value from a choice point, then re-match the inner pattern
@@ -661,7 +666,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                     match self.match_pattern(pattern, pos.clone())? {
                         ParseResult::Success(matched, new_index) => {
                             // The guard can reference variables bound by the pattern
-                            let result = self.evaluate_predicate(guard_expr)?;
+                            let result = self.evaluate_predicate(predicate)?;
                             if result.is_truthy() {
                                 return Ok(ParseResult::Success(matched, new_index));
                             } else {
@@ -683,7 +688,10 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 }
             }
 
-            Pattern::Action(inner, action) => match self.match_pattern(inner, pos)? {
+            Pattern::Action {
+                pattern: inner,
+                action,
+            } => match self.match_pattern(inner, pos)? {
                 ParseResult::Success(matched, new_index) => {
                     let result = self.evaluate_action(action, matched)?;
                     Ok(ParseResult::Success(result, new_index))
@@ -692,209 +700,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             },
 
             // === Binary Patterns ===
-            Pattern::Byte(expected) => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(item) = self.input.head(&pos)
-                    && let Some(b) = item.as_byte()
-                    && b == *expected
-                {
-                    let new_pos = self.input.tail(&pos);
-                    return Ok(ParseResult::Success(
-                        Value::Int(b as i64),
-                        self.input.index(&new_pos),
-                    ));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::ByteRange(lo, hi) => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(item) = self.input.head(&pos)
-                    && let Some(b) = item.as_byte()
-                    && b >= *lo
-                    && b <= *hi
-                {
-                    let new_pos = self.input.tail(&pos);
-                    return Ok(ParseResult::Success(
-                        Value::Int(b as i64),
-                        self.input.index(&new_pos),
-                    ));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::Bytes(n) => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, *n) {
-                    let values: Vec<Value> = bytes.iter().map(|b| Value::Int(*b as i64)).collect();
-                    let end_index = self.input.index(&pos) + n;
-                    return Ok(ParseResult::Success(
-                        Value::List(Arc::new(values)),
-                        end_index,
-                    ));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::UInt8 => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(item) = self.input.head(&pos)
-                    && let Some(b) = item.as_byte()
-                {
-                    let new_pos = self.input.tail(&pos);
-                    return Ok(ParseResult::Success(
-                        Value::Int(b as i64),
-                        self.input.index(&new_pos),
-                    ));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::UInt16BE => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, 2) {
-                    let value = u16::from_be_bytes([bytes[0], bytes[1]]);
-                    let end_index = self.input.index(&pos) + 2;
-                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::UInt16LE => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, 2) {
-                    let value = u16::from_le_bytes([bytes[0], bytes[1]]);
-                    let end_index = self.input.index(&pos) + 2;
-                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::UInt32BE => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, 4) {
-                    let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                    let end_index = self.input.index(&pos) + 4;
-                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::UInt32LE => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, 4) {
-                    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                    let end_index = self.input.index(&pos) + 4;
-                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::Int8 => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(item) = self.input.head(&pos)
-                    && let Some(b) = item.as_byte()
-                {
-                    let new_pos = self.input.tail(&pos);
-                    return Ok(ParseResult::Success(
-                        Value::Int(b as i8 as i64),
-                        self.input.index(&new_pos),
-                    ));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::Int16BE => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, 2) {
-                    let value = i16::from_be_bytes([bytes[0], bytes[1]]);
-                    let end_index = self.input.index(&pos) + 2;
-                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::Int16LE => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, 2) {
-                    let value = i16::from_le_bytes([bytes[0], bytes[1]]);
-                    let end_index = self.input.index(&pos) + 2;
-                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::Int32BE => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, 4) {
-                    let value = i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                    let end_index = self.input.index(&pos) + 4;
-                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
-                }
-                Ok(ParseResult::Failure)
-            }
-
-            Pattern::Int32LE => {
-                if !self.input.supports_binary_patterns() {
-                    return Err(Error::Runtime(
-                        "binary patterns not supported for this input type".to_string(),
-                    ));
-                }
-                if let Some(bytes) = self.input.bytes_at(&pos, 4) {
-                    let value = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-                    let end_index = self.input.index(&pos) + 4;
-                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
-                }
-                Ok(ParseResult::Failure)
-            }
+            Pattern::Binary(bp) => self.match_binary_pattern(bp, pos),
 
             // === Object/Value Patterns ===
             Pattern::MatchValue(expected) => {
@@ -1052,17 +858,29 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 let mut item_idx = 0;
 
                 for pat in patterns {
-                    // Check if this is a Star/Plus pattern (possibly wrapped in Bind)
+                    // Check if this is a Repeat pattern (possibly wrapped in Bind)
                     let (inner_pat, is_star, is_plus, bind_name) = match pat {
-                        Pattern::Star(inner) => (inner.as_ref(), true, false, None),
-                        Pattern::Plus(inner) => (inner.as_ref(), false, true, None),
-                        Pattern::Bind(inner, name, _) => match inner.as_ref() {
-                            Pattern::Star(inner2) => {
-                                (inner2.as_ref(), true, false, Some(name.clone()))
-                            }
-                            Pattern::Plus(inner2) => {
-                                (inner2.as_ref(), false, true, Some(name.clone()))
-                            }
+                        Pattern::Repeat {
+                            pattern: inner,
+                            kind: RepeatKind::ZeroOrMore,
+                        } => (inner.as_ref(), true, false, None),
+                        Pattern::Repeat {
+                            pattern: inner,
+                            kind: RepeatKind::OneOrMore,
+                        } => (inner.as_ref(), false, true, None),
+                        Pattern::Bind {
+                            pattern: inner,
+                            name,
+                            is_choice: _,
+                        } => match inner.as_ref() {
+                            Pattern::Repeat {
+                                pattern: inner2,
+                                kind: RepeatKind::ZeroOrMore,
+                            } => (inner2.as_ref(), true, false, Some(name.clone())),
+                            Pattern::Repeat {
+                                pattern: inner2,
+                                kind: RepeatKind::OneOrMore,
+                            } => (inner2.as_ref(), false, true, Some(name.clone())),
                             _ => {
                                 // Regular pattern - match single element
                                 if item_idx >= items.len() {
@@ -1307,6 +1125,171 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 } else {
                     Ok(ParseResult::Failure)
                 }
+            }
+
+            // Let binding patterns - these are typically used in non-grammar contexts
+            // but we include them for completeness
+            Pattern::Var(_)
+            | Pattern::Literal(_)
+            | Pattern::Map(_)
+            | Pattern::List(_)
+            | Pattern::Tagged { .. } => Err(Error::Runtime(
+                "Let binding patterns not supported in grammar runtime - use @ operator"
+                    .to_string(),
+            )),
+        }
+    }
+
+    /// Match a binary pattern against the input.
+    fn match_binary_pattern(
+        &mut self,
+        bp: &BinaryPattern,
+        pos: I::Position,
+    ) -> Result<ParseResult> {
+        if !self.input.supports_binary_patterns() {
+            return Err(Error::Runtime(
+                "binary patterns not supported for this input type".to_string(),
+            ));
+        }
+
+        match bp {
+            BinaryPattern::Byte(expected) => {
+                if let Some(item) = self.input.head(&pos)
+                    && let Some(b) = item.as_byte()
+                    && b == *expected
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Int(b as i64),
+                        self.input.index(&new_pos),
+                    ));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::ByteRange(lo, hi) => {
+                if let Some(item) = self.input.head(&pos)
+                    && let Some(b) = item.as_byte()
+                    && b >= *lo
+                    && b <= *hi
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Int(b as i64),
+                        self.input.index(&new_pos),
+                    ));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::Bytes(n) => {
+                if let Some(bytes) = self.input.bytes_at(&pos, *n) {
+                    let values: Vec<Value> = bytes.iter().map(|b| Value::Int(*b as i64)).collect();
+                    let end_index = self.input.index(&pos) + n;
+                    return Ok(ParseResult::Success(
+                        Value::List(Arc::new(values)),
+                        end_index,
+                    ));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::UInt8 => {
+                if let Some(item) = self.input.head(&pos)
+                    && let Some(b) = item.as_byte()
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Int(b as i64),
+                        self.input.index(&new_pos),
+                    ));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::UInt16BE => {
+                if let Some(bytes) = self.input.bytes_at(&pos, 2) {
+                    let value = u16::from_be_bytes([bytes[0], bytes[1]]);
+                    let end_index = self.input.index(&pos) + 2;
+                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::UInt16LE => {
+                if let Some(bytes) = self.input.bytes_at(&pos, 2) {
+                    let value = u16::from_le_bytes([bytes[0], bytes[1]]);
+                    let end_index = self.input.index(&pos) + 2;
+                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::UInt32BE => {
+                if let Some(bytes) = self.input.bytes_at(&pos, 4) {
+                    let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                    let end_index = self.input.index(&pos) + 4;
+                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::UInt32LE => {
+                if let Some(bytes) = self.input.bytes_at(&pos, 4) {
+                    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                    let end_index = self.input.index(&pos) + 4;
+                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::Int8 => {
+                if let Some(item) = self.input.head(&pos)
+                    && let Some(b) = item.as_byte()
+                {
+                    let new_pos = self.input.tail(&pos);
+                    return Ok(ParseResult::Success(
+                        Value::Int(b as i8 as i64),
+                        self.input.index(&new_pos),
+                    ));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::Int16BE => {
+                if let Some(bytes) = self.input.bytes_at(&pos, 2) {
+                    let value = i16::from_be_bytes([bytes[0], bytes[1]]);
+                    let end_index = self.input.index(&pos) + 2;
+                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::Int16LE => {
+                if let Some(bytes) = self.input.bytes_at(&pos, 2) {
+                    let value = i16::from_le_bytes([bytes[0], bytes[1]]);
+                    let end_index = self.input.index(&pos) + 2;
+                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::Int32BE => {
+                if let Some(bytes) = self.input.bytes_at(&pos, 4) {
+                    let value = i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                    let end_index = self.input.index(&pos) + 4;
+                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
+                }
+                Ok(ParseResult::Failure)
+            }
+
+            BinaryPattern::Int32LE => {
+                if let Some(bytes) = self.input.bytes_at(&pos, 4) {
+                    let value = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                    let end_index = self.input.index(&pos) + 4;
+                    return Ok(ParseResult::Success(Value::Int(value as i64), end_index));
+                }
+                Ok(ParseResult::Failure)
             }
         }
     }
@@ -2020,11 +2003,14 @@ mod tests {
         // hex = [0-9a-fA-F]+
         grammar.add_rule(
             SmolStr::new("hex"),
-            Rule::new(Pattern::Plus(Box::new(Pattern::CharClass(vec![
-                CharRange::Range('0', '9'),
-                CharRange::Range('a', 'f'),
-                CharRange::Range('A', 'F'),
-            ])))),
+            Rule::new(Pattern::Repeat {
+                pattern: Box::new(Pattern::Char(CharPattern::Class(vec![
+                    CharRange::Range('0', '9'),
+                    CharRange::Range('a', 'f'),
+                    CharRange::Range('A', 'F'),
+                ]))),
+                kind: RepeatKind::OneOrMore,
+            }),
         );
 
         registry.register(grammar);
@@ -2044,10 +2030,10 @@ mod tests {
         grammar.add_rule(
             SmolStr::new("pair"),
             Rule::new(Pattern::Seq(vec![
-                Pattern::Rule(SmolStr::new("word")),
-                Pattern::Char(':'),
-                Pattern::Rule(SmolStr::new("spaces")),
-                Pattern::Rule(SmolStr::new("word")),
+                Pattern::ApplyRule(SmolStr::new("word")),
+                Pattern::Char(CharPattern::Exact(':')),
+                Pattern::ApplyRule(SmolStr::new("spaces")),
+                Pattern::ApplyRule(SmolStr::new("word")),
             ])),
         );
 
@@ -2067,8 +2053,8 @@ mod tests {
         grammar.add_rule(
             SmolStr::new("bool"),
             Rule::new(Pattern::Choice(vec![
-                (Pattern::Literal(SmolStr::new("true")), false),
-                (Pattern::Literal(SmolStr::new("false")), false),
+                (Pattern::StringLiteral(SmolStr::new("true")), false),
+                (Pattern::StringLiteral(SmolStr::new("false")), false),
             ])),
         );
 
@@ -2096,8 +2082,8 @@ mod tests {
         grammar.add_rule(
             SmolStr::new("check"),
             Rule::new(Pattern::Seq(vec![
-                Pattern::Lookahead(Box::new(Pattern::Rule(SmolStr::new("digit")))),
-                Pattern::Rule(SmolStr::new("digit")),
+                Pattern::Lookahead(Box::new(Pattern::ApplyRule(SmolStr::new("digit")))),
+                Pattern::ApplyRule(SmolStr::new("digit")),
             ])),
         );
 
@@ -2120,7 +2106,7 @@ mod tests {
         grammar.add_rule(
             SmolStr::new("not_a"),
             Rule::new(Pattern::Seq(vec![
-                Pattern::Not(Box::new(Pattern::Char('a'))),
+                Pattern::Not(Box::new(Pattern::Char(CharPattern::Exact('a')))),
                 Pattern::Any,
             ])),
         );
@@ -2144,11 +2130,11 @@ mod tests {
         // capture = word:w => w
         grammar.add_rule(
             SmolStr::new("capture"),
-            Rule::new(Pattern::Bind(
-                Box::new(Pattern::Rule(SmolStr::new("word"))),
-                SmolStr::new("w"),
-                false, // not a choice point
-            )),
+            Rule::new(Pattern::Bind {
+                pattern: Box::new(Pattern::ApplyRule(SmolStr::new("word"))),
+                name: SmolStr::new("w"),
+                is_choice: false,
+            }),
         );
 
         registry.register(grammar);
@@ -2231,7 +2217,10 @@ mod tests {
         // magic = byte(0x89) byte(0x50)
         grammar.add_rule(
             SmolStr::new("magic"),
-            Rule::new(Pattern::Seq(vec![Pattern::Byte(0x89), Pattern::Byte(0x50)])),
+            Rule::new(Pattern::Seq(vec![
+                Pattern::Binary(BinaryPattern::Byte(0x89)),
+                Pattern::Binary(BinaryPattern::Byte(0x50)),
+            ])),
         );
 
         registry.register(grammar);
@@ -2260,7 +2249,7 @@ mod tests {
         // printable = byte(0x20..0x7E)
         grammar.add_rule(
             SmolStr::new("printable"),
-            Rule::new(Pattern::ByteRange(0x20, 0x7E)),
+            Rule::new(Pattern::Binary(BinaryPattern::ByteRange(0x20, 0x7E))),
         );
 
         registry.register(grammar);
@@ -2285,7 +2274,10 @@ mod tests {
         let mut grammar = Grammar::new(SmolStr::new("test::bytes"));
 
         // four_bytes = bytes(4)
-        grammar.add_rule(SmolStr::new("four_bytes"), Rule::new(Pattern::Bytes(4)));
+        grammar.add_rule(
+            SmolStr::new("four_bytes"),
+            Rule::new(Pattern::Binary(BinaryPattern::Bytes(4))),
+        );
 
         registry.register(grammar);
 
@@ -2517,7 +2509,7 @@ mod tests {
         let mut parent = Grammar::new(SmolStr::new("parent"));
         parent.add_rule(
             SmolStr::new("greeting"),
-            Rule::new(Pattern::Literal(SmolStr::new("hello"))),
+            Rule::new(Pattern::StringLiteral(SmolStr::new("hello"))),
         );
         let parent = Arc::new(parent);
 
@@ -2586,9 +2578,10 @@ mod tests {
         let mut custom = Grammar::with_parent_grammar(SmolStr::new("test"), grammar.clone());
         custom.add_rule(
             SmolStr::new("ints"),
-            Rule::new(Pattern::Star(Box::new(Pattern::MatchType(SmolStr::new(
-                "int",
-            ))))),
+            Rule::new(Pattern::Repeat {
+                pattern: Box::new(Pattern::MatchType(SmolStr::new("int"))),
+                kind: RepeatKind::ZeroOrMore,
+            }),
         );
         let custom = Arc::new(custom);
 
@@ -2615,9 +2608,10 @@ mod tests {
         let mut custom = Grammar::with_parent_grammar(SmolStr::new("test"), grammar.clone());
         custom.add_rule(
             SmolStr::new("ints"),
-            Rule::new(Pattern::Plus(Box::new(Pattern::MatchType(SmolStr::new(
-                "int",
-            ))))),
+            Rule::new(Pattern::Repeat {
+                pattern: Box::new(Pattern::MatchType(SmolStr::new("int"))),
+                kind: RepeatKind::OneOrMore,
+            }),
         );
         let custom = Arc::new(custom);
 
@@ -2701,11 +2695,11 @@ mod tests {
         let mut custom = Grammar::with_parent_grammar(SmolStr::new("test"), grammar.clone());
         custom.add_rule(
             SmolStr::new("bound"),
-            Rule::new(Pattern::Bind(
-                Box::new(Pattern::Any),
-                SmolStr::new("x"),
-                false, // not a choice point
-            )),
+            Rule::new(Pattern::Bind {
+                pattern: Box::new(Pattern::Any),
+                name: SmolStr::new("x"),
+                is_choice: false,
+            }),
         );
         let custom = Arc::new(custom);
 
@@ -2814,8 +2808,11 @@ mod tests {
         custom.add_rule(
             SmolStr::new("multiple_matches"),
             Rule::new(Pattern::Choice(vec![
-                (Pattern::Literal(SmolStr::new("a")), true), // ? marker for backtracking
-                (Pattern::CharClass(vec![CharRange::Range('a', 'z')]), true), // ? marker for backtracking
+                (Pattern::StringLiteral(SmolStr::new("a")), true), // ? marker for backtracking
+                (
+                    Pattern::Char(CharPattern::Class(vec![CharRange::Range('a', 'z')])),
+                    true,
+                ), // ? marker for backtracking
             ])),
         );
         let custom = Arc::new(custom);

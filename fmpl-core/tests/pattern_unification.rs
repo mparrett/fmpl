@@ -1,5 +1,6 @@
 //! Tests for unified Pattern type
 
+use fmpl_core::ast::Expr;
 use fmpl_core::pattern::*;
 use smol_str::SmolStr;
 
@@ -50,7 +51,10 @@ fn test_pattern_literal() {
 
 #[test]
 fn test_pattern_char_class() {
-    let p = Pattern::Char(CharPattern::Class(vec![('a', 'z'), ('A', 'Z')]));
+    let p = Pattern::Char(CharPattern::Class(vec![
+        CharRange::Range('a', 'z'),
+        CharRange::Range('A', 'Z'),
+    ]));
     assert!(matches!(p, Pattern::Char(CharPattern::Class(_))));
 }
 
@@ -66,9 +70,16 @@ fn test_pattern_seq() {
 
 #[test]
 fn test_pattern_choice() {
+    // Choice now takes (Pattern, bool) tuples
     let p = Pattern::Choice(vec![
-        Pattern::Literal(LiteralValue::String(SmolStr::new("hello"))),
-        Pattern::Literal(LiteralValue::String(SmolStr::new("world"))),
+        (
+            Pattern::Literal(LiteralValue::String(SmolStr::new("hello"))),
+            false,
+        ),
+        (
+            Pattern::Literal(LiteralValue::String(SmolStr::new("world"))),
+            false,
+        ),
     ]);
     assert!(matches!(p, Pattern::Choice(_)));
 }
@@ -96,11 +107,14 @@ fn test_pattern_optional() {
 
 #[test]
 fn test_pattern_lookahead() {
-    let p = Pattern::Lookahead {
-        pattern: Box::new(Pattern::Any),
-        positive: true,
-    };
-    assert!(matches!(p, Pattern::Lookahead { positive: true, .. }));
+    let p = Pattern::Lookahead(Box::new(Pattern::Any));
+    assert!(matches!(p, Pattern::Lookahead(_)));
+}
+
+#[test]
+fn test_pattern_not() {
+    let p = Pattern::Not(Box::new(Pattern::Any));
+    assert!(matches!(p, Pattern::Not(_)));
 }
 
 #[test]
@@ -108,24 +122,27 @@ fn test_pattern_bind() {
     let p = Pattern::Bind {
         name: SmolStr::new("x"),
         pattern: Box::new(Pattern::Any),
+        is_choice: false,
     };
     assert!(matches!(p, Pattern::Bind { .. }));
 }
 
 #[test]
 fn test_pattern_guard() {
+    let guard_expr = Expr::Ident(SmolStr::new("x"));
     let p = Pattern::Guard {
         pattern: Box::new(Pattern::Any),
-        predicate: GuardPredicate::Expr(SmolStr::new("x > 0")),
+        predicate: guard_expr,
     };
     assert!(matches!(p, Pattern::Guard { .. }));
 }
 
 #[test]
 fn test_pattern_action() {
+    let action_expr = Expr::Ident(SmolStr::new("x"));
     let p = Pattern::Action {
         pattern: Box::new(Pattern::Any),
-        action: SmolStr::new("x * 2"),
+        action: action_expr,
     };
     assert!(matches!(p, Pattern::Action { .. }));
 }
@@ -170,6 +187,7 @@ fn test_fast_mode_patterns() {
     let bind_p = Pattern::Bind {
         name: SmolStr::new("x"),
         pattern: Box::new(Pattern::Any),
+        is_choice: false,
     };
     assert_eq!(bind_p.recommended_mode(), PatternMode::Fast);
 
@@ -184,14 +202,15 @@ fn test_full_mode_patterns() {
     let seq_p = Pattern::Seq(vec![Pattern::Any, Pattern::Any]);
     assert_eq!(seq_p.recommended_mode(), PatternMode::Full);
 
-    // Choice requires full mode
-    let choice_p = Pattern::Choice(vec![Pattern::Any, Pattern::Any]);
+    // Choice requires full mode (now with backtracking flags)
+    let choice_p = Pattern::Choice(vec![(Pattern::Any, false), (Pattern::Any, false)]);
     assert_eq!(choice_p.recommended_mode(), PatternMode::Full);
 
-    // Guard requires full mode
+    // Guard requires full mode (now with Box<Expr>)
+    let guard_expr = Expr::Ident(SmolStr::new("true"));
     let guard_p = Pattern::Guard {
         pattern: Box::new(Pattern::Any),
-        predicate: GuardPredicate::Expr(SmolStr::new("true")),
+        predicate: guard_expr,
     };
     assert_eq!(guard_p.recommended_mode(), PatternMode::Full);
 
@@ -203,16 +222,18 @@ fn test_full_mode_patterns() {
     assert_eq!(repeat_p.recommended_mode(), PatternMode::Full);
 
     // Lookahead requires full mode
-    let lookahead_p = Pattern::Lookahead {
-        pattern: Box::new(Pattern::Any),
-        positive: true,
-    };
+    let lookahead_p = Pattern::Lookahead(Box::new(Pattern::Any));
     assert_eq!(lookahead_p.recommended_mode(), PatternMode::Full);
 
+    // Not requires full mode
+    let not_p = Pattern::Not(Box::new(Pattern::Any));
+    assert_eq!(not_p.recommended_mode(), PatternMode::Full);
+
     // Action requires full mode
+    let action_expr = Expr::Ident(SmolStr::new("x"));
     let action_p = Pattern::Action {
         pattern: Box::new(Pattern::Any),
-        action: SmolStr::new("x * 2"),
+        action: action_expr,
     };
     assert_eq!(action_p.recommended_mode(), PatternMode::Full);
 
@@ -280,12 +301,13 @@ fn test_map_pattern_mode() {
 #[test]
 fn test_guarded_pattern_requires_full() {
     // Pattern with guard requires full mode
+    let guard_expr = Expr::Ident(SmolStr::new("v"));
     let p = Pattern::Guard {
         pattern: Box::new(Pattern::Map(vec![(
             SmolStr::new("x"),
             Pattern::Var(SmolStr::new("v")),
         )])),
-        predicate: GuardPredicate::Expr(SmolStr::new("v > 0")),
+        predicate: guard_expr,
     };
 
     // Should require full mode

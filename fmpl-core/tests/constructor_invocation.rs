@@ -4,7 +4,14 @@
 //! When `spawn parent(args)` is called, the parent's constructor method
 //! should be invoked with the provided arguments to initialize the new object.
 
-use fmpl_core::{Value, Vm, eval};
+use fmpl_core::{Compiler, Lexer, Parser, Result, Value, Vm};
+
+fn eval(vm: &mut Vm, source: &str) -> Result<Value> {
+    let tokens = Lexer::new(source).tokenize()?;
+    let ast = Parser::with_source(&tokens, source).parse()?;
+    let code = Compiler::new().compile(&ast)?;
+    vm.run(&code)
+}
 
 // =============================================================================
 // Constructor invocation tests

@@ -61,7 +61,7 @@ fn run_fmpl_test(source: &str, name: &str) {
 }
 
 use execution_tape::asm::{Asm, FunctionSig, ProgramBuilder};
-use execution_tape::host::{Host, HostError, SigHash, ValueRef};
+use execution_tape::host::{AccessSink, Host, HostError, SigHash, ValueRef};
 use execution_tape::program::ValueType;
 use execution_tape::trace::TraceMask;
 use execution_tape::value::FuncId;
@@ -74,6 +74,7 @@ impl Host for TestHost {
         _symbol: &str,
         _sig_hash: SigHash,
         _args: &[ValueRef<'_>],
+        _access_sink: Option<&mut dyn AccessSink>,
     ) -> Result<(Vec<execution_tape::value::Value>, u64), HostError> {
         Err(HostError::UnknownSymbol)
     }

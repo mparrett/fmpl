@@ -33,8 +33,9 @@ Both now use a single `Pattern` type with different compilation strategies based
 
 | Pattern | Description | Example |
 |---------|-------------|---------|
-| `%{k: p}` | Map pattern - extracts key values | `%{name: n, age: a}` |
-| `%{}` | Empty map pattern | `%{} => "empty"` |
+| `{k: p}` | Map pattern - extracts key values | `{name: n, age: a}` |
+| `{k}` | Shorthand - key from variable name | `{name, age}` |
+| `{}` | Empty map pattern | `{} => "empty"` |
 | `[p1, p2]` | List pattern - exact length | `[a, b, c]` |
 | `[h \| t]` | Head/tail pattern | `[head \| tail]` |
 | `[p*]` | Repeat pattern - zero or more | `[item*]` |
@@ -64,8 +65,8 @@ Both now use a single `Pattern` type with different compilation strategies based
 | Modifier | Description | Example |
 |----------|-------------|---------|
 | `p when e` | Guard - pattern with predicate | `n when n > 0` |
-| `p => e` | Action - pattern with transformation | `%{x: v} => v * 2` |
-| `p as name` | Bind entire match to name | `%{...} as whole` |
+| `p => e` | Action - pattern with transformation | `{x: v} => v * 2` |
+| `p as name` | Bind entire match to name | `{...} as whole` |
 
 ---
 
@@ -79,7 +80,7 @@ In `let` bindings, patterns use **direct extraction** for optimal performance:
 
 ```fmpl
 -- Map destructuring
-let %{name: n, age: a} = %{name: "Alice", age: 30}
+let {name: n, age: a} = {name: "Alice", age: 30}
 -- n = "Alice", a = 30
 
 -- List destructuring
@@ -91,7 +92,7 @@ let :Some(value) = :Some(42)
 -- value = 42
 
 -- Nested destructuring
-let %{user: %{name: n}} = %{user: %{name: "Bob"}}
+let {user: {name: n}} = {user: {name: "Bob"}}
 -- n = "Bob"
 ```
 
@@ -112,9 +113,9 @@ The `@` operator uses **full PEG matching** with backtracking:
 
 -- Inline pattern block (anonymous grammar)
 result @ {
-  %{type: "move", dir: d} => move(d)
-  %{type: "attack", target: t} => attack(t)
-  %{type: "quit"} => exit()
+  {type: "move", dir: d} => move(d)
+  {type: "attack", target: t} => attack(t)
+  {type: "quit"} => exit()
   _ => continue()
 }
 
@@ -147,7 +148,7 @@ input @ {
 | Feature | Fast Mode (`let`) | Full Mode (`@`) |
 |---------|-------------------|-----------------|
 | Basic patterns (`_`, `x`, literals) | Yes | Yes |
-| Map patterns (`%{k: p}`) | Yes | Yes |
+| Map patterns (`{k: p}`) | Yes | Yes |
 | List patterns (`[a, b, c]`) | Yes | Yes |
 | Head/tail (`[h \| t]`) | Yes | Yes |
 | Tagged patterns (`:Tag(p)`) | Yes | Yes |
@@ -215,8 +216,8 @@ pub enum StreamMode {
 -- Elements consumed one at a time
 
 -- Map to single-element stream
-%{x: 1, y: 2} @ {
-  %{x: a, y: b} => a + b
+{x: 1, y: 2} @ {
+  {x: a, y: b} => a + b
 }
 -- Entire map matched as one element
 
@@ -235,7 +236,7 @@ When using `StreamMode::Auto` (the default), the runtime detects input type:
 -- All these work with @ operator
 "text" @ Parser.rule       -- Auto detects Chars mode
 [1, 2, 3] @ Parser.rule    -- Auto detects Items mode
-%{k: v} @ Parser.rule      -- Auto detects Once mode
+{k: v} @ Parser.rule      -- Auto detects Once mode
 :Tag(x) @ Parser.rule      -- Auto detects Once mode
 ```
 
@@ -253,7 +254,7 @@ pub enum Pattern {
     Literal(LiteralValue),         // 42, "hello", true
 
     // Structured patterns (fast mode compatible)
-    Map(Vec<(SmolStr, Pattern)>),  // %{k: p}
+    Map(Vec<(SmolStr, Pattern)>),  // {k: p}
     List(ListPattern),             // [p1, p2] or [h | t]
     Tagged { tag: SmolStr, patterns: Vec<Pattern> },  // :Tag(p)
 
@@ -323,7 +324,7 @@ impl Pattern {
 
 ```fmpl
 -- Map destructuring
-let %{status: s, body: b} = response
+let {status: s, body: b} = response
 if s == 200 { process(b) } else { handle_error(s) }
 
 -- List destructuring
@@ -331,7 +332,7 @@ let [cmd, arg1, arg2] = args
 execute(cmd, arg1, arg2)
 
 -- Nested destructuring
-let %{config: %{database: %{host: h, port: p}}} = settings
+let {config: {database: {host: h, port: p}}} = settings
 connect(h, p)
 ```
 
@@ -340,9 +341,9 @@ connect(h, p)
 ```fmpl
 -- HTTP response handling
 response @ {
-  %{status: 200, body: b} => parse_json(b)
-  %{status: 404} => not_found()
-  %{status: s} when s >= 500 => server_error(s)
+  {status: 200, body: b} => parse_json(b)
+  {status: 404} => not_found()
+  {status: s} when s >= 500 => server_error(s)
   _ => unknown_response()
 }
 
@@ -388,14 +389,14 @@ value @ {
 ```fmpl
 -- Process streamed messages
 fn process_messages(stream) {
-  stream |> each(|msg| {
+  stream |> each(\msg -> {
     -- First destructure known fields
-    let %{type: t, payload: p} = msg
+    let {type: t, payload: p} = msg
 
     -- Then match on type with full patterns
     p @ {
-      %{action: a, data: d} when t == "command" => execute(a, d)
-      %{text: txt} when t == "chat" => display(txt)
+      {action: a, data: d} when t == "command" => execute(a, d)
+      {text: txt} when t == "chat" => display(txt)
       _ => log("unknown payload", p)
     }
   })

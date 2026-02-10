@@ -20,7 +20,7 @@ object ^agent (bcom, state) {
 }
 
 -- Spawn, call sync/async, pipe streams
-let bot = spawn ^agent(%{history: []})
+let bot = spawn ^agent({history: []})
 $ bot.status()                          -- sync call
 <- bot.process("hello") |> handler      -- async + pipe
 ```
@@ -29,7 +29,7 @@ $ bot.status()                          -- sync call
 
 ## 1. Objects and Capabilities
 
-### Constructors and spawn
+### Constructors and new/spawn
 
 ```fmpl
 object ^cell (bcom, val) {
@@ -37,13 +37,20 @@ object ^cell (bcom, val) {
   set(new): bcom(^cell(bcom, new))      -- functional update
 }
 
-let c = spawn ^cell(42)
+let c = new ^cell(42)                   -- simple instantiation
 $ c.get()                               -- 42
 $ c.set(100)                            -- returns new cell
+
+-- Spawn with bound streams (concurrent actor)
+let worker = spawn Parser {
+  input: data_stream
+  output: result_stream
+}
 ```
 
 - `^name` is a constructor
-- `spawn ^constructor(args)` creates instances
+- `new ^constructor(args)` creates instances (synchronous)
+- `spawn obj { streams }` creates concurrent entity with bound streams
 - `bcom` enables immutable-style state updates (become pattern)
 
 ### Visibility Markers
@@ -85,12 +92,21 @@ Async calls return **streams** that can be piped and parsed.
 ## 3. Maps and Data
 
 ```fmpl
-%{key: val, other: 42}           -- map literal
-%{get_key() => computed}         -- computed key
-%{}                              -- empty map
+{key: val, other: 42}            -- map literal
+{(get_key()): computed}          -- computed key (parens for expression)
+{}                               -- empty map
 
-map | %{extra: 1}                -- merge (right wins)
+map | {extra: 1}                 -- merge (right wins)
 map.key                          -- access
+
+-- Flexible key syntax
+{
+  name: "alice",                 -- bare identifier → string key
+  status,                        -- shorthand: key "status", value from variable
+  :type: "user",                 -- symbol key
+  42: "answer",                  -- integer key
+  (user.id): data,               -- computed key
+}
 ```
 
 ---
@@ -162,7 +178,7 @@ Direct destructuring with no backtracking:
 
 ```fmpl
 -- Map destructuring
-let %{name: n, age: a} = user
+let {name: n, age: a} = user
 -- n = "Alice", a = 30
 
 -- List destructuring
@@ -174,7 +190,7 @@ let :Some(value) = result
 -- value = 42
 
 -- Nested patterns
-let %{config: %{db: %{host: h}}} = settings
+let {config: {db: {host: h}}} = settings
 ```
 
 ### @ Operator (Full Mode)
@@ -187,9 +203,9 @@ Apply grammars or match patterns with backtracking:
 
 -- Inline pattern block (anonymous grammar)
 result @ {
-  %{tool: t, args: a} => execute(t, a)
-  %{done: r}          => r
-  %{error: e}         => handle(e)
+  {tool: t, args: a} => execute(t, a)
+  {done: r}          => r
+  {error: e}         => handle(e)
   _                   => continue()
 }
 
@@ -219,7 +235,7 @@ The `@` operator automatically coerces input to the appropriate stream type:
 [1, 2, 3] @ { 1 2 3 => "matched" }
 
 -- Map becomes single-element stream
-%{x: 1} @ { %{x: v} => v }
+{x: 1} @ { {x: v} => v }
 ```
 
 ---
@@ -232,11 +248,11 @@ Declarative parsing with inheritance:
 grammar ToolParser <: base::tree {
   -- Parse tool calls from LLM output
   output =
-    | "TOOL:" word:name "(" json:args ")" => %{tool: name, args: args}
-    | chunk+                               => %{text: chunks};
+    | "TOOL:" word:name "(" json:args ")" => {tool: name, args: args}
+    | chunk+                               => {text: chunks};
 
   -- Semantic predicate: run code mid-match
-  command = word:v &{ valid_verb(v) } noun:n => %{v: v, n: n};
+  command = word:v &{ valid_verb(v) } noun:n => {v: v, n: n};
 }
 
 -- Apply to stream
@@ -284,15 +300,15 @@ grammar TaskAgent <: base::tree {
 
   -- Handle LLM output stream
   tool_output =
-    | %{tool: t, args: a} => <- execute(t, a) |> turn   -- recurse
-    | %{done: result}     => result                      -- done
-    | %{text: t}          => emit(t); <tool_output>;     -- stream text
+    | {tool: t, args: a} => <- execute(t, a) |> turn   -- recurse
+    | {done: result}     => result                      -- done
+    | {text: t}          => emit(t); <tool_output>;     -- stream text
 
   -- Human approval gate (rule override)
   tool_output =
-    | %{tool: t} &{ needs_approval(t) } => {
+    | {tool: t} &{ needs_approval(t) } => {
         let decision = <- human.approve(t)
-        decision @ { %{approved: true} => ... }
+        decision @ { {approved: true} => ... }
       }
     | <super.tool_output>;
 }
@@ -330,7 +346,19 @@ add(a, b, c): a + b + c
 
 add(1)(2)(3)        -- 6
 add(1, 2)(3)        -- 6
-add(_, 5, _)        -- partial: \a \c add(a, 5, c)
+add(_, 5, _)        -- partial: \a c -> add(a, 5, c)
+```
+
+---
+
+## 12. Lambda Syntax
+
+Multi-argument lambdas use `->` as delimiter:
+
+```fmpl
+\x y -> x + y           -- two arguments
+\x -> x + 1             -- single argument
+\f g x -> f(g(x))       -- multiple arguments
 ```
 
 ---
@@ -339,20 +367,21 @@ add(_, 5, _)        -- partial: \a \c add(a, 5, c)
 
 | Syntax | Meaning |
 |--------|---------|
-| `spawn ^ctor(args)` | Create instance |
+| `new ^ctor(args)` | Create instance |
+| `spawn obj { streams }` | Create concurrent actor |
 | `$ obj.method()` | Sync call |
 | `<- obj.method()` | Async call (returns stream) |
 | `a \|> b \|> c` | Pipe chain |
 | `x @ grammar.rule` | Apply grammar |
 | `x @ { pat => expr }` | Pattern match |
-| `%{k: v}` | Map literal |
+| `{k: v}` | Map literal |
 | `[a, b, c]` | List literal |
 | `list[i]` | Index access |
 | `list[a..b]` | Slice (elements a to b-1) |
 | `list[a..]` | Slice from a to end |
 | `list[..b]` | Slice from start to b-1 |
 | `&{ code }` | Semantic predicate |
-| `\x expr` | Lambda |
+| `\x -> expr` | Lambda |
 | `obj.as(:facet)` | Get restricted view |
 | `.#private/.#public/.#facets` | Visibility markers |
 | `bcom(^ctor(...))` | Functional state update |
@@ -368,7 +397,7 @@ A complete tool-calling agent:
 grammar CodeAgent <: ToolAgent {
   -- Build context before LLM call
   turn = message:m => {
-    let ctx = %{
+    let ctx = {
       history: last_messages(10),
       codebase: <- search_code(m.text)
     }
@@ -377,15 +406,15 @@ grammar CodeAgent <: ToolAgent {
 
   -- Gate dangerous operations
   tool_output =
-    | %{tool: t} &{ t in [:delete, :deploy] } => {
-        <- human.approve(%{tool: t, reason: "Dangerous operation"})
+    | {tool: t} &{ t in [:delete, :deploy] } => {
+        <- human.approve({tool: t, reason: "Dangerous operation"})
           |> approval_handler
       }
     | <super.tool_output>;
 
   approval_handler =
-    | %{approved: true}  => <super.tool_output>
-    | %{denied: reason}  => %{error: "Denied: " + reason};
+    | {approved: true}  => <super.tool_output>
+    | {denied: reason}  => {error: "Denied: " + reason};
 }
 
 -- Run: pipe user input through agent

@@ -94,11 +94,6 @@ use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-// Note: The unified pattern type is in crate::pattern::Pattern
-// This module's Pattern enum is used for PEG grammar patterns (Char, CharClass, Seq, Choice, etc.).
-// The ast module has a separate Pattern enum for let-binding patterns.
-// Both are currently in active use and cannot be unified without significant refactoring.
-
 /// A grammar definition with rules and optional parent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Grammar {
@@ -148,14 +143,21 @@ impl Grammar {
 }
 
 /// A grammar rule (pattern with optional semantic action).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Rule {
     /// The pattern to match.
+    #[serde(default)]
     pub pattern: Pattern,
     /// Semantic action producing a value (optional).
+    #[serde(default)]
     pub action: Option<Expr>,
     /// Whether this rule uses backtracking (enabled by `?` marker).
+    #[serde(default)]
     pub backtracking: bool,
+    /// Parameters for function-style rules: `name(param1, param2) = expr`
+    /// When non-empty, this is a helper function rather than a parsing rule.
+    #[serde(default)]
+    pub params: Vec<SmolStr>,
 }
 
 impl Rule {
@@ -164,6 +166,7 @@ impl Rule {
             pattern,
             action: None,
             backtracking: false,
+            params: Vec::new(),
         }
     }
 
@@ -172,6 +175,7 @@ impl Rule {
             pattern,
             action: Some(action),
             backtracking: false,
+            params: Vec::new(),
         }
     }
 
@@ -179,159 +183,28 @@ impl Rule {
         self.backtracking = backtracking;
         self
     }
-}
 
-/// PEG pattern for matching input.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Pattern {
-    /// Match nothing, always succeed.
-    Empty,
-
-    /// Match any single character.
-    Any,
-
-    /// Match a specific character.
-    Char(char),
-
-    /// Match a literal string.
-    Literal(SmolStr),
-
-    /// Match a character class (e.g., [a-zA-Z]).
-    CharClass(Vec<CharRange>),
-
-    /// Negated character class (e.g., [^a-z]).
-    NegCharClass(Vec<CharRange>),
-
-    /// Apply a named rule.
-    Rule(SmolStr),
-
-    /// Apply a rule from parent grammar (super call).
-    Super(SmolStr),
-
-    /// Sequence: match all patterns in order.
-    Seq(Vec<Pattern>),
-
-    /// Ordered choice: try patterns left to right.
-    /// Each (pattern, bool) tuple indicates if that alternative uses backtracking.
-    Choice(Vec<(Pattern, bool)>),
-
-    /// Zero or more (greedy).
-    Star(Box<Pattern>),
-
-    /// One or more (greedy).
-    Plus(Box<Pattern>),
-
-    /// Optional (zero or one).
-    Optional(Box<Pattern>),
-
-    /// Positive lookahead (don't consume).
-    Lookahead(Box<Pattern>),
-
-    /// Negative lookahead (don't consume).
-    Not(Box<Pattern>),
-
-    /// Bind match result to a variable name.
-    /// The bool indicates if this is a choice point (digit:?x syntax).
-    Bind(Box<Pattern>, SmolStr, bool),
-
-    /// Semantic predicate (evaluate expression, succeed if truthy).
-    Predicate(Expr),
-
-    /// Match pattern, then check guard expression (succeeds only if guard is truthy).
-    /// The guard can reference variables bound by the pattern.
-    Guard(Box<Pattern>, Expr),
-
-    /// Apply rule and transform with semantic action.
-    Action(Box<Pattern>, Expr),
-
-    // === Binary Patterns ===
-    /// Match a specific byte value.
-    Byte(u8),
-
-    /// Match a byte in a range (inclusive).
-    ByteRange(u8, u8),
-
-    /// Consume exactly n bytes, return as list of ints.
-    Bytes(usize),
-
-    /// Read unsigned 8-bit integer.
-    UInt8,
-
-    /// Read unsigned 16-bit big-endian integer.
-    UInt16BE,
-
-    /// Read unsigned 16-bit little-endian integer.
-    UInt16LE,
-
-    /// Read unsigned 32-bit big-endian integer.
-    UInt32BE,
-
-    /// Read unsigned 32-bit little-endian integer.
-    UInt32LE,
-
-    /// Read signed 8-bit integer.
-    Int8,
-
-    /// Read signed 16-bit big-endian integer.
-    Int16BE,
-
-    /// Read signed 16-bit little-endian integer.
-    Int16LE,
-
-    /// Read signed 32-bit big-endian integer.
-    Int32BE,
-
-    /// Read signed 32-bit little-endian integer.
-    Int32LE,
-
-    // === Object/Value Patterns (for tree parsing) ===
-    /// Match a specific FMPL value exactly.
-    MatchValue(Value),
-
-    /// Match any value of a specific type (null, bool, int, float, string, symbol, list, map, object).
-    MatchType(SmolStr),
-
-    /// Match a list with specific element patterns. Last element can be a rest pattern.
-    ListMatch(Vec<Pattern>, Option<Box<Pattern>>),
-
-    /// Match a map with specific key patterns.
-    MapMatch(Vec<(SmolStr, Pattern)>),
-
-    /// Match a symbol with a specific name.
-    SymbolMatch(SmolStr),
-
-    /// Match a symbol literal (like :foo in patterns).
-    SymbolLiteral(SmolStr),
-
-    /// Match a tagged/constructor value with specific tag and child patterns.
-    /// E.g., :Int(n) matches Value::Tagged("Int", [n])
-    TagMatch(SmolStr, Vec<Pattern>),
-
-    /// Descend into a value and apply a pattern (for tree walking).
-    /// When parsing a list, this pops an element and matches against it.
-    Apply(Box<Pattern>),
-
-    /// Match the end of the current input stream/list.
-    End,
-}
-
-/// A character range for character classes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum CharRange {
-    /// Single character.
-    Char(char),
-    /// Range of characters (inclusive).
-    Range(char, char),
-}
-
-impl CharRange {
-    pub fn matches(&self, c: char) -> bool {
-        match self {
-            CharRange::Char(ch) => c == *ch,
-            CharRange::Range(lo, hi) => c >= *lo && c <= *hi,
+    /// Create a function-style rule: `name(params) = expr`
+    pub fn function(params: Vec<SmolStr>, body: Expr) -> Self {
+        Self {
+            pattern: Pattern::Empty,
+            action: Some(body),
+            backtracking: false,
+            params,
         }
     }
+
+    /// Check if this is a function-style rule (has parameters)
+    pub fn is_function(&self) -> bool {
+        !self.params.is_empty()
+    }
 }
+
+// Re-export the unified Pattern type and related types from crate::pattern.
+// This completes Phase 8 of the pattern unification migration.
+pub use crate::pattern::{
+    BinaryPattern, CharPattern, CharRange, ListPattern, LiteralValue, Pattern, RepeatKind,
+};
 
 /// Input stream for parsing - can be text, binary, or object stream.
 #[derive(Debug, Clone)]
@@ -437,51 +310,56 @@ impl GrammarRegistry {
         // digit = [0-9]
         base.add_rule(
             SmolStr::new("digit"),
-            Rule::new(Pattern::CharClass(vec![CharRange::Range('0', '9')])),
+            Rule::new(Pattern::Char(CharPattern::Class(vec![CharRange::Range(
+                '0', '9',
+            )]))),
         );
 
         // letter = [a-zA-Z]
         base.add_rule(
             SmolStr::new("letter"),
-            Rule::new(Pattern::CharClass(vec![
+            Rule::new(Pattern::Char(CharPattern::Class(vec![
                 CharRange::Range('a', 'z'),
                 CharRange::Range('A', 'Z'),
-            ])),
+            ]))),
         );
 
         // space = [ \t\n\r]
         base.add_rule(
             SmolStr::new("space"),
-            Rule::new(Pattern::CharClass(vec![
+            Rule::new(Pattern::Char(CharPattern::Class(vec![
                 CharRange::Char(' '),
                 CharRange::Char('\t'),
                 CharRange::Char('\n'),
                 CharRange::Char('\r'),
-            ])),
+            ]))),
         );
 
         // spaces = space*
         base.add_rule(
             SmolStr::new("spaces"),
-            Rule::new(Pattern::Star(Box::new(Pattern::Rule(SmolStr::new(
-                "space",
-            ))))),
+            Rule::new(Pattern::Repeat {
+                pattern: Box::new(Pattern::ApplyRule(SmolStr::new("space"))),
+                kind: RepeatKind::ZeroOrMore,
+            }),
         );
 
         // word = letter+
         base.add_rule(
             SmolStr::new("word"),
-            Rule::new(Pattern::Plus(Box::new(Pattern::Rule(SmolStr::new(
-                "letter",
-            ))))),
+            Rule::new(Pattern::Repeat {
+                pattern: Box::new(Pattern::ApplyRule(SmolStr::new("letter"))),
+                kind: RepeatKind::OneOrMore,
+            }),
         );
 
         // integer = digit+
         base.add_rule(
             SmolStr::new("integer"),
-            Rule::new(Pattern::Plus(Box::new(Pattern::Rule(SmolStr::new(
-                "digit",
-            ))))),
+            Rule::new(Pattern::Repeat {
+                pattern: Box::new(Pattern::ApplyRule(SmolStr::new("digit"))),
+                kind: RepeatKind::OneOrMore,
+            }),
         );
 
         // eof = ~.
@@ -502,21 +380,54 @@ impl GrammarRegistry {
         binary.add_rule(SmolStr::new("any"), Rule::new(Pattern::Any));
 
         // byte = uint8
-        binary.add_rule(SmolStr::new("byte"), Rule::new(Pattern::UInt8));
+        binary.add_rule(
+            SmolStr::new("byte"),
+            Rule::new(Pattern::Binary(BinaryPattern::UInt8)),
+        );
 
         // uint8, uint16be, uint16le, uint32be, uint32le
-        binary.add_rule(SmolStr::new("uint8"), Rule::new(Pattern::UInt8));
-        binary.add_rule(SmolStr::new("uint16be"), Rule::new(Pattern::UInt16BE));
-        binary.add_rule(SmolStr::new("uint16le"), Rule::new(Pattern::UInt16LE));
-        binary.add_rule(SmolStr::new("uint32be"), Rule::new(Pattern::UInt32BE));
-        binary.add_rule(SmolStr::new("uint32le"), Rule::new(Pattern::UInt32LE));
+        binary.add_rule(
+            SmolStr::new("uint8"),
+            Rule::new(Pattern::Binary(BinaryPattern::UInt8)),
+        );
+        binary.add_rule(
+            SmolStr::new("uint16be"),
+            Rule::new(Pattern::Binary(BinaryPattern::UInt16BE)),
+        );
+        binary.add_rule(
+            SmolStr::new("uint16le"),
+            Rule::new(Pattern::Binary(BinaryPattern::UInt16LE)),
+        );
+        binary.add_rule(
+            SmolStr::new("uint32be"),
+            Rule::new(Pattern::Binary(BinaryPattern::UInt32BE)),
+        );
+        binary.add_rule(
+            SmolStr::new("uint32le"),
+            Rule::new(Pattern::Binary(BinaryPattern::UInt32LE)),
+        );
 
         // int8, int16be, int16le, int32be, int32le
-        binary.add_rule(SmolStr::new("int8"), Rule::new(Pattern::Int8));
-        binary.add_rule(SmolStr::new("int16be"), Rule::new(Pattern::Int16BE));
-        binary.add_rule(SmolStr::new("int16le"), Rule::new(Pattern::Int16LE));
-        binary.add_rule(SmolStr::new("int32be"), Rule::new(Pattern::Int32BE));
-        binary.add_rule(SmolStr::new("int32le"), Rule::new(Pattern::Int32LE));
+        binary.add_rule(
+            SmolStr::new("int8"),
+            Rule::new(Pattern::Binary(BinaryPattern::Int8)),
+        );
+        binary.add_rule(
+            SmolStr::new("int16be"),
+            Rule::new(Pattern::Binary(BinaryPattern::Int16BE)),
+        );
+        binary.add_rule(
+            SmolStr::new("int16le"),
+            Rule::new(Pattern::Binary(BinaryPattern::Int16LE)),
+        );
+        binary.add_rule(
+            SmolStr::new("int32be"),
+            Rule::new(Pattern::Binary(BinaryPattern::Int32BE)),
+        );
+        binary.add_rule(
+            SmolStr::new("int32le"),
+            Rule::new(Pattern::Binary(BinaryPattern::Int32LE)),
+        );
 
         // end = end of input
         binary.add_rule(SmolStr::new("end"), Rule::new(Pattern::End));
@@ -622,7 +533,7 @@ mod tests {
         let mut parent = Grammar::new(SmolStr::new("parent"));
         parent.add_rule(
             SmolStr::new("foo"),
-            Rule::new(Pattern::Literal(SmolStr::new("foo"))),
+            Rule::new(Pattern::StringLiteral(SmolStr::new("foo"))),
         );
         let parent = Arc::new(parent);
 
@@ -630,7 +541,7 @@ mod tests {
         let mut child = Grammar::with_parent_grammar(SmolStr::new("child"), parent.clone());
         child.add_rule(
             SmolStr::new("bar"),
-            Rule::new(Pattern::Literal(SmolStr::new("bar"))),
+            Rule::new(Pattern::StringLiteral(SmolStr::new("bar"))),
         );
 
         // Child should have access to parent

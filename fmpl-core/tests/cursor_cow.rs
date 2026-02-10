@@ -4,7 +4,14 @@
 // without copying the underlying data. Multiple cursors can observe the same
 // stream independently, enabling RLM-style recursive processing.
 
-use fmpl_core::{Value, eval};
+use fmpl_core::{Compiler, Lexer, Parser, Result, Value};
+
+fn eval(vm: &mut fmpl_core::Vm, source: &str) -> Result<Value> {
+    let tokens = Lexer::new(source).tokenize()?;
+    let ast = Parser::with_source(&tokens, source).parse()?;
+    let code = Compiler::new().compile(&ast)?;
+    vm.run(&code)
+}
 
 #[test]
 fn test_observe_stream_creates_cursor() {
