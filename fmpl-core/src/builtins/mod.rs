@@ -5,8 +5,6 @@ pub mod bridge;
 pub mod bytes;
 pub mod codegen;
 pub mod curl;
-#[cfg(feature = "cross_compile")]
-pub mod execution_tape;
 pub mod grammar_to_ir;
 pub mod grammar_to_rust;
 pub mod io;

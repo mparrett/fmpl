@@ -1,0 +1,85 @@
+# Pattern migration rules for grammar::Pattern -> pattern::Pattern
+
+---
+id: rule-to-applyrule
+language: rust
+rule:
+  pattern: Pattern::Rule($NAME)
+fix: Pattern::ApplyRule($NAME)
+
+---
+id: star-to-repeat-zerormore
+language: rust
+rule:
+  pattern: Pattern::Star($INNER)
+fix: "Pattern::Repeat { pattern: $INNER, kind: RepeatKind::ZeroOrMore }"
+
+---
+id: plus-to-repeat-oneormore
+language: rust
+rule:
+  pattern: Pattern::Plus($INNER)
+fix: "Pattern::Repeat { pattern: $INNER, kind: RepeatKind::OneOrMore }"
+
+---
+id: lookahead-positive
+language: rust
+rule:
+  pattern: Pattern::Lookahead($INNER)
+fix: "Pattern::Lookahead { pattern: $INNER, positive: true }"
+
+---
+id: not-to-lookahead-negative
+language: rust
+rule:
+  pattern: Pattern::Not($INNER)
+fix: "Pattern::Lookahead { pattern: $INNER, positive: false }"
+
+---
+id: char-to-charpattern-exact
+language: rust
+rule:
+  pattern: Pattern::Char($C)
+fix: Pattern::Char(CharPattern::Exact($C))
+
+---
+id: literal-to-stringliteral
+language: rust
+rule:
+  pattern: Pattern::Literal($S)
+fix: Pattern::StringLiteral($S)
+
+---
+id: charclass-to-char-class
+language: rust
+rule:
+  pattern: Pattern::CharClass($RANGES)
+fix: Pattern::Char(CharPattern::Class($RANGES))
+
+---
+id: negcharclass-to-char-negatedclass
+language: rust
+rule:
+  pattern: Pattern::NegCharClass($RANGES)
+fix: Pattern::Char(CharPattern::NegatedClass($RANGES))
+
+---
+id: bind-tuple-to-struct
+language: rust
+rule:
+  pattern: Pattern::Bind($INNER, $NAME, $IS_CHOICE)
+fix: "Pattern::Bind { name: $NAME, pattern: $INNER, is_choice: $IS_CHOICE }"
+
+---
+id: guard-to-struct
+language: rust
+rule:
+  pattern: Pattern::Guard($INNER, $EXPR)
+fix: "Pattern::Guard { pattern: $INNER, predicate: Box::new($EXPR) }"
+
+---
+id: action-to-struct
+language: rust
+rule:
+  pattern: Pattern::Action($INNER, $EXPR)
+fix: "Pattern::Action { pattern: $INNER, action: Box::new($EXPR) }"

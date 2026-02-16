@@ -74,8 +74,9 @@ impl Host for TestHost {
         _symbol: &str,
         _sig_hash: SigHash,
         _args: &[ValueRef<'_>],
+        _rets: &mut [execution_tape::value::Value],
         _access_sink: Option<&mut dyn AccessSink>,
-    ) -> Result<(Vec<execution_tape::value::Value>, u64), HostError> {
+    ) -> Result<u64, HostError> {
         Err(HostError::UnknownSymbol)
     }
 }
@@ -96,7 +97,6 @@ fn run_exec_arithmetic() {
         FunctionSig {
             arg_types: vec![],
             ret_types: vec![ValueType::I64],
-            reg_count: 6,
         },
     )
     .unwrap();
@@ -122,7 +122,6 @@ fn run_exec_conditional() {
         FunctionSig {
             arg_types: vec![],
             ret_types: vec![ValueType::I64],
-            reg_count: 7,
         },
     )
     .unwrap();
@@ -150,7 +149,6 @@ fn run_exec_function_call() {
         FunctionSig {
             arg_types: vec![ValueType::I64],
             ret_types: vec![ValueType::I64],
-            reg_count: 3,
         },
     )
     .unwrap();
@@ -160,7 +158,6 @@ fn run_exec_function_call() {
         FunctionSig {
             arg_types: vec![],
             ret_types: vec![ValueType::I64],
-            reg_count: 3,
         },
     )
     .unwrap();

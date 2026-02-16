@@ -1,143 +1,41 @@
 # Object System
 
-Goblins-inspired prototype-based objects with capabilities.
-
-**Location**: `fmpl-core/src/object.rs:1`
-
----
+Live, image-based prototype objects with capability security.
 
 ## Overview
 
-Prototype-based object system inspired by [Spritely Goblins](https://spritely.institute/goblins/):
+Objects live in a persistent image (Self/Smalltalk/LambdaMOO tradition). The image is the source of truth -- `object { }` blocks are bootstrapping sugar. The inspector is the primary interface.
 
-- **Prototype inheritance** — Objects delegate to parent objects (`object.rs:102`)
-- **Facets** — Capability-based restricted views (`object.rs:152`)
-- **spawn** — Create object instances from parent objects (`vm.rs:1018`)
-- **Sync/async calls** — `$` for same-vat, `<-` for async (Phase 1 implemented)
+- **Prototype inheritance** — Delegate to parent via chain lookup (`object.rs:102`)
+- **Default private** — All slots private unless exposed through a facet
+- **Facets** — Lightweight, sealed views on parent objects (`object.rs:23`)
+- **Multi-principal** — Humans and LLM agents share the image via faceted capabilities
+- **Transparent persistence** — Fjall-backed, no explicit save/load
+- **spawn / bcom** — Object creation and functional state updates
 
----
+## Subsections
 
-## Object Definition
-
-Objects are defined with methods and optional facets:
-
-```fmpl
-object web_root {
-  entry(): :crossroads
-}
-
-object crossroads {
-  render_html(): "ok"
-}
-```
-
-See `fmpl-core/tests/object_methods.rs:3` for usage examples.
-
-### Visibility Markers (Planned)
-
-| Marker | Meaning |
-|--------|---------|
-| `.#private` | Internal only |
-| `.#public` | Accessible by callers |
-| `.#facets` | Facet definitions |
-
-> **Note**: Visibility markers are parsed (`lexer.rs:83`) but not yet enforced at runtime.
-
----
-
-## spawn
-
-Creates object instances from a parent object (`vm.rs:1267`):
-
-```fmpl
-let obj = spawn parent_object(args)
-```
-
-Spawns a new object with the given parent. If the parent (or its prototype chain) has an `init` method, it will be called with the provided arguments to initialize the new object.
-
-**Constructor invocation**:
-- The `init` method is looked up on the new object (following prototype chain)
-- If found, and the argument count matches, `init` is called with `this` bound to the new object
-- If `init` doesn't exist or arg count doesn't match, spawn still succeeds (graceful degradation)
-
-```fmpl
-object counter {
-  init(start): 42  -- Constructor body
-
-  get_value(): 100
-}
-
-let c = spawn counter(10)  -- Creates counter, calls init(10)
-```
-
-**Implementation**: `vm.rs:1267-1301`
-
----
-
-## Sync vs Async (Phase 1)
-
-```fmpl
-$ obj.method()      -- synchronous, same-vat (pass-through)
-<- obj.method()     -- asynchronous, returns stream
-```
-
-**Status**: Phase 1 implemented (`vm.rs:586-609`, `parser.rs:458-467`)
-
-**Phase 1 behavior**:
-- `$ expr` — Passes through the value unchanged (same-vat call is implicit)
-- `<- expr` — Wraps the value in an `AsyncStream` for consumption
-
-**Future phases**:
-- Phase 2: Multi-VAT support for cross-vat async calls
-- Promise pipelining: `<- (<- a.b()).c()` syntax
-
-**Tests**: `fmpl-core/tests/sync_async_operators.rs`
-
----
-
-## Facets (Capabilities)
-
-Facets define restricted views of objects (`object.rs:21`):
-
-```rust
-pub struct Facet {
-    pub members: Vec<SmolStr>,  // allowed members
-    pub terminal: bool,         // true for `facet!:` definitions
-}
-```
-
-**Parser support**: `parser.rs:175` (parse_facet_def)
-
-**Runtime check**: `object.rs:177` (facet_allows)
-
-### Facet Syntax (Planned)
-
-```fmpl
-object treasury {
-  .#facets
-  auditor: [view_balance]
-  auditor!: [view_balance]  -- terminal (non-delegatable)
-}
-
-treasury.as(:auditor).view_balance()   -- works
-treasury.as(:auditor).withdraw(100)    -- denied
-```
-
-Facet access via `.as(:facet)` compiles to `GetFacet` instruction (`compiler.rs:579`).
-
----
+| Spec | Scope | Key Files |
+|------|-------|-----------|
+| [image-model](object-system/image-model.md) | Image interaction, inspector, persistence | `object.rs`, `persistence.md` |
+| [facets](object-system/facets.md) | Sealed views, syntax levels, composition, laws | `object.rs:23`, `parser.rs:188`, `vm.rs:632` |
+| [visibility](object-system/visibility.md) | Default private, `.#public` sugar, enforcement | `lexer.rs:93-99`, `parser.rs:110` |
+| [multi-principal](object-system/multi-principal.md) | Users, agents, VATs, tuple space coordination | `vm.rs:42`, `tuplespace/facet.rs` |
+| [spawn-bcom](object-system/spawn-bcom.md) | Object creation, become pattern, transactions | `vm.rs:625` |
 
 ## Key Types
 
-### ObjectId (`object.rs:12`)
-
 ```rust
+// object.rs:12
 pub type ObjectId = u64;
-```
 
-### Object (`object.rs:29`)
+// object.rs:23
+pub struct Facet {
+    pub members: Vec<SmolStr>,
+    pub terminal: bool,
+}
 
-```rust
+// object.rs:30
 pub struct Object {
     pub id: ObjectId,
     pub parent: Option<ObjectId>,
@@ -147,156 +45,26 @@ pub struct Object {
 }
 ```
 
-### Method (`object.rs:15`)
+## Implementation Status
 
-```rust
-pub struct Method {
-    pub params: Vec<SmolStr>,
-    pub code: Arc<CompiledCode>,
-}
-```
+- [x] Prototype chain — `object.rs:102`
+- [x] spawn with init — `vm.rs:625`
+- [x] Facet parsing — `parser.rs:188`
+- [x] `.as(:facet)` — `compiler.rs:1027`, `vm.rs:632`
+- [x] Tuple space facets — `tuplespace/facet.rs:57`
+- [ ] **Default private enforcement** → [visibility](object-system/visibility.md)
+- [ ] **Facet sealing** (return sealed view, not raw ObjectId) → [facets](object-system/facets.md)
+- [ ] **`.#public` desugaring** → [visibility](object-system/visibility.md)
+- [ ] **Facet arity/unification** (level 2-3 syntax) → [facets](object-system/facets.md)
+- [ ] **bcom** → [spawn-bcom](object-system/spawn-bcom.md)
+- [ ] **User context propagation** → [multi-principal](object-system/multi-principal.md)
+- [ ] **Yield injection** → [multi-principal](object-system/multi-principal.md)
+- [ ] **Multi-VAT** → [multi-principal](object-system/multi-principal.md)
 
-### Magical Variables in Method Context
+## Related
 
-Methods have access to special variables that are **always available** in their execution environment:
-
-| Variable | Description |
-|----------|-------------|
-| `self` | Reference to the current object (the receiver of the method call) |
-| `parent` | Reference to the object's prototype parent (for prototype chain lookup) |
-| `caller` | Reference to the object that called this method |
-| `user` | Reference to the current user context (from VM's `current_user`) |
-| `args` | The list of all arguments passed to the method |
-
-**Design rationale**: These magical variables provide essential context for method execution without requiring explicit parameter passing. They are similar to reserved words in languages like Self, JavaScript, and Python (`self`, `this`, `super`, etc.).
-
-**Example usage**:
-
-```fmpl
-object authenticated_agent {
-  secret_key: "hidden"
-
-  .#public
-  do_action(arg): {
-    -- 'self' gives access to own properties
-    if user.authenticated then {
-      -- 'user' is pre-bound from VM context
-      self.perform(arg)
-    }
-  }
-
-  .#private
-  perform(arg): arg + secret_key
-}
-```
-
-**Implementation note**: Currently, `self`, `parent`, `caller`, `user`, and `args` are implemented as dedicated bytecode instructions (`LoadSelf`, `LoadParent`, etc.) in the compiler ([compiler.rs:53](../fmpl-core/src/compiler.rs:53)) and VM ([vm.rs:326](../fmpl-core/src/vm.rs:326)). The lexer tokenizes these as keywords ([lexer.rs:59-68](../fmpl-core/src/lexer.rs:59-68)).
-
-**Future direction**: These may be bound as actual local variables in the method's environment for consistency with parameter passing, allowing them to be captured, shadowed, or passed as first-class values.
-
-### ObjectDb (`object.rs:51`)
-
-```rust
-pub struct ObjectDb {
-    objects: HashMap<ObjectId, Object>,
-    next_id: ObjectId,
-    named: HashMap<SmolStr, ObjectId>,  // @name registrations
-}
-```
-
----
-
-## ObjectDb API
-
-| Method | Line | Description |
-|--------|------|-------------|
-| `create(parent)` | 69 | Create new object |
-| `get(id)` | 92 | Get object by ID |
-| `get_mut(id)` | 97 | Get mutable object |
-| `register_name(name, id)` | 77 | Register named object |
-| `lookup_name(name)` | 82 | Look up by name |
-| `named_objects()` | 87 | Iterate named objects |
-| `get_property(id, name)` | 102 | Get property (follows prototype chain) |
-| `set_property(id, name, val)` | 117 | Set property |
-| `get_method(id, name)` | 127 | Get method (follows prototype chain) |
-| `define_method(id, name, method)` | 142 | Define method |
-| `get_facet(id, name)` | 152 | Get facet definition |
-| `define_facet(id, name, facet)` | 167 | Define facet |
-| `facet_allows(id, facet, member)` | 177 | Check facet access |
-
----
-
-## Prototype Chain
-
-Properties and methods are looked up through the prototype chain (`object.rs:102`):
-
-```rust
-pub fn get_property(&self, id: ObjectId, name: &str) -> Option<Value> {
-    let obj = self.objects.get(&id)?;
-
-    // Check local first
-    if let Some(val) = obj.properties.get(name) {
-        return Some(val.clone());
-    }
-
-    // Delegate to parent
-    if let Some(parent) = obj.parent {
-        return self.get_property(parent, name);
-    }
-
-    None
-}
-```
-
----
-
-## Value Representation
-
-Objects are referenced by ID in the runtime (`value.rs:25`):
-
-```rust
-pub enum Value {
-    Object(ObjectId),
-    // ... other variants
-}
-```
-
-Object data lives in `ObjectDb`; `Value::Object` is just a handle.
-
----
-
-## Planned Features
-
-- [x] **Constructor invocation** — `spawn` calls constructor method (`vm.rs:1602-1629`)
-- [ ] **bcom pattern** — Functional state updates (become pattern)
-- [ ] **Visibility enforcement** — `.#private`/`.#public` at runtime
-- [x] **$ and <- operators (Phase 1)** — Sync/async method calls (`vm.rs:586-609`)
-- [ ] **$ and <- operators (Phase 2)** — Multi-VAT support
-- [ ] **Promise pipelining** — `<- (<- a.b()).c()`
-- [ ] **Multi-VAT** — Distributed objects
-
----
-
-## Public Exports
-
-From `fmpl-core/src/lib.rs:30`:
-
-```rust
-pub use object::{Object, ObjectDb, ObjectId};
-```
-
----
-
-## Related Specs
-
-- [fmpl-core.md](./fmpl-core.md) — Core runtime
-- [vm.md](./vm.md) — VM execution
-- [persistence.md](./persistence.md) — Object persistence
-
----
-
-## References
-
-- [Spritely Goblins](https://spritely.institute/goblins/) — Distributed objects
-- [Self](https://selflanguage.org/) — Prototype-based OOP
-- [E Language](http://www.erights.org/) — Capability security
+- [vm.md](./vm.md) — Instruction set, magical variables
+- [tuplespace.md](./tuplespace.md) — Tuple space coordination
+- [grammar-system.md](./grammar-system.md) — Command parsing dispatch
+- [persistence.md](./persistence.md) — Fjall-backed storage
+- Research: [type-inference](../docs/research/2026-02-25-type-inference-duck-typed-systems.md), [category-theory](../docs/research/2026-02-25-category-theoretic-type-system.md), [multi-user-synthesis](../docs/research/2026-02-25-multi-user-architecture-synthesis.md), [coldmud](../docs/research/2026-02-25-coldmud-architecture.md)
