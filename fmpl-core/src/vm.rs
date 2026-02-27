@@ -3633,6 +3633,13 @@ impl Vm {
                 crate::builtins::RandBuiltin::int(min, max)
             }
             ("__builtin_rand", "float") => crate::builtins::RandBuiltin::float(),
+            ("__builtin_stream", "new") => {
+                if args.len() != 1 {
+                    return Err(Error::Runtime("stream::new requires 1 argument".into()));
+                }
+                let ps = crate::parse_stream::ParseStream::new(args.into_iter().next().unwrap());
+                Ok(Value::ParseStream(Arc::new(std::sync::Mutex::new(ps))))
+            }
             ("__builtin_stream", "observe") => {
                 // observe(collection_or_stream_or_cursor, branch_id?) -> Cursor
                 // Creates a cursor reference to any collection, stream, or existing cursor
@@ -4190,6 +4197,21 @@ impl Vm {
                         let end = end.min(s.len());
                         let start = start.min(end);
                         Value::String(SmolStr::new(&s[start..end]))
+                    }
+                    _ => return Err(Error::UndefinedMethod(name.to_string())),
+                };
+                let frame = self.frames.last_mut().unwrap();
+                frame.set_current(result);
+            }
+            Value::ParseStream(ps) => {
+                let result = match name {
+                    "head" => {
+                        let stream = ps.lock().unwrap();
+                        stream.head()
+                    }
+                    "position" => {
+                        let stream = ps.lock().unwrap();
+                        Value::Int(stream.position() as i64)
                     }
                     _ => return Err(Error::UndefinedMethod(name.to_string())),
                 };

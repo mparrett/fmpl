@@ -764,6 +764,10 @@ impl SourceRepr for Value {
             Value::TupleSpaceFacet(_) => "<tuplespace_facet>".to_string(),
             Value::Cursor(c) => format!("<cursor branch:{} pos:{}>", c.branch_id, c.position.index),
             Value::Code(_) => "<code>".to_string(),
+            Value::ParseStream(ps) => {
+                let stream = ps.lock().unwrap();
+                format!("<parse_stream@{}>", stream.position())
+            }
         }
     }
 }

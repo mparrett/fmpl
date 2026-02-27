@@ -63,6 +63,9 @@ pub enum Value {
     /// Compiled bytecode (opaque, executable).
     #[serde(skip)]
     Code(Arc<CompiledCode>),
+    /// Parse stream for grammar parsing (unified stream type).
+    #[serde(skip)]
+    ParseStream(Arc<std::sync::Mutex<crate::parse_stream::ParseStream>>),
 }
 
 /// A cursor into a stream - lightweight CoW reference.
@@ -280,13 +283,16 @@ impl Value {
             Value::TupleSpaceFacet(_) => "tuplespace_facet",
             Value::Cursor(_) => "cursor",
             Value::Code(_) => "code",
+            Value::ParseStream(_) => "parse_stream",
         }
     }
 
     /// Check if value is a stream or cursor.
     pub fn is_stream_like(&self) -> bool {
         match self {
-            Value::Stream(_) | Value::AsyncStream(_) | Value::Cursor(_) => true,
+            Value::Stream(_) | Value::AsyncStream(_) | Value::Cursor(_) | Value::ParseStream(_) => {
+                true
+            }
             _ => false,
         }
     }
@@ -649,6 +655,10 @@ impl fmt::Display for Value {
                 c.branch_id, c.position.index
             ),
             Value::Code(_) => write!(f, "<code>"),
+            Value::ParseStream(ps) => {
+                let stream = ps.lock().unwrap();
+                write!(f, "<parse_stream@{}>", stream.position())
+            }
         }
     }
 }
