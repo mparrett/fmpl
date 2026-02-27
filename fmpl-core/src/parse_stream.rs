@@ -1,16 +1,33 @@
 //! ParseStream: unified stream type for grammar parsing.
 //!
-//! Wraps any iterable Value (String, List, Tagged) with position tracking
-//! and checkpoint/restore for backtracking. Memoization will be added
-//! when `apply()` is implemented (Task 4).
+//! Wraps any iterable Value (String, List, Tagged) with position tracking,
+//! checkpoint/restore for backtracking, and packrat memoization for `apply()`.
 
 use crate::value::Value;
 use smol_str::SmolStr;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// A checkpoint for backtracking.
 #[derive(Debug, Clone)]
 pub struct Checkpoint {
     pub position: usize,
+}
+
+/// Key for the packrat memo table.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MemoKey {
+    pub position: usize,
+    pub rule_id: u64,
+}
+
+/// Memo entry for packrat parsing.
+#[derive(Debug, Clone)]
+pub enum MemoEntry {
+    /// Rule is currently being evaluated (left recursion guard).
+    InProgress,
+    /// Rule completed with result and end position.
+    Done(Option<Value>, usize),
 }
 
 /// Unified parse stream over any iterable Value.
@@ -20,6 +37,8 @@ pub struct ParseStream {
     source: Value,
     /// Current position in the source.
     position: usize,
+    /// Packrat memoization table.
+    memo: HashMap<MemoKey, MemoEntry>,
 }
 
 impl ParseStream {
@@ -28,6 +47,7 @@ impl ParseStream {
         Self {
             source,
             position: 0,
+            memo: HashMap::new(),
         }
     }
 
@@ -111,6 +131,34 @@ impl ParseStream {
             Value::List(items) => self.position >= items.len(),
             Value::Tagged(_, _) => self.position >= 1,
             _ => self.position >= 1,
+        }
+    }
+
+    /// Look up a memo entry by key.
+    pub fn get_memo(&self, key: &MemoKey) -> Option<&MemoEntry> {
+        self.memo.get(key)
+    }
+
+    /// Store a memo entry.
+    pub fn set_memo(&mut self, key: MemoKey, entry: MemoEntry) {
+        self.memo.insert(key, entry);
+    }
+}
+
+/// Compute identity hash for a rule value (for memo keying).
+///
+/// Uses pointer identity for Lambda and Partial values (fast, stable),
+/// and falls back to Debug-format hashing for other value types.
+pub fn compute_rule_identity(rule: &Value) -> u64 {
+    match rule {
+        Value::Lambda(lambda) => Arc::as_ptr(lambda) as u64,
+        Value::Partial(partial) => Arc::as_ptr(partial) as u64,
+        _ => {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            format!("{:?}", rule).hash(&mut hasher);
+            hasher.finish()
         }
     }
 }

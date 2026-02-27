@@ -223,3 +223,59 @@ fn match_class_failure() {
     .unwrap();
     assert_eq!(result, Value::String("fail".into()));
 }
+
+#[test]
+fn parse_stream_apply_calls_rule() {
+    let mut vm = Vm::new();
+    // Define a rule as a lambda that takes a stream,
+    // reads head, advances, returns it
+    let result = eval(
+        &mut vm,
+        r#"
+        let s = stream::new("abc")
+        let rule = \s { let c = s.head(); s.advance(1); c }
+        s.apply(rule)
+    "#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::String("a".into()));
+}
+
+#[test]
+fn parse_stream_apply_memoizes_result() {
+    let mut vm = Vm::new();
+    // apply() at same position with same rule should return cached result
+    let result = eval(
+        &mut vm,
+        r#"
+        let s = stream::new("abc")
+        let rule = \s { let c = s.head(); s.advance(1); c }
+        let r1 = s.apply(rule)
+        s.restore(0)
+        s.apply(rule)
+    "#,
+    )
+    .unwrap();
+    // Second apply at same position with same rule should return memoized "a"
+    assert_eq!(result, Value::String("a".into()));
+}
+
+#[test]
+fn parse_stream_apply_memoizes_position() {
+    let mut vm = Vm::new();
+    // After memoized apply, position should be restored to the end position
+    let result = eval(
+        &mut vm,
+        r#"
+        let s = stream::new("abc")
+        let rule = \s { let c = s.head(); s.advance(1); c }
+        let r1 = s.apply(rule)
+        s.restore(0)
+        let r2 = s.apply(rule)
+        s.position()
+    "#,
+    )
+    .unwrap();
+    // After memo hit, position should be at 1 (where the rule left off)
+    assert_eq!(result, Value::Int(1));
+}

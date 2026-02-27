@@ -3251,6 +3251,29 @@ impl Vm {
         Ok(())
     }
 
+    /// Call a value (lambda) synchronously within this VM and return its result.
+    ///
+    /// Pushes a new frame for the lambda, executes it to completion within the
+    /// current VM (sharing all state including ParseStreams), and returns the result.
+    /// This is used by `apply()` and other combinators that need to invoke FMPL
+    /// lambdas during method dispatch.
+    fn call_value_and_wait(&mut self, func: Value, args: Vec<Value>) -> Result<Value> {
+        let base_depth = self.frames.len();
+        self.call_value(func, args)?;
+        self.execute_with_depth(base_depth)?;
+
+        if self.frames.len() > base_depth {
+            // Frame still on stack (no explicit Return instruction) — pop and get result
+            let result = self.frames.last().unwrap().result();
+            self.frames.pop();
+            Ok(result)
+        } else {
+            // Frame was popped by Return instruction; result was set on caller frame
+            let frame = self.frames.last().unwrap();
+            Ok(frame.result())
+        }
+    }
+
     /// Execute a lambda with shared VM state (objects and grammars).
     ///
     /// This function creates a new VM instance that shares the object database
@@ -4311,6 +4334,105 @@ impl Vm {
                 frame.set_current(result);
             }
             Value::ParseStream(ps) => {
+                // Handle apply() separately — it needs call_value_and_wait which borrows &mut self
+                if name == "apply" {
+                    let rule = match args.into_iter().next() {
+                        Some(rule) => rule,
+                        None => {
+                            return Err(Error::Runtime("apply() requires a rule argument".into()));
+                        }
+                    };
+
+                    let rule_id = crate::parse_stream::compute_rule_identity(&rule);
+
+                    // Check memo table (lock scope limited to avoid holding lock during call)
+                    {
+                        let stream = ps.lock().unwrap();
+                        let position = stream.position();
+                        let key = crate::parse_stream::MemoKey { position, rule_id };
+                        if let Some(entry) = stream.get_memo(&key) {
+                            match entry {
+                                crate::parse_stream::MemoEntry::Done(Some(value), end_pos) => {
+                                    let value = value.clone();
+                                    let end_pos = *end_pos;
+                                    drop(stream);
+                                    {
+                                        let mut s = ps.lock().unwrap();
+                                        s.restore(&crate::parse_stream::Checkpoint {
+                                            position: end_pos,
+                                        });
+                                    }
+                                    let frame = self.frames.last_mut().unwrap();
+                                    frame.set_current(value);
+                                    return Ok(());
+                                }
+                                crate::parse_stream::MemoEntry::Done(None, _) => {
+                                    return Err(Error::ParseFailed {
+                                        position,
+                                        message: "memoized parse failure".into(),
+                                    });
+                                }
+                                crate::parse_stream::MemoEntry::InProgress => {
+                                    return Err(Error::ParseFailed {
+                                        position,
+                                        message: "left recursion detected".into(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    // Mark rule as in-progress (left recursion guard)
+                    let position = {
+                        let mut stream = ps.lock().unwrap();
+                        let pos = stream.position();
+                        let key = crate::parse_stream::MemoKey {
+                            position: pos,
+                            rule_id,
+                        };
+                        stream.set_memo(key, crate::parse_stream::MemoEntry::InProgress);
+                        pos
+                    };
+
+                    // Call the rule synchronously — lock is NOT held during execution
+                    let stream_val = Value::ParseStream(ps.clone());
+                    match self.call_value_and_wait(rule, vec![stream_val]) {
+                        Ok(result) => {
+                            // Memoize success with end position
+                            let end_pos = {
+                                let stream = ps.lock().unwrap();
+                                stream.position()
+                            };
+                            {
+                                let mut stream = ps.lock().unwrap();
+                                let key = crate::parse_stream::MemoKey { position, rule_id };
+                                stream.set_memo(
+                                    key,
+                                    crate::parse_stream::MemoEntry::Done(
+                                        Some(result.clone()),
+                                        end_pos,
+                                    ),
+                                );
+                            }
+                            let frame = self.frames.last_mut().unwrap();
+                            frame.set_current(result);
+                        }
+                        Err(e) => {
+                            // Memoize failure
+                            {
+                                let mut stream = ps.lock().unwrap();
+                                let key = crate::parse_stream::MemoKey { position, rule_id };
+                                stream.set_memo(
+                                    key,
+                                    crate::parse_stream::MemoEntry::Done(None, position),
+                                );
+                            }
+                            return Err(e);
+                        }
+                    }
+                    return Ok(());
+                }
+
                 let result = match name {
                     "head" => {
                         let stream = ps.lock().unwrap();
