@@ -569,7 +569,14 @@ impl Vm {
                 Instruction::Call { func, args } => {
                     let func_val = frame.get(func);
                     let arg_vals: Vec<Value> = args.iter().map(|&idx| frame.get(idx)).collect();
-                    self.call_value(func_val, arg_vals)?;
+                    match self.call_value(func_val, arg_vals) {
+                        Ok(()) => {}
+                        Err(e) if !self.exception_handlers.is_empty() => {
+                            let error = Value::String(SmolStr::new(e.to_string()));
+                            self.throw_exception(error)?;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
                 Instruction::TailCall { func, args } => {
                     let func_val = frame.get(func);
@@ -584,7 +591,14 @@ impl Vm {
                 } => {
                     let receiver_val = frame.get(receiver);
                     let arg_vals: Vec<Value> = args.iter().map(|&idx| frame.get(idx)).collect();
-                    self.call_method(receiver_val, &method, arg_vals)?;
+                    match self.call_method(receiver_val, &method, arg_vals) {
+                        Ok(()) => {}
+                        Err(e) if !self.exception_handlers.is_empty() => {
+                            let error = Value::String(SmolStr::new(e.to_string()));
+                            self.throw_exception(error)?;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
                 Instruction::Return { value } => {
                     let ret_val = frame.get(value);
@@ -3639,6 +3653,16 @@ impl Vm {
                 }
                 let ps = crate::parse_stream::ParseStream::new(args.into_iter().next().unwrap());
                 Ok(Value::ParseStream(Arc::new(std::sync::Mutex::new(ps))))
+            }
+            ("__builtin_stream", "fail") => {
+                let msg = match args.first() {
+                    Some(Value::String(s)) => s.to_string(),
+                    _ => "parse failure".to_string(),
+                };
+                return Err(Error::ParseFailed {
+                    position: 0,
+                    message: msg,
+                });
             }
             ("__builtin_stream", "observe") => {
                 // observe(collection_or_stream_or_cursor, branch_id?) -> Cursor

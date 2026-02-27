@@ -1406,7 +1406,9 @@ impl Compiler {
                 }
 
                 // Convert stream::new(args), stream::observe(args) to __builtin_stream.method(args)
-                if module == "stream" && (method == "new" || method == "observe") {
+                if module == "stream"
+                    && (method == "new" || method == "observe" || method == "fail")
+                {
                     let builtin_idx = self
                         .code
                         .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_stream")));

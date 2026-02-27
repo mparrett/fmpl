@@ -123,3 +123,18 @@ fn parse_stream_from_list_checkpoint_restore() {
     .unwrap();
     assert_eq!(result, Value::Int(20));
 }
+
+#[test]
+fn parse_stream_fail_is_catchable() {
+    let mut vm = Vm::new();
+    let result = eval(
+        &mut vm,
+        r#"
+        let s = stream::new("abc")
+        let fail_rule = \s { stream::fail("expected digit") }
+        try { fail_rule(s) } catch e { "caught: " + e }
+    "#,
+    )
+    .unwrap();
+    assert!(matches!(result, Value::String(_)));
+}
