@@ -76,3 +76,50 @@ fn parse_stream_is_at_end() {
     // At end of input, head() returns null
     assert_eq!(result, Value::Null);
 }
+
+#[test]
+fn parse_stream_from_list_head() {
+    let mut vm = Vm::new();
+    let result = eval(
+        &mut vm,
+        r#"
+        let s = stream::new([10, 20, 30])
+        s.head()
+    "#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::Int(10));
+}
+
+#[test]
+fn parse_stream_from_list_advance_head() {
+    let mut vm = Vm::new();
+    let result = eval(
+        &mut vm,
+        r#"
+        let s = stream::new([10, 20, 30])
+        s.advance(1)
+        s.head()
+    "#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::Int(20));
+}
+
+#[test]
+fn parse_stream_from_list_checkpoint_restore() {
+    let mut vm = Vm::new();
+    let result = eval(
+        &mut vm,
+        r#"
+        let s = stream::new([10, 20, 30])
+        s.advance(1)
+        let cp = s.checkpoint()
+        s.advance(2)
+        s.restore(cp)
+        s.head()
+    "#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::Int(20));
+}
