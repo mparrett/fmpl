@@ -394,7 +394,7 @@ impl Vm {
                     let val = if let Some(id) = self.current_user {
                         Value::Object(id)
                     } else {
-                        Value::Null
+                        Value::Symbol("none".into())
                     };
                     let frame = self.frames.last_mut().unwrap();
                     frame.set_current(val);

@@ -1,3 +1,4 @@
+use fmpl_core::object::ObjectId;
 use fmpl_core::{Compiler, Lexer, Parser, Result, Value, Vm};
 
 fn eval(vm: &mut Vm, source: &str) -> Result<Value> {
@@ -3206,4 +3207,26 @@ fn test_ir_to_rust_compiles_and_runs() {
     // Cleanup
     let _ = std::fs::remove_file(&rs_path);
     let _ = std::fs::remove_file(&bin_path);
+}
+
+// ============================================================
+// USER CONTEXT TESTS
+// ============================================================
+
+#[test]
+fn test_user_returns_none_when_unset() {
+    let mut vm = Vm::new();
+    let result = eval(&mut vm, "user").unwrap();
+    assert_eq!(result, Value::Symbol("none".into()));
+}
+
+#[test]
+fn test_user_returns_object_id_when_set() {
+    let mut vm = Vm::new();
+
+    let principal_id: ObjectId = 42;
+    vm.current_user = Some(principal_id);
+
+    let result = eval(&mut vm, "user").unwrap();
+    assert_eq!(result, Value::Object(principal_id));
 }

@@ -3,7 +3,7 @@ Remember:
 @c study the jj-workflow skill - it will help you with commiting code and managing tasks.
 Rules:
 0. Always follow the jj-workflow for managing tasks and commits.
-1. Given the list of things to work on in the specs directory, pick the highest value task, and complete it.
+1. Use ``jj issue ready`` to find the highest priority task to work on.
 1a. Maintaining documentation with your fixes is part of the task.
 1b. Fixing specs is part of the task if they're inaccurate or incomplete.
 2. Stop as soon as you've fixed your selected task.
