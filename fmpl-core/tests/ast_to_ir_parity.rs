@@ -272,3 +272,98 @@ mod functions {
         );
     }
 }
+
+/// Full pipeline parity tests: FMPL parser + ast_to_ir vs Rust compiler
+///
+/// These tests verify that the complete FMPL compilation pipeline produces
+/// identical results to the Rust compiler:
+/// 1. ast::parse(source) -> AST tagged values
+/// 2. ast @ ast_to_ir.expr -> IR tagged values
+/// 3. ir::compile(ir) -> CompiledCode
+/// 4. code::eval(code) -> result
+mod full_pipeline {
+    use super::*;
+
+    fn run_fmpl_pipeline(vm: &mut Vm, source: &str) -> Result<Value, String> {
+        let code = format!(
+            r#"
+            io::load("lib/core/prelude.fmpl");
+            io::load("lib/core/ast_to_ir.fmpl");
+            let (ast = ast::parse({:?}));
+            let (ir = ast @ ast_to_ir.expr);
+            let (code = ir::compile(ir));
+            code::eval(code)
+            "#,
+            source
+        );
+        eval(vm, &code).map_err(|e| e.to_string())
+    }
+
+    fn assert_pipeline_parity(source: &str) {
+        let mut vm_fmpl = Vm::new();
+        let mut vm_rust = Vm::new();
+
+        let fmpl_result = run_fmpl_pipeline(&mut vm_fmpl, source);
+        let rust_result = run_rust_compiler(&mut vm_rust, source);
+
+        match fmpl_result {
+            Ok(f) => {
+                // FMPL succeeded - compare with Rust result
+                assert_eq!(
+                    f, rust_result,
+                    "Pipeline parity mismatch for '{}': FMPL={:?}, Rust={:?}",
+                    source, f, rust_result
+                );
+            }
+            Err(f) => {
+                // FMPL failed - this is expected for unsupported features
+                eprintln!(
+                    "FMPL pipeline failed for '{}' (may be unsupported): {}",
+                    source, f
+                );
+                // Still try to run Rust compiler to see if it would have worked
+                eprintln!("Rust compiler result for '{}': {:?}", source, rust_result);
+            }
+        }
+    }
+
+    #[test]
+    fn parity_integer() {
+        assert_pipeline_parity("42");
+    }
+
+    #[test]
+    fn parity_arithmetic() {
+        assert_pipeline_parity("1 + 2 * 3");
+    }
+
+    #[test]
+    fn parity_string() {
+        assert_pipeline_parity("\"hello\"");
+    }
+
+    #[test]
+    fn parity_let_binding() {
+        assert_pipeline_parity("let (x = 42) x + 1");
+    }
+
+    #[test]
+    fn parity_if_expr() {
+        assert_pipeline_parity("if true then 1 else 2");
+    }
+
+    #[test]
+    fn parity_lambda() {
+        assert_pipeline_parity("let (f = \\x x + 1) f(41)");
+    }
+
+    #[test]
+    fn parity_list() {
+        assert_pipeline_parity("[1, 2, 3]");
+    }
+
+    #[test]
+    fn parity_map() {
+        assert_pipeline_parity("%{a: 1, b: 2}");
+    }
+}

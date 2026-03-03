@@ -23,6 +23,27 @@ FMPL is a streaming-first DSL for building AI agents with grammars, capabilities
 
 **Core flow**: Source → Lexer (logos) → Parser (recursive descent) → AST → Compiler → Indexed RPN bytecode → VM execution
 
+## Operating Instructions (Automated Loops)
+
+### Issue Descriptions Are Pre-Digested Research
+
+`jj issue show` descriptions contain key files, code snippets, and context needed for implementation. Treat the description as your research phase — go directly to implementation after reading it. Only read additional files if you need surrounding context for an edit that the issue doesn't cover.
+
+### Cargo Output Filtering
+
+Always filter cargo output to test results:
+
+```bash
+cargo test -p fmpl-core --test <name> <filter> 2>&1 | grep -E '^(test |test result:|error\[|thread.*panicked|assertion)'
+```
+
+### Avoid Re-reading What You Already Have
+
+- Don't `jj issue show` parent issues just to pick a subtask — `jj issue ready` gives you what you need
+- Don't `jj diff` to verify edits — run the failing test instead
+- After editing, run only the specific failing test, not the full suite. Full suite once before commit.
+- Don't re-read files you just wrote — you know what's in them
+
 ## Build & Test
 
 ```bash

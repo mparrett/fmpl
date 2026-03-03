@@ -1,0 +1,15 @@
+[general]
+disable = false
+log_level = "info"
+
+[remote]
+endpoint = "https://ndn.local:50051"
+instance = "main"
+min_remote_size = 100000
+
+[worker]
+auto_start = true
+targets = []
+
+[project]
+type = "rust"
