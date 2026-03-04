@@ -4551,13 +4551,76 @@ impl Vm {
                         let start = start.min(end);
                         Value::List(Arc::new(list[start..end].to_vec()))
                     }
-                    // TODO: Implement fold, foldr, map, filter as VM-level constructs
-                    // that compile to loops in Indexed RPN bytecode, similar to for..in
-                    "fold" | "foldl" | "foldr" | "map" | "filter" => {
-                        return Err(Error::Runtime(format!(
-                            "{}() is not yet implemented - should compile to VM-level loop",
-                            name
-                        )));
+                    "map" => {
+                        let func = match args.first() {
+                            Some(f @ Value::Lambda(_)) => f.clone(),
+                            _ => {
+                                return Err(Error::Runtime(
+                                    "map() requires a lambda argument".to_string(),
+                                ));
+                            }
+                        };
+                        let items = (*list).clone();
+                        let mut result = Vec::with_capacity(items.len());
+                        for item in items {
+                            let val = self.call_value_and_wait(func.clone(), vec![item])?;
+                            result.push(val);
+                        }
+                        Value::List(Arc::new(result))
+                    }
+                    "filter" => {
+                        let func = match args.first() {
+                            Some(f @ Value::Lambda(_)) => f.clone(),
+                            _ => {
+                                return Err(Error::Runtime(
+                                    "filter() requires a lambda argument".to_string(),
+                                ));
+                            }
+                        };
+                        let items = (*list).clone();
+                        let mut result = Vec::new();
+                        for item in items {
+                            let keep =
+                                self.call_value_and_wait(func.clone(), vec![item.clone()])?;
+                            if keep.is_truthy() {
+                                result.push(item);
+                            }
+                        }
+                        Value::List(Arc::new(result))
+                    }
+                    "reduce" | "fold" | "foldl" => {
+                        let (init, func) = match args.as_slice() {
+                            [init, f @ Value::Lambda(_)] => (init.clone(), f.clone()),
+                            _ => {
+                                return Err(Error::Runtime(
+                                    "reduce() requires (initial_value, lambda) arguments"
+                                        .to_string(),
+                                ));
+                            }
+                        };
+                        let items = (*list).clone();
+                        let mut acc = init;
+                        for item in items {
+                            acc = self.call_value_and_wait(func.clone(), vec![acc, item])?;
+                        }
+                        acc
+                    }
+                    "foldr" => {
+                        let (init, func) = match args.as_slice() {
+                            [init, f @ Value::Lambda(_)] => (init.clone(), f.clone()),
+                            _ => {
+                                return Err(Error::Runtime(
+                                    "foldr() requires (initial_value, lambda) arguments"
+                                        .to_string(),
+                                ));
+                            }
+                        };
+                        let items = (*list).clone();
+                        let mut acc = init;
+                        for item in items.into_iter().rev() {
+                            acc = self.call_value_and_wait(func.clone(), vec![acc, item])?;
+                        }
+                        acc
                     }
                     _ => return Err(Error::UndefinedMethod(name.to_string())),
                 };
@@ -5308,5 +5371,53 @@ mod tests {
             has_nameref_with_bind_index,
             "Expected NameRef with bind index"
         );
+    }
+
+    #[test]
+    fn test_list_map() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"[1, 2, 3].map(\x x * 2)"#).unwrap();
+        assert_eq!(
+            result,
+            Value::List(Arc::new(vec![Value::Int(2), Value::Int(4), Value::Int(6)]))
+        );
+    }
+
+    #[test]
+    fn test_list_filter() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"[1, 2, 3].filter(\x x > 1)"#).unwrap();
+        assert_eq!(
+            result,
+            Value::List(Arc::new(vec![Value::Int(2), Value::Int(3)]))
+        );
+    }
+
+    #[test]
+    fn test_list_reduce() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"[1, 2, 3].reduce(0, \acc, x acc + x)"#).unwrap();
+        assert_eq!(result, Value::Int(6));
+    }
+
+    #[test]
+    fn test_list_map_empty() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"[].map(\x x * 2)"#).unwrap();
+        assert_eq!(result, Value::List(Arc::new(vec![])));
+    }
+
+    #[test]
+    fn test_list_filter_none_match() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"[1, 2, 3].filter(\x x > 10)"#).unwrap();
+        assert_eq!(result, Value::List(Arc::new(vec![])));
+    }
+
+    #[test]
+    fn test_list_reduce_single() {
+        let mut vm = Vm::new();
+        let result = eval(&mut vm, r#"[5].reduce(0, \acc, x acc + x)"#).unwrap();
+        assert_eq!(result, Value::Int(5));
     }
 }

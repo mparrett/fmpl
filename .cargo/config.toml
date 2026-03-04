@@ -1,5 +1,4 @@
 [build]
-rustc-wrapper = "cargo-objfs-rustc"
 
 [env]
 OBJFS_REMOTE_ENDPOINT = "http://ndn.local:50051"

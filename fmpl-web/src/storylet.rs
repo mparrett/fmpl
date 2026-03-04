@@ -45,7 +45,7 @@ pub fn build_app(data_dir: impl AsRef<FsPath>) -> crate::continuations::Result<R
         .layer(Extension(state)))
 }
 
-async fn play_start(session: Session, Extension(state): Extension<AppState>) -> impl IntoResponse {
+async fn play_start(Extension(state): Extension<AppState>, session: Session) -> impl IntoResponse {
     let session_id = get_or_create_session_id(&session).await;
     let token = match state
         .continuations
@@ -59,8 +59,8 @@ async fn play_start(session: Session, Extension(state): Extension<AppState>) -> 
 }
 
 async fn play_token(
-    session: Session,
     Extension(state): Extension<AppState>,
+    session: Session,
     Path(token): Path<String>,
     Query(query): Query<StoryletQuery>,
     headers: HeaderMap,
@@ -94,8 +94,8 @@ struct ChoiceForm {
 }
 
 async fn play_choice(
-    session: Session,
     Extension(state): Extension<AppState>,
+    session: Session,
     Path(token): Path<String>,
     axum::Form(form): axum::Form<ChoiceForm>,
 ) -> impl IntoResponse {

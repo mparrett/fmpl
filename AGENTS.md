@@ -23,6 +23,24 @@ FMPL is a streaming-first DSL for building AI agents with grammars, capabilities
 
 **Core flow**: Source → Lexer (logos) → Parser (recursive descent) → AST → Compiler → Indexed RPN bytecode → VM execution
 
+## Development Conventions
+
+### Quality Gates
+
+- **TDD**: Write tests first, then implementation. In green mode, don't fix failing tests by changing the test.
+- **DRY, KISS, YAGNI**: Don't over-engineer. Only implement what's needed now.
+- **cargo test must pass before commit**. Run full suite once before commit; targeted tests during development.
+- **cargo clippy must pass before commit**. Apply all suggestions. If you need `#[allow(...)]`, add it at the file top with a comment explaining why.
+- **Zero warnings**: There MUST be no warnings while building.
+- **3-strike rule**: If you hit the same error 3 times, write a spec with what you tried and what failed, comment the spec path on the issue (`jj issue comment <id> "Blocked: see specs/<path>"`), then stop.
+
+### Documentation Conventions
+
+- Discoveries during implementation that need fixing → document in `specs/` directory.
+- Design decisions → `docs/` directory.
+- Build/implementation instructions → `AGENTS.md` (this file). Don't pollute with design decisions.
+- Specs should be clear, concise, < 200 lines. Break large specs into a directory with subspecs.
+
 ## Operating Instructions (Automated Loops)
 
 ### Issue Descriptions Are Pre-Digested Research
