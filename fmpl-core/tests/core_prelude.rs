@@ -2660,8 +2660,7 @@ fn test_fmpl_parser_complex_arithmetic() {
 
 // TODO: Stack overflow in grammar - needs optimization
 #[test]
-#[ignore = "stack overflow in grammar - needs optimization"]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
+#[ignore = "stack overflow in grammar - needs optimization; fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_nested_function_calls() {
     // Nested function calls: f(g(x), h(y, z))
     let mut vm = Vm::new();
@@ -2803,12 +2802,11 @@ fn test_fmpl_parser_let_with_lambda() {
         assert_eq!(tag.as_str(), "Let");
         assert_eq!(fields.len(), 2);
         // Value in binding should be ShortLambda (short form)
-        if let Value::List(bindings) = &fields[0] {
-            if let Value::Tagged(_, binding_children) = &bindings[0] {
-                if let Value::Tagged(val_tag, _) = &binding_children[1] {
-                    assert_eq!(val_tag.as_str(), "ShortLambda");
-                }
-            }
+        if let Value::List(bindings) = &fields[0]
+            && let Value::Tagged(_, binding_children) = &bindings[0]
+            && let Value::Tagged(val_tag, _) = &binding_children[1]
+        {
+            assert_eq!(val_tag.as_str(), "ShortLambda");
         }
         // Body (index 1) should be Call
         if let Value::Tagged(body_tag, _) = &fields[1] {
@@ -2858,8 +2856,7 @@ fn test_fmpl_parser_list_of_lambdas() {
 // when parsing maps with complex expression values and multiple entries.
 // The grammar needs optimization to handle this case.
 #[test]
-#[ignore = "stack overflow in grammar - needs optimization"]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
+#[ignore = "stack overflow in grammar - needs optimization; fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_map_with_expressions() {
     // Map with expression values: %{a: 1 + 2, b: f(x)}
     let mut vm = Vm::new();

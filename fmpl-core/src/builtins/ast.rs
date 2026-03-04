@@ -326,6 +326,32 @@ pub fn expr_to_value(expr: &Expr) -> Value {
             ))]),
         ),
 
+        // Inline pattern block: x @ { pat => body, ... } is sugar for match
+        Expr::InlinePatternBlock { input, cases } => Value::Tagged(
+            SmolStr::new("Match"),
+            Arc::new(vec![
+                expr_to_value(input),
+                Value::List(Arc::new(
+                    cases
+                        .iter()
+                        .map(|c| {
+                            Value::Tagged(
+                                SmolStr::new("Case"),
+                                Arc::new(vec![
+                                    pattern_to_value(&c.pattern),
+                                    c.guard
+                                        .as_ref()
+                                        .map(|g| expr_to_value(g))
+                                        .unwrap_or(Value::Null),
+                                    expr_to_value(&c.body),
+                                ]),
+                            )
+                        })
+                        .collect(),
+                )),
+            ]),
+        ),
+
         // Catch-all for less common cases
         _ => Value::Tagged(
             SmolStr::new("Unknown"),

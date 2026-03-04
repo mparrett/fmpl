@@ -58,6 +58,12 @@ FMPL is a streaming-first DSL for building AI agents with grammars, capabilities
 - **Zero warnings**: There MUST be no warnings while building.
 - **3-strike rule**: If you hit the same error 3 times, write a spec with what you tried and what failed, comment the spec path on the issue (`jj issue comment <id> "Blocked: see specs/<path>"`), then stop.
 
+### Rust Development
+
+- Always run `cargo clippy` after implementation changes to catch warnings before committing
+- When working with unfamiliar Rust crate APIs (e.g., Fjall, tower-sessions, Axum extractors), read the actual docs or source first rather than guessing the API shape
+- If a dependency API doesn't work after 2 attempts, use `Read` to check the actual type signatures in the dependency source under the cargo registry or target directory
+
 ### Documentation Conventions
 
 - Discoveries during implementation that need fixing → document in `specs/` directory.
@@ -65,7 +71,25 @@ FMPL is a streaming-first DSL for building AI agents with grammars, capabilities
 - Build/implementation instructions → `AGENTS.md` (this file). Don't pollute with design decisions.
 - Specs should be clear, concise, < 200 lines. Break large specs into a directory with subspecs.
 
+## Version Control (jj)
+
+- When using `jj`, describe the current working copy change with `jj describe -m "message"` instead of `jj new -m "message"` (which creates an empty new change)
+- After `jj commit` or `jj describe`, the working copy will show as modified — this is normal jj behavior, not an error
+- When committing, ensure changes are properly separated: check `jj diff` before committing to avoid mixing unrelated changes across commits
+- To split commits: use `jj split` rather than trying manual workarounds
+
 ## Operating Instructions (Automated Loops)
+
+### Issue Triage
+
+- Before starting implementation on any issue, first check if it's already implemented by running relevant tests and grepping for the feature in the codebase
+- Do NOT spend multiple loops closing already-completed issues — batch-check issue status upfront before entering the task loop
+- If more than 2 issues in a row are already done, stop and report the pattern to the user rather than continuing to triage one-by-one
+
+### Task Sizing
+
+- When selecting issues from a backlog, prefer issues that are small and well-scoped over large multi-component issues
+- If an issue spans multiple crates or subsystems (e.g., TUI + Web + core), implement and commit one component at a time rather than trying to do everything at once
 
 ### Issue Descriptions Are Pre-Digested Research
 
@@ -73,16 +97,34 @@ FMPL is a streaming-first DSL for building AI agents with grammars, capabilities
 
 ### Cargo Output Filtering
 
-Always filter cargo output. Unfiltered cargo output wastes context.
+Use `rtk` to filter cargo output. It condenses diagnostics into one-line summaries with file:line locations, filters noise, and shows only failures for tests. Never use raw grep chains — they strip file locations and force re-runs.
 
 ```bash
-# Tests
-cargo test -p fmpl-core --test <name> <filter> 2>&1 | grep -E '^(test |test result:|error\[|thread.*panicked|assertion)'
+# Tests (targeted)
+rtk test cargo test -p fmpl-core --test <name> <filter>
 
-# Build / check / clippy
-cargo build -p <crate> 2>&1 | grep -v objfs | grep -E '^(error|warning:.*fmpl|Compiling fmpl)' | head -30
-cargo clippy 2>&1 | grep -v objfs | grep -E '^(error|warning:)' | grep -v 'generated.*warnings' | head -30
+# Build / check / clippy (workspace-wide)
+rtk err cargo build
+rtk err cargo clippy
 ```
+
+For large error sets (50+) that need interactive triage, use `cargo-browser.py`:
+
+```bash
+cargo clippy 2>&1 | python3 cargo-browser.py   # Parse and save state
+python3 cargo-browser.py --repl                 # Browse errors interactively
+```
+
+### Diffing During Iterations
+
+Always diff against the `ralph-iter-base` bookmark (set at iteration start). Bare `jj diff` shows changes vs parent, but jj auto-snapshots the working copy into the parent — so bare diff often shows nothing or wrong changes.
+
+```bash
+jj diff --from ralph-iter-base --stat    # All files changed this iteration
+jj diff --from ralph-iter-base <file>    # Specific file changes
+```
+
+Never use `jj diff --stat -r 'main'` — that shows the entire project divergence, not iteration changes.
 
 ### Avoid Re-reading What You Already Have
 
@@ -103,7 +145,7 @@ The issue is extractor ordering or missing middleware. `Session` requires `Sessi
 ### How To: Debug Cargo Build Failures
 
 ```bash
-cargo build -p <crate> 2>&1 | grep -v objfs | grep -E '^(error|warning:.*fmpl)' | head -30
+rtk err cargo build -p <crate>
 ```
 
 If errors reference external crate types, check API docs first (see above).

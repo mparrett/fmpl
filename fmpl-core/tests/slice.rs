@@ -280,7 +280,7 @@ mod string_slicing {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#""hello"[3..1]"#).unwrap();
         assert!(
-            matches!(result, Value::String(ref s) if s == ""),
+            matches!(result, Value::String(ref s) if s.is_empty()),
             "got {:?}",
             result
         );
@@ -302,7 +302,7 @@ mod string_slicing {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"""[0..0]"#).unwrap();
         assert!(
-            matches!(result, Value::String(ref s) if s == ""),
+            matches!(result, Value::String(ref s) if s.is_empty()),
             "got {:?}",
             result
         );

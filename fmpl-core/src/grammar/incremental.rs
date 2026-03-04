@@ -177,7 +177,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = fjall::Database::builder(temp_dir.path()).open().unwrap();
         let keyspace = db
-            .keyspace("parse_states", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("parse_states", fjall::KeyspaceCreateOptions::default)
             .unwrap();
 
         let mut bindings = HashMap::new();
@@ -212,7 +212,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = fjall::Database::builder(temp_dir.path()).open().unwrap();
         let keyspace = db
-            .keyspace("parse_states", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("parse_states", fjall::KeyspaceCreateOptions::default)
             .unwrap();
 
         let result = ParseState::load_from_fjall(&keyspace, b"nonexistent");

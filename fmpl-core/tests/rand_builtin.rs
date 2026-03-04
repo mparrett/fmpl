@@ -29,7 +29,7 @@ fn test_rand_int_returns_valid_integer() {
 
     if let Value::Int(n) = value {
         assert!(
-            n >= 1 && n < 10,
+            (1..10).contains(&n),
             "rand::int(1, 10) returned {} (expected 1 <= n < 10)",
             n
         );
@@ -55,7 +55,7 @@ fn test_rand_float_returns_valid_float() {
 
     if let Value::Float(f) = value {
         assert!(
-            f >= 0.0 && f < 1.0,
+            (0.0..1.0).contains(&f),
             "rand::float() returned {} (expected 0.0 <= f < 1.0)",
             f
         );
@@ -193,7 +193,7 @@ fn test_rand_int_with_negative_range() {
 
     if let Value::Int(n) = value {
         assert!(
-            n >= -10 && n < -5,
+            (-10..-5).contains(&n),
             "rand::int(-10, -5) returned {} (expected -10 <= n < -5)",
             n
         );
@@ -212,7 +212,7 @@ fn test_rand_int_multiple_calls() {
     assert!(result_a.is_ok(), "Expected Ok, got: {:?}", result_a);
 
     if let Value::Int(a) = result_a.unwrap() {
-        assert!(a >= 1 && a < 1000, "rand::int(1, 1000) returned {}", a);
+        assert!((1..1000).contains(&a), "rand::int(1, 1000) returned {}", a);
 
         // Generate second number
         let code_b = r#"
@@ -223,7 +223,7 @@ fn test_rand_int_multiple_calls() {
         assert!(result_b.is_ok(), "Expected Ok, got: {:?}", result_b);
 
         if let Value::Int(b) = result_b.unwrap() {
-            assert!(b >= 1 && b < 1000, "rand::int(1, 1000) returned {}", b);
+            assert!((1..1000).contains(&b), "rand::int(1, 1000) returned {}", b);
             // Note: We don't assert a != b due to small probability of collision
         }
     }
@@ -241,7 +241,7 @@ fn test_rand_float_multiple_calls() {
     assert!(result_a.is_ok(), "Expected Ok, got: {:?}", result_a);
 
     if let Value::Float(a) = result_a.unwrap() {
-        assert!(a >= 0.0 && a < 1.0, "rand::float() returned {}", a);
+        assert!((0.0..1.0).contains(&a), "rand::float() returned {}", a);
 
         // Generate second number
         let code_b = r#"
@@ -252,7 +252,7 @@ fn test_rand_float_multiple_calls() {
         assert!(result_b.is_ok(), "Expected Ok, got: {:?}", result_b);
 
         if let Value::Float(b) = result_b.unwrap() {
-            assert!(b >= 0.0 && b < 1.0, "rand::float() returned {}", b);
+            assert!((0.0..1.0).contains(&b), "rand::float() returned {}", b);
             // Note: We don't assert a != b due to astronomically small probability of collision
         }
     }

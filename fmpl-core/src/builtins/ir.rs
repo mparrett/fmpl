@@ -248,13 +248,27 @@ impl IrCompiler {
                 self.compile_ir(&children[2])
             }
             "Seq" => {
-                // :Seq([ir1, ir2, ...])
-                let items = self.expect_list(&children[0])?;
-                let mut last_idx = self.emit(Instruction::LoadNull);
-                for item in items {
-                    last_idx = self.compile_ir(&item)?;
+                // Two forms:
+                // :Seq([ir1, ir2, ...]) - list form
+                // :Seq(ir_first, ir_rest) - two-child form from ast_to_ir.fmpl
+                if children.len() == 1 {
+                    // List form
+                    let items = self.expect_list(&children[0])?;
+                    let mut last_idx = self.emit(Instruction::LoadNull);
+                    for item in items {
+                        last_idx = self.compile_ir(&item)?;
+                    }
+                    Ok(last_idx)
+                } else if children.len() == 2 {
+                    // Two-child form: evaluate first, then rest
+                    self.compile_ir(&children[0])?;
+                    self.compile_ir(&children[1])
+                } else {
+                    Err(Error::Runtime(format!(
+                        "Seq expects 1 or 2 children, got {}",
+                        children.len()
+                    )))
                 }
-                Ok(last_idx)
             }
             "If" => {
                 // :If(:cond, :then, :else)
@@ -467,6 +481,452 @@ impl IrCompiler {
                     captures,
                 }))
             }
+            "While" => {
+                // :While(cond_ir, body_ir)
+                let result_var =
+                    SmolStr::new(format!("__while_result_{}", self.code.instructions.len()));
+                // Initialize result to null
+                let null_idx = self.emit(Instruction::LoadNull);
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: null_idx,
+                });
+
+                let loop_start = InstrIndex(self.code.instructions.len());
+                let cond = self.compile_ir(&children[0])?;
+                let jump_if_false_idx = self.code.instructions.len();
+                self.emit(Instruction::JumpIfFalse {
+                    cond,
+                    target: InstrIndex(0), // placeholder
+                });
+
+                let body = self.compile_ir(&children[1])?;
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: body,
+                });
+                self.emit(Instruction::Jump { target: loop_start });
+
+                let end = InstrIndex(self.code.instructions.len());
+                if let Instruction::JumpIfFalse { target, .. } =
+                    &mut self.code.instructions[jump_if_false_idx]
+                {
+                    *target = end;
+                }
+
+                Ok(self.emit(Instruction::LoadVar(result_var)))
+            }
+            "DoWhile" => {
+                // :DoWhile(body_ir, cond_ir)
+                let result_var =
+                    SmolStr::new(format!("__dowhile_result_{}", self.code.instructions.len()));
+                let loop_start = InstrIndex(self.code.instructions.len());
+                let body = self.compile_ir(&children[0])?;
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: body,
+                });
+                let cond = self.compile_ir(&children[1])?;
+                self.emit(Instruction::JumpIfTrue {
+                    cond,
+                    target: loop_start,
+                });
+                Ok(self.emit(Instruction::LoadVar(result_var)))
+            }
+            "For" => {
+                // :For(pat, iter_ir, body_ir) — pat may be :PatVar(:x) or bare :x
+                let pat_name = match &children[0] {
+                    Value::Tagged(tag, inner) if tag.as_str() == "PatVar" => {
+                        self.expect_symbol(&inner[0])?
+                    }
+                    other => self.expect_symbol(other)?,
+                };
+                let iter_idx = self.compile_ir(&children[1])?;
+
+                // Create index counter and result
+                let idx_var = SmolStr::new(format!("__for_idx_{}", self.code.instructions.len()));
+                let result_var =
+                    SmolStr::new(format!("__for_result_{}", self.code.instructions.len()));
+                let len_var = SmolStr::new(format!("__for_len_{}", self.code.instructions.len()));
+
+                let zero = self.emit(Instruction::LoadInt(0));
+                self.emit(Instruction::StoreVar {
+                    name: idx_var.clone(),
+                    value: zero,
+                });
+                let null_idx = self.emit(Instruction::LoadNull);
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: null_idx,
+                });
+
+                // Store iter for access in loop, then get length
+                self.emit(Instruction::StoreVar {
+                    name: SmolStr::new("__for_iter"),
+                    value: iter_idx,
+                });
+                let iter_ref = self.emit(Instruction::LoadVar(SmolStr::new("__for_iter")));
+                let len_call = self.emit(Instruction::MethodCall {
+                    receiver: iter_ref,
+                    method: SmolStr::new("len"),
+                    args: vec![],
+                });
+                self.emit(Instruction::StoreVar {
+                    name: len_var.clone(),
+                    value: len_call,
+                });
+
+                // Loop start
+                let loop_start = InstrIndex(self.code.instructions.len());
+                let cur_idx = self.emit(Instruction::LoadVar(idx_var.clone()));
+                let cur_len = self.emit(Instruction::LoadVar(len_var.clone()));
+                let cond = self.emit(Instruction::Lt {
+                    lhs: cur_idx,
+                    rhs: cur_len,
+                });
+                let jump_if_false_idx = self.code.instructions.len();
+                self.emit(Instruction::JumpIfFalse {
+                    cond,
+                    target: InstrIndex(0),
+                });
+
+                // Get current element
+                let iter_ref2 = self.emit(Instruction::LoadVar(SmolStr::new("__for_iter")));
+                let cur_idx2 = self.emit(Instruction::LoadVar(idx_var.clone()));
+                let elem = self.emit(Instruction::Index {
+                    collection: iter_ref2,
+                    key: cur_idx2,
+                });
+                self.emit(Instruction::StoreVar {
+                    name: pat_name,
+                    value: elem,
+                });
+
+                // Execute body
+                let body = self.compile_ir(&children[2])?;
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: body,
+                });
+
+                // Increment counter
+                let cur_idx3 = self.emit(Instruction::LoadVar(idx_var.clone()));
+                let one = self.emit(Instruction::LoadInt(1));
+                let new_idx = self.emit(Instruction::Add {
+                    lhs: cur_idx3,
+                    rhs: one,
+                });
+                self.emit(Instruction::StoreVar {
+                    name: idx_var,
+                    value: new_idx,
+                });
+                self.emit(Instruction::Jump { target: loop_start });
+
+                let end = InstrIndex(self.code.instructions.len());
+                if let Instruction::JumpIfFalse { target, .. } =
+                    &mut self.code.instructions[jump_if_false_idx]
+                {
+                    *target = end;
+                }
+
+                // For loops return null for parity with Rust compiler
+                Ok(self.emit(Instruction::LoadNull))
+            }
+            "Block" => {
+                // :Block([stmt_ir1, stmt_ir2, ...])
+                let stmts = self.expect_list(&children[0])?;
+                if stmts.is_empty() {
+                    return Ok(self.emit(Instruction::LoadNull));
+                }
+                let mut last_idx = self.emit(Instruction::LoadNull);
+                for stmt in stmts {
+                    last_idx = self.compile_ir(&stmt)?;
+                }
+                Ok(last_idx)
+            }
+            "Pipe" => {
+                // :Pipe(arg_ir, func_ir)
+                let arg = self.compile_ir(&children[0])?;
+                let func = self.compile_ir(&children[1])?;
+                Ok(self.emit(Instruction::Pipe { arg, func }))
+            }
+            "Match" => {
+                // :Match(expr_ir, [case_ir1, case_ir2, ...])
+                // Cases may be :Case(pat, guard_or_null, body_ir) with 3 children
+                // or :Case(pat, body_ir) with 2 children
+                let expr_idx = self.compile_ir(&children[0])?;
+                let cases = self.expect_list(&children[1])?;
+                let result_var =
+                    SmolStr::new(format!("__match_result_{}", self.code.instructions.len()));
+                let match_val_var =
+                    SmolStr::new(format!("__match_val_{}", self.code.instructions.len()));
+
+                // Store the match expression value for pattern testing
+                self.emit(Instruction::StoreVar {
+                    name: match_val_var.clone(),
+                    value: expr_idx,
+                });
+
+                let mut jump_to_end_indices = Vec::new();
+
+                for case in &cases {
+                    if let Value::Tagged(case_tag, case_children) = case
+                        && (case_tag.as_str() == "Case" || case_tag.as_str() == "CaseGuard")
+                    {
+                        let (pat, body_ir) = if case_children.len() == 3 {
+                            // 3-child: :Case(pat, guard_or_null, body_ir)
+                            (&case_children[0], &case_children[2])
+                        } else if case_children.len() == 2 {
+                            // 2-child: :Case(pat, body_ir)
+                            (&case_children[0], &case_children[1])
+                        } else {
+                            continue;
+                        };
+
+                        // Check if this is a wildcard pattern
+                        let is_wildcard = matches!(
+                            pat,
+                            Value::Tagged(t, _) if t.as_str() == "PatWildcard"
+                        );
+
+                        if is_wildcard {
+                            // Wildcard: always matches, compile body
+                            let body = self.compile_ir(body_ir)?;
+                            self.emit(Instruction::StoreVar {
+                                name: result_var.clone(),
+                                value: body,
+                            });
+                            let jmp_idx = self.code.instructions.len();
+                            self.emit(Instruction::Jump {
+                                target: InstrIndex(0),
+                            });
+                            jump_to_end_indices.push(jmp_idx);
+                        } else if let Value::Tagged(pat_tag, pat_children) = pat {
+                            match pat_tag.as_str() {
+                                "PatVar" => {
+                                    // :PatVar(:name) — bind match value to name, always matches
+                                    let var_name = self.expect_symbol(&pat_children[0])?;
+                                    let val_ref =
+                                        self.emit(Instruction::LoadVar(match_val_var.clone()));
+                                    self.emit(Instruction::StoreVar {
+                                        name: var_name,
+                                        value: val_ref,
+                                    });
+                                    let body = self.compile_ir(body_ir)?;
+                                    self.emit(Instruction::StoreVar {
+                                        name: result_var.clone(),
+                                        value: body,
+                                    });
+                                    let jmp_idx = self.code.instructions.len();
+                                    self.emit(Instruction::Jump {
+                                        target: InstrIndex(0),
+                                    });
+                                    jump_to_end_indices.push(jmp_idx);
+                                }
+                                "PatConstructor" if pat_children.len() >= 2 => {
+                                    // :PatConstructor(:Tag, [:PatVar(:x), :PatVar(:y)])
+                                    // Check tag matches, then bind children
+                                    let expected_tag = self.expect_symbol(&pat_children[0])?;
+                                    let sub_patterns = self.expect_list(&pat_children[1])?;
+
+                                    // Load the match value and get its tag
+                                    let val_ref =
+                                        self.emit(Instruction::LoadVar(match_val_var.clone()));
+                                    let tag_ref = self.emit(Instruction::GetProp {
+                                        object: val_ref,
+                                        name: SmolStr::new("tag"),
+                                    });
+                                    let expected_tag_idx =
+                                        self.emit(Instruction::LoadSymbol(expected_tag));
+                                    let tag_matches = self.emit(Instruction::Eq {
+                                        lhs: tag_ref,
+                                        rhs: expected_tag_idx,
+                                    });
+
+                                    // If tag doesn't match, skip to next case
+                                    let skip_idx = self.code.instructions.len();
+                                    self.emit(Instruction::JumpIfFalse {
+                                        cond: tag_matches,
+                                        target: InstrIndex(0), // placeholder
+                                    });
+
+                                    // Tag matches — bind children by index
+                                    let val_ref2 =
+                                        self.emit(Instruction::LoadVar(match_val_var.clone()));
+                                    for (idx, sub_pat) in sub_patterns.iter().enumerate() {
+                                        if let Value::Tagged(sp_tag, sp_children) = sub_pat
+                                            && sp_tag.as_str() == "PatVar"
+                                            && !sp_children.is_empty()
+                                        {
+                                            let var_name = self.expect_symbol(&sp_children[0])?;
+                                            let idx_val =
+                                                self.emit(Instruction::LoadInt(idx as i64));
+                                            let elem = self.emit(Instruction::Index {
+                                                collection: val_ref2,
+                                                key: idx_val,
+                                            });
+                                            self.emit(Instruction::StoreVar {
+                                                name: var_name,
+                                                value: elem,
+                                            });
+                                        }
+                                    }
+
+                                    let body_result = self.compile_ir(body_ir)?;
+                                    self.emit(Instruction::StoreVar {
+                                        name: result_var.clone(),
+                                        value: body_result,
+                                    });
+                                    let jmp_idx = self.code.instructions.len();
+                                    self.emit(Instruction::Jump {
+                                        target: InstrIndex(0),
+                                    });
+                                    jump_to_end_indices.push(jmp_idx);
+
+                                    // Patch skip target
+                                    let next_case = InstrIndex(self.code.instructions.len());
+                                    if let Instruction::JumpIfFalse { target, .. } =
+                                        &mut self.code.instructions[skip_idx]
+                                    {
+                                        *target = next_case;
+                                    }
+                                }
+                                _ => {
+                                    // Other patterns: treat as wildcard for now
+                                    let body = self.compile_ir(body_ir)?;
+                                    self.emit(Instruction::StoreVar {
+                                        name: result_var.clone(),
+                                        value: body,
+                                    });
+                                    let jmp_idx = self.code.instructions.len();
+                                    self.emit(Instruction::Jump {
+                                        target: InstrIndex(0),
+                                    });
+                                    jump_to_end_indices.push(jmp_idx);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let end = InstrIndex(self.code.instructions.len());
+                for jmp_idx in jump_to_end_indices {
+                    if let Instruction::Jump { target } = &mut self.code.instructions[jmp_idx] {
+                        *target = end;
+                    }
+                }
+
+                Ok(self.emit(Instruction::LoadVar(result_var)))
+            }
+            "TryCatch" => {
+                // :TryCatch(body_ir, catch_var, catch_body_ir)
+                // Matches Rust compiler behavior: PushHandler, try body, PopHandler,
+                // jump over catch, catch handler, result
+                let catch_var = self.expect_symbol(&children[1])?;
+                let result_var =
+                    SmolStr::new(format!("__try_result_{}", self.code.instructions.len()));
+
+                // PushHandler with placeholder catch target
+                let handler_idx = self.code.instructions.len();
+                self.emit(Instruction::PushHandler {
+                    catch_target: InstrIndex(0),
+                });
+
+                // Try body
+                let body = self.compile_ir(&children[0])?;
+                self.emit(Instruction::PopHandler);
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: body,
+                });
+
+                // Jump over catch
+                let jump_idx = self.code.instructions.len();
+                self.emit(Instruction::Jump {
+                    target: InstrIndex(0),
+                });
+
+                // Catch handler target
+                let catch_target = InstrIndex(self.code.instructions.len());
+                if let Instruction::PushHandler {
+                    catch_target: target,
+                } = &mut self.code.instructions[handler_idx]
+                {
+                    *target = catch_target;
+                }
+
+                // Bind error value (VM pushes error on catch)
+                let error_val = self.emit(Instruction::LoadNull);
+                self.emit(Instruction::StoreVar {
+                    name: catch_var,
+                    value: error_val,
+                });
+
+                // Catch body
+                let catch_body = self.compile_ir(&children[2])?;
+                self.emit(Instruction::StoreVar {
+                    name: result_var.clone(),
+                    value: catch_body,
+                });
+
+                // Patch jump over catch
+                let end = InstrIndex(self.code.instructions.len());
+                if let Instruction::Jump { target } = &mut self.code.instructions[jump_idx] {
+                    *target = end;
+                }
+
+                // TryCatch returns null for parity with Rust compiler
+                Ok(self.emit(Instruction::LoadNull))
+            }
+            "Slice" => {
+                // :Slice(collection_ir, start_or_null, end_or_null)
+                // Start/end may be raw AST values (passed through from ast_to_ir)
+                let collection = self.compile_ir(&children[0])?;
+                let start = match &children[1] {
+                    Value::Null => None,
+                    other => Some(self.compile_ir(other)?),
+                };
+                let end = match &children[2] {
+                    Value::Null => None,
+                    other => Some(self.compile_ir(other)?),
+                };
+                Ok(self.emit(Instruction::Slice {
+                    collection,
+                    start,
+                    end,
+                }))
+            }
+            "Assign" => {
+                // :Assign(target_name, value_ir)
+                let name = self.expect_symbol(&children[0])?;
+                let value = self.compile_ir(&children[1])?;
+                self.emit(Instruction::StoreVar { name, value });
+                Ok(value)
+            }
+            "QualifiedName" => {
+                // :QualifiedName([part1, part2, ...]) — module::function references
+                let parts = self.expect_list(&children[0])?;
+                let mut name_parts = Vec::new();
+                for p in &parts {
+                    name_parts.push(self.expect_symbol(p)?);
+                }
+                let qualified = name_parts.join("::");
+                Ok(self.emit(Instruction::LoadVar(SmolStr::new(qualified))))
+            }
+            // Raw AST nodes that may pass through ast_to_ir unchanged
+            // (e.g., in Slice bounds where null prevents expr application)
+            "Int" => {
+                let n = self.expect_int(&children[0])?;
+                Ok(self.emit(Instruction::LoadInt(n)))
+            }
+            "Float" => {
+                let n = self.expect_float(&children[0])?;
+                Ok(self.emit(Instruction::LoadFloat(n)))
+            }
+            "String" if !children.is_empty() => {
+                let s = self.expect_string(&children[0])?;
+                Ok(self.emit(Instruction::LoadString(s)))
+            }
             _ => Err(Error::Runtime(format!("Unknown IR node: {}", tag))),
         }
     }
@@ -504,6 +964,7 @@ impl IrCompiler {
     fn expect_string(&self, val: &Value) -> Result<SmolStr> {
         match val {
             Value::String(s) => Ok(s.clone()),
+            Value::Symbol(s) => Ok(s.clone()),
             _ => Err(Error::Runtime(format!(
                 "Expected string, got {}",
                 val.type_name()

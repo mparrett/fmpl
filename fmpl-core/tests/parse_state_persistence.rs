@@ -26,7 +26,7 @@ mod tests {
 
         let db1 = fjall::Database::builder(temp_dir.path()).open().unwrap();
         let keyspace1 = db1
-            .keyspace("parse_states", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("parse_states", fjall::KeyspaceCreateOptions::default)
             .unwrap();
 
         // Simulate parse in progress
@@ -56,7 +56,7 @@ mod tests {
 
         let db2 = fjall::Database::builder(temp_dir.path()).open().unwrap();
         let keyspace2 = db2
-            .keyspace("parse_states", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("parse_states", fjall::KeyspaceCreateOptions::default)
             .unwrap();
 
         // Restore suspended state
@@ -93,12 +93,12 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = fjall::Database::builder(temp_dir.path()).open().unwrap();
         let keyspace = db
-            .keyspace("parse_states", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("parse_states", fjall::KeyspaceCreateOptions::default)
             .unwrap();
 
         let mut bindings = HashMap::new();
         bindings.insert(SmolStr::new("int_val"), Value::Int(42));
-        bindings.insert(SmolStr::new("float_val"), Value::Float(3.14));
+        bindings.insert(SmolStr::new("float_val"), Value::Float(2.71));
         bindings.insert(SmolStr::new("bool_val"), Value::Bool(true));
         bindings.insert(SmolStr::new("null_val"), Value::Null);
         bindings.insert(
@@ -127,7 +127,7 @@ mod tests {
         );
         assert_eq!(
             restored.bindings.get(&SmolStr::new("float_val")),
-            Some(&Value::Float(3.14))
+            Some(&Value::Float(2.71))
         );
         assert_eq!(
             restored.bindings.get(&SmolStr::new("bool_val")),
@@ -155,7 +155,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = fjall::Database::builder(temp_dir.path()).open().unwrap();
         let keyspace = db
-            .keyspace("parse_states", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("parse_states", fjall::KeyspaceCreateOptions::default)
             .unwrap();
 
         // Create several sessions
@@ -194,7 +194,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = fjall::Database::builder(temp_dir.path()).open().unwrap();
         let keyspace = db
-            .keyspace("parse_states", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("parse_states", fjall::KeyspaceCreateOptions::default)
             .unwrap();
 
         let key = b"evolving_session";
@@ -237,7 +237,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let db = fjall::Database::builder(temp_dir.path()).open().unwrap();
         let keyspace = db
-            .keyspace("parse_states", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("parse_states", fjall::KeyspaceCreateOptions::default)
             .unwrap();
 
         // Create a deep rule stack (simulating nested grammar rules)

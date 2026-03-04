@@ -42,9 +42,33 @@ If protected files are listed, the state machine will block Write/Edit on them.
 - `jj status` creates checkpoints. `jj undo` rolls back.
 - Consolidate discoveries to `docs/codebase/` before committing.
 
+## Version Control (jj)
+
+- Use `jj describe -m "message"` to describe the current change, NOT `jj new -m "message"` (which creates an empty new change)
+- After `jj commit` or `jj describe`, the working copy showing as modified is normal — not an error
+- Check `jj diff` before committing to avoid mixing unrelated changes
+- Use `jj split` to split commits, not manual workarounds
+
+## Issue Triage
+
+- Before implementing, check if the issue is already done (run tests, grep codebase)
+- Do NOT spend multiple loops closing already-completed issues — batch-check upfront
+- If 2+ issues in a row are already done, stop and report the pattern
+
+## Task Sizing
+
+- Prefer small, well-scoped issues over large multi-component ones
+- If an issue spans multiple crates, implement and commit one crate at a time
+
+## Rust Development
+
+- Run `cargo clippy` after implementation changes, before committing
+- Read docs/source for unfamiliar crate APIs — do NOT guess the API shape
+- If a dependency API doesn't work after 2 attempts, read the type signatures in the dependency source
+
 ## Budget
 
-- 40 tool calls max per iteration
+- **Context goals (soft)**: Keep reference data (file reads, issue descriptions, docs) under ~40% of context. Keep implementation work (edits, test runs, verification) under ~60%. These are guidelines — prioritize task completion over strict limits.
 - 3 close-and-pick loops max in triage
 - 3-strike rule: same error 3 times → write spec, comment on issue, stop
 - Do NOT use TodoWrite — the issue tracker is the task list

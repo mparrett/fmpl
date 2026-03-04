@@ -759,11 +759,12 @@ pub fn resolve_names(code: &mut CompiledCode) {
                 scope_stack.push(HashMap::new());
             }
 
-            Instruction::BlockEnd | Instruction::PopScope => {
+            Instruction::BlockEnd | Instruction::PopScope if scope_stack.len() > 1 => {
                 // Pop scope - inner bindings are forgotten
-                if scope_stack.len() > 1 {
-                    scope_stack.pop();
-                }
+                scope_stack.pop();
+            }
+            Instruction::BlockEnd | Instruction::PopScope => {
+                // No scope to pop (at root)
             }
 
             Instruction::Bind { name, .. } => {
@@ -878,14 +879,28 @@ impl Compiler {
             Expr::Bool(b) => Ok(self.code.emit(Instruction::LoadBool(*b))),
             Expr::Null => Ok(self.code.emit(Instruction::LoadNull)),
             Expr::Ident(name) => {
+                // Use LoadVar so user-defined locals can shadow builtin module names.
+                // The VM's lookup_var falls back to builtin symbols (e.g.,
+                // __builtin_cursor) when no local binding exists.
                 self.loaded_vars.insert(name.clone());
                 Ok(self.code.emit(Instruction::LoadVar(name.clone())))
             }
             Expr::Qualified(qn) => {
-                // For now, treat as simple name lookup
-                Ok(self
-                    .code
-                    .emit(Instruction::LoadVar(SmolStr::new(qn.to_string()))))
+                // Handle global qualified names like ::__builtin_curl
+                // These are symbols that can be used as method receivers
+                if qn.parts.len() >= 2 && qn.parts[0].is_empty() {
+                    // Global namespace reference (::name or ::module.submodule.name)
+                    // Emit as LoadSymbol so call_method can recognize it as a builtin
+                    let symbol_name = qn.parts[1..].join("::");
+                    Ok(self
+                        .code
+                        .emit(Instruction::LoadSymbol(SmolStr::new(symbol_name))))
+                } else {
+                    // Regular qualified name - treat as simple name lookup
+                    Ok(self
+                        .code
+                        .emit(Instruction::LoadVar(SmolStr::new(qn.to_string()))))
+                }
             }
             Expr::ObjTag(name) => Ok(self
                 .code
@@ -1437,7 +1452,7 @@ impl Compiler {
                 }));
             }
 
-            // Convert stream::new(args), stream::observe(args) to __builtin_stream.method(args)
+            // Convert stream::new(args), stream::observe(args), stream.create(args) to __builtin_stream.method(args)
             if module == "stream"
                 && (method == "new"
                     || method == "observe"
@@ -1450,7 +1465,8 @@ impl Compiler {
                     || method == "seq"
                     || method == "not"
                     || method == "lookahead"
-                    || method == "optional")
+                    || method == "optional"
+                    || method == "create")
             {
                 let builtin_idx = self
                     .code
@@ -1498,6 +1514,53 @@ impl Compiler {
                 let builtin_idx = self
                     .code
                     .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_io")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
+                    }
+                }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
+        }
+
+        // Special handling for 3-part qualified names like ::__builtin_curl.get()
+        if let Expr::Qualified(qn) = func
+            && qn.parts.len() == 3
+        {
+            // ::module.method(args) - parts are ["", module, method"]
+            let module = &qn.parts[1];
+            let method = &qn.parts[2];
+
+            // Convert ::__builtin_curl.get(args) to __builtin_curl.get(args)
+            if module == "__builtin_curl" && method == "get" {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_curl")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
+                    }
+                }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
+
+            // Convert ::__builtin_curl.post(args) to __builtin_curl.post(args)
+            if module == "__builtin_curl" && method == "post" {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_curl")));
                 let mut arg_indices = Vec::with_capacity(args.len());
                 for arg in args {
                     match arg {

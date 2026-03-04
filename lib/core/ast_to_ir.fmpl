@@ -13,7 +13,7 @@ let ast_to_ir = grammar ast_to_ir {
          | :Null() => :LoadNull
          | :String(s) => :LoadString(s)
           | :Symbol(s) => :LoadSymbol(s)
-          | :Tagged(tag, expr*:args) => :MakeTagged(tag, args)
+          | :Tagged(tag, expr*:xs) => :MakeTagged(tag, xs)
           | :Var(name) => :Var(name)
          | :QualifiedName(parts) => :QualifiedName(parts)
          -- Binary operators
@@ -30,6 +30,7 @@ let ast_to_ir = grammar ast_to_ir {
          | :Binary(:>=, expr:l, expr:r) => :GtEq(l, r)
          | :Binary(:&&, expr:l, expr:r) => :And(l, r)
          | :Binary(:||, expr:l, expr:r) => :Or(l, r)
+         | :Binary(:|>, expr:l, expr:r) => :Pipe(l, r)
          -- Unary operators
          | :Unary(:-, expr:e) => :Neg(e)
          | :Unary(:!, expr:e) => :Not(e)
@@ -62,16 +63,27 @@ let ast_to_ir = grammar ast_to_ir {
          -- Async operations
          | :AsyncCall(expr:e) => :AsyncCall(e)
          | :SyncCall(expr:e) => :SyncCall(e)
+         -- Try/catch
+         | :TryCatch(expr:body, catch_var, expr:catch_body) => :TryCatch(body, catch_var, catch_body)
+         -- Pipe
+         | :Pipe(expr:arg, expr:func) => :Pipe(arg, func)
+         -- Slice (start/end may be null for open-ended slices, passed through)
+         | :Slice(expr:coll, start, end) => :Slice(coll, start, end)
          -- Assignment
          | :Assign(target, expr:value) => :Assign(target, value)
          -- Block/sequence
          | :Block(expr*:stmts) => :Block(stmts)
+         | :Sequence(expr*:stmts) => :Block(stmts)
          | :Seq(expr:first, expr:rest) => :Seq(first, rest)
 
     -- Transform a [key, val] pair
-    pair = [expr:k, expr:v] => [k, v]
+    -- Map keys in AST are raw symbols (:a), not tagged (:Symbol(:a))
+    -- They need to become :LoadString for ir::compile
+    pair = [_:k, expr:v] => [:LoadString(k), v]
 
     -- Transform match cases
-    case = :Case(pat, expr:body) => :Case(pat, body)
+    -- Parser emits :Case(pat, guard_or_null, body) with 3 children
+    -- Pass through the guard (may be null) without applying expr to it
+    case = :Case(pat, guard, expr:body) => :Case(pat, guard, body)
          | :CaseGuard(pat, expr:guard, expr:body) => :CaseGuard(pat, guard, body)
 }

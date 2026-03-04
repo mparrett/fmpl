@@ -18,6 +18,8 @@ data/
 # Ralph loop logs and transient state
 .ralph-logs/
 .claude/.ralph-state.json
+ralph.yml
+ralph.oc.yml
 
 # Python bytecode
 __pycache__/
@@ -33,3 +35,6 @@ test_*
 # Keep test source files
 !tests/
 
+# Override global ignore for iterative-development artifacts
+!docs/superpowers/
+docs/superpowers/iterations/scratch/

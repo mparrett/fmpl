@@ -156,6 +156,26 @@ pub enum Pattern {
     End,
 }
 
+impl Pattern {
+    /// If this pattern is a `Bind`, return the bind name.
+    pub fn bind_name(&self) -> Option<&SmolStr> {
+        match self {
+            Pattern::Bind { name, .. } => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Check if this pattern contains a Repeat (Star/Plus), possibly wrapped in Bind.
+    /// Used by TagMatch to decide whether to unwrap list-valued children.
+    pub fn contains_repeat(&self) -> bool {
+        match self {
+            Pattern::Repeat { .. } => true,
+            Pattern::Bind { pattern, .. } => pattern.contains_repeat(),
+            _ => false,
+        }
+    }
+}
+
 /// Binary pattern operations for byte-level parsing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum BinaryPattern {

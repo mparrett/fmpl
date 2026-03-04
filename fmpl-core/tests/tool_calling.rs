@@ -71,38 +71,65 @@ fn test_parse_json_tool_call() {
 }
 
 /// T-2: Execute curl.get via Symbol method dispatch (AC-2)
-#[test]
-fn test_execute_curl_via_symbol() {
-    // This test verifies that ::__builtin_curl.get() works via Symbol dispatch
+#[tokio::test]
+async fn test_execute_curl_via_symbol() {
+    // First test: just load the symbol and return it
+    let code_load = r#"
+        ::__builtin_curl
+    "#;
+    let mut vm = Vm::new();
+    let value = eval(&mut vm, code_load);
+    println!("Load symbol result: {:?}", value);
+    assert!(value.is_ok());
+
+    // Second test: the full call with variable
     let code = r#"
         let url = "https://httpbin.org/get"
-        let result = ::__builtin_curl.get([url])
+        let result = ::__builtin_curl.get(url)
         result
     "#;
 
-    let value = run(code);
-    // Result should be a Map with status and body
-    // Note: This will fail without network access, so we just check it doesn't error
-    // assert!(matches!(value, Value::Map(_)));
-    assert!(value.is_ok() || matches!(value, Err(_)));
+    let mut vm = Vm::with_runtime(tokio::runtime::Handle::current());
+    let value = eval(&mut vm, code);
+    // Result should be a Map with source and sink keys (async stream)
+    if let Err(e) = &value {
+        println!("Error: {}", e);
+    }
+    if value.is_err() {
+        println!("Full error: {:?}", value);
+    }
+    assert!(value.is_ok());
+
+    // Verify the result structure
+    match value.unwrap() {
+        Value::Map(m) => {
+            assert!(m.contains_key("source"), "result should have 'source' key");
+            assert!(m.contains_key("sink"), "result should have 'sink' key");
+        }
+        other => panic!("Expected Map with source/sink, got {:?}", other),
+    }
 }
 
 /// T-3: Tool result is returned as FMPL Value (AC-3)
-#[test]
-fn test_tool_result_structure() {
+#[tokio::test]
+async fn test_tool_result_structure() {
     let code = r#"
         let result = ::__builtin_curl.get("https://httpbin.org/get")
         result
     "#;
 
-    let value = run(code);
+    let mut vm = Vm::with_runtime(tokio::runtime::Handle::current());
+    let value = eval(&mut vm, code);
 
-    // Result should be a Map with status and body
-    // Note: Network-dependent test, so we accept errors
+    // Debug: Print the error if any
+    if let Err(ref e) = value {
+        eprintln!("test_tool_result_structure error: {}", e);
+    }
+
+    // Result should be a Map with source and sink (async stream)
     if let Ok(Value::Map(m)) = value {
-        // status: Int, body: String
-        assert!(matches!(m.get("status"), Some(Value::Int(_))));
-        assert!(matches!(m.get("body"), Some(Value::String(_))));
+        assert!(m.contains_key("source"), "result should have 'source' key");
+        assert!(m.contains_key("sink"), "result should have 'sink' key");
     }
     // If we get an error (no network), that's ok for this test
 }

@@ -34,7 +34,7 @@ object test_obj {
     drop(db);
 
     assert!(
-        named.len() > 0,
+        !named.is_empty(),
         "Expected at least 1 named object after object definition"
     );
 

@@ -1,3 +1,9 @@
+// Suppress style lints for nested if-let inside match arms — refactoring would
+// reduce clarity in this large dispatch table.
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::collapsible_match)]
+#![allow(clippy::manual_checked_ops)]
+
 //! IR to Rust transpiler.
 //!
 //! Generates Rust source code from IR tagged values.

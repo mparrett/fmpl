@@ -645,7 +645,7 @@ mod tests {
         use tempfile::tempdir;
 
         let temp_dir = tempdir().unwrap();
-        let values: Vec<Value> = (0..10).map(|i| Value::Int(i)).collect();
+        let values: Vec<Value> = (0..10).map(Value::Int).collect();
 
         // Create async stream with fjall backing
         let (tx, rx) = mpsc::channel(100);

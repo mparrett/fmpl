@@ -5,8 +5,9 @@
 
 use fmpl_core::{compiler::Compiler, error::Result, grammar::Grammar, value::Value, vm::Vm};
 
+#[allow(dead_code)]
 fn eval_bytecode_grammar(source: &str) -> Result<Value> {
-    let vm = Vm::new();
+    let _vm = Vm::new();
 
     // Parse the source to get a Grammar AST
     let grammar = parse_grammar(source)?;
@@ -79,7 +80,7 @@ fn test_compile_grammar_with_rule_reference() {
     println!("number rule entry point: {:?}", number_entry);
 
     // Check that the bytecode contains pattern instructions
-    assert!(compiled.instructions.len() > 0);
+    assert!(!compiled.instructions.is_empty());
 }
 
 #[test]

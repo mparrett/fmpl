@@ -1,69 +1,73 @@
--- AST Optimizer for FMPL
--- Demonstrates OMeta-style optimization pattern
---
--- Optimizations implemented:
--- - Constant folding: evaluate constant expressions at compile time
--- - Algebraic simplification: simplify expressions using algebraic identities
---
--- Usage:
---   let optimized = expr @ optimizer.constant_fold.trans
---   let optimized = expr @ optimizer.algebraic_simp.trans
---   let optimized = optimizer.optimize(expr)
-
--- =============================================================================
--- Constant Folding Optimization
--- =============================================================================
--- Fold constant arithmetic operations
 let constant_fold = grammar constant_fold {
-    trans = [:Binary, :+, [:Int, a], [:Int, b]] => :Int(a + b)
-          | [:Binary, :-, [:Int, a], [:Int, b]] => :Int(a - b)
-          | [:Binary, :*, [:Int, a], [:Int, b]] => :Int(a * b)
-          | [:Binary, :/, [:Int, a], [:Int, b]] => :Int(a / b)
-          | [:Binary, :%, [:Int, a], [:Int, b]] => :Int(a % b)
-          | [:Binary, :<, [:Int, a], [:Int, b]] => :Bool(a < b)
-          | [:Binary, :>, [:Int, a], [:Int, b]] => :Bool(a > b)
-          | [:Binary, :<=, [:Int, a], [:Int, b]] => :Bool(a <= b)
-          | [:Binary, :>=, [:Int, a], [:Int, b]] => :Bool(a >= b)
-          | [:Binary, :==, [:Int, a], [:Int, b]] => :Bool(a == b)
-          | [:Binary, :!=, [:Int, a], [:Int, b]] => :Bool(a != b)
-          | [:Binary, :&&, [:Bool, a], [:Bool, b]] => :Bool(a && b)
-          | [:Binary, :||, [:Bool, a], [:Bool, b]] => :Bool(a || b)
-          | [:Unary, :-, [:Int, a]] => :Int(0 - a)
-          | [:Unary, :!, [:Bool, a]] => :Bool(!a)
-          | [:If, [:Bool, true], t, e] => t
-          | [:If, [:Bool, false], t, e] => e
-          | [:Binary, op, a, b] => :Binary(op, a @ trans.trans, b @ trans.trans)
-          | [:Unary, op, a] => :Unary(op, a @ trans.trans)
-          | [:If, cond, t, e] => :If(cond @ trans.trans, t @ trans.trans, e @ trans.trans)
-          | x => x
+    trans = :Binary(:+, :Int(a), :Int(b)) => :Int(a + b)
+          | :Binary(:-, :Int(a), :Int(b)) => :Int(a - b)
+          | :Binary(:*, :Int(a), :Int(b)) => :Int(a * b)
+          | :Binary(:/, :Int(a), :Int(b)) &{ b != 0 } => :Int(a / b)
+          | :Binary(:%, :Int(a), :Int(b)) &{ b != 0 } => :Int(a % b)
+          | :Binary(:<,  :Int(a), :Int(b)) => :Bool(a < b)
+          | :Binary(:>,  :Int(a), :Int(b)) => :Bool(a > b)
+          | :Binary(:<=, :Int(a), :Int(b)) => :Bool(a <= b)
+          | :Binary(:>=, :Int(a), :Int(b)) => :Bool(a >= b)
+          | :Binary(:==, :Int(a), :Int(b)) => :Bool(a == b)
+          | :Binary(:!=, :Int(a), :Int(b)) => :Bool(a != b)
+          | :Binary(:&&, :Bool(a), :Bool(b)) => :Bool(a && b)
+          | :Binary(:||, :Bool(a), :Bool(b)) => :Bool(a || b)
+          | :Unary(:-, :Int(a)) &{ a > 0 - 9223372036854775807 - 1 } => :Int(0 - a)
+          | :Unary(:!, :Bool(a)) => :Bool(!a)
+          | :If(:Bool(true), trans:t, trans:e) => t
+          | :If(:Bool(false), trans:t, trans:e) => e
+          | :Binary(:+,  trans:a, trans:b) => :Binary(:+,  a, b)
+          | :Binary(:-,  trans:a, trans:b) => :Binary(:-,  a, b)
+          | :Binary(:*,  trans:a, trans:b) => :Binary(:*,  a, b)
+          | :Binary(:/,  trans:a, trans:b) => :Binary(:/,  a, b)
+          | :Binary(:%,  trans:a, trans:b) => :Binary(:%,  a, b)
+          | :Binary(:<,  trans:a, trans:b) => :Binary(:<,  a, b)
+          | :Binary(:>,  trans:a, trans:b) => :Binary(:>,  a, b)
+          | :Binary(:<=, trans:a, trans:b) => :Binary(:<=, a, b)
+          | :Binary(:>=, trans:a, trans:b) => :Binary(:>=, a, b)
+          | :Binary(:==, trans:a, trans:b) => :Binary(:==, a, b)
+          | :Binary(:!=, trans:a, trans:b) => :Binary(:!=, a, b)
+          | :Binary(:&&, trans:a, trans:b) => :Binary(:&&, a, b)
+          | :Binary(:||, trans:a, trans:b) => :Binary(:||, a, b)
+          | :Unary(:-,  trans:a) => :Unary(:-, a)
+          | :Unary(:!,  trans:a) => :Unary(:!, a)
+          | :If(trans:cond, trans:t, trans:e) => :If(cond, t, e)
+          | _:x => x
 };
 
--- =============================================================================
--- Algebraic Simplification Optimization
--- =============================================================================
 let algebraic_simp = grammar algebraic_simp {
-    trans = [:Binary, :+, x, [:Int, 0]] => x
-          | [:Binary, :+, [:Int, 0], x] => x
-          | [:Binary, :*, x, [:Int, 1]] => x
-          | [:Binary, :*, [:Int, 1], x] => x
-          | [:Binary, :*, x, [:Int, 0]] => :Int(0)
-          | [:Binary, :*, [:Int, 0], x] => :Int(0)
-          | [:Binary, :-, x, [:Int, 0]] => x
-          | [:Binary, :/, x, [:Int, 1]] => x
-          | [:Binary, :&&, [:Bool, false], x] => :Bool(false)
-          | [:Binary, :&&, [:Bool, true], x] => x
-          | [:Binary, :||, [:Bool, true], x] => :Bool(true)
-          | [:Binary, :||, [:Bool, false], x] => x
-          | [:Unary, :-, [:Unary, :-, x]] => x
-          | [:Binary, op, a, b] => :Binary(op, a @ trans.trans, b @ trans.trans)
-          | [:Unary, op, a] => :Unary(op, a @ trans.trans)
-          | [:If, cond, t, e] => :If(cond @ trans.trans, t @ trans.trans, e @ trans.trans)
-          | x => x
+    trans = :Binary(:+, _:x, :Int(0)) => x
+          | :Binary(:+, :Int(0), _:x) => x
+          | :Binary(:*, _:x, :Int(1)) => x
+          | :Binary(:*, :Int(1), _:x) => x
+          | :Binary(:*, _:x, :Int(0)) => :Int(0)
+          | :Binary(:*, :Int(0), _:x) => :Int(0)
+          | :Binary(:-, _:x, :Int(0)) => x
+          | :Binary(:/, _:x, :Int(1)) => x
+          | :Binary(:&&, :Bool(false), _:x) => :Bool(false)
+          | :Binary(:&&, :Bool(true), _:x) => x
+          | :Binary(:||, :Bool(true), _:x) => :Bool(true)
+          | :Binary(:||, :Bool(false), _:x) => x
+          | :Unary(:-, :Unary(:-, _:x)) => x
+          | :Binary(:+,  trans:a, trans:b) => :Binary(:+,  a, b)
+          | :Binary(:-,  trans:a, trans:b) => :Binary(:-,  a, b)
+          | :Binary(:*,  trans:a, trans:b) => :Binary(:*,  a, b)
+          | :Binary(:/,  trans:a, trans:b) => :Binary(:/,  a, b)
+          | :Binary(:%,  trans:a, trans:b) => :Binary(:%,  a, b)
+          | :Binary(:<,  trans:a, trans:b) => :Binary(:<,  a, b)
+          | :Binary(:>,  trans:a, trans:b) => :Binary(:>,  a, b)
+          | :Binary(:<=, trans:a, trans:b) => :Binary(:<=, a, b)
+          | :Binary(:>=, trans:a, trans:b) => :Binary(:>=, a, b)
+          | :Binary(:==, trans:a, trans:b) => :Binary(:==, a, b)
+          | :Binary(:!=, trans:a, trans:b) => :Binary(:!=, a, b)
+          | :Binary(:&&, trans:a, trans:b) => :Binary(:&&, a, b)
+          | :Binary(:||, trans:a, trans:b) => :Binary(:||, a, b)
+          | :Unary(:-,  trans:a) => :Unary(:-, a)
+          | :Unary(:!,  trans:a) => :Unary(:!, a)
+          | :If(trans:cond, trans:t, trans:e) => :If(cond, t, e)
+          | _:x => x
 };
 
--- =============================================================================
--- Combined Optimizer
--- =============================================================================
 let optimize_once = lambda(expr)
     let (folded = expr @ constant_fold.trans)
     folded @ algebraic_simp.trans
@@ -76,9 +80,6 @@ let optimize = lambda(expr)
     result3
 ;
 
--- =============================================================================
--- Export optimizer module
--- =============================================================================
 %{
     constant_fold: constant_fold,
     algebraic_simp: algebraic_simp,

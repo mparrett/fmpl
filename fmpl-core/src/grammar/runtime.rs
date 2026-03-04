@@ -530,7 +530,9 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         }
 
                         // Return concatenated string or list
-                        let result = if values.iter().all(|v| matches!(v, Value::String(_))) {
+                        let result = if !values.is_empty()
+                            && values.iter().all(|v| matches!(v, Value::String(_)))
+                        {
                             let s: String = values
                                 .iter()
                                 .filter_map(|v| {
@@ -806,18 +808,34 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 // Match each child pattern against corresponding child value
                 let mut matched_values = Vec::new();
                 for (i, pat) in child_patterns.iter().enumerate() {
-                    let sub_input = ValueInput::new(vec![children[i].clone()]);
+                    // If the pattern contains a Repeat (Star/Plus) and the
+                    // child value is a List, unwrap the list contents as
+                    // individual input items so the Star can iterate over them.
+                    let sub_items = if pat.contains_repeat() {
+                        match &children[i] {
+                            Value::List(items) => (**items).clone(),
+                            other => vec![other.clone()],
+                        }
+                    } else {
+                        vec![children[i].clone()]
+                    };
+                    let sub_input = ValueInput::new(sub_items);
                     let mut sub_runtime =
                         PegRuntime::new(sub_input, self.registry, self.grammar.clone());
-                    sub_runtime.bindings = self.bindings.clone();
-                    // Share the action evaluator with sub-runtime (Rc allows cloning)
+                    // Start sub-runtime at rule_depth 1 so any ApplyRule inside
+                    // is treated as nested (depth > 1), preventing transient
+                    // bindings from leaking out of rule applications.
+                    sub_runtime.rule_depth = 1;
                     sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                     let result = sub_runtime.match_pattern(pat, 0)?;
                     match result {
                         ParseResult::Success(v, _) => {
                             matched_values.push(v);
-                            // Merge bindings back
+                            // Merge sub-runtime bindings into parent.
+                            // Since rule_depth starts at 1, any ApplyRule
+                            // inside will save/clear/restore bindings,
+                            // so only direct Bind names remain.
                             self.bindings.extend(sub_runtime.bindings);
                         }
                         ParseResult::Failure => return Ok(ParseResult::Failure),
@@ -886,7 +904,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                                 let sub_input = ValueInput::new(vec![items[item_idx].clone()]);
                                 let mut sub_runtime =
                                     PegRuntime::new(sub_input, self.registry, self.grammar.clone());
-                                sub_runtime.bindings = self.bindings.clone();
+                                sub_runtime.rule_depth = 1;
                                 sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                                 let result = sub_runtime.match_pattern(pat, 0)?;
@@ -909,7 +927,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                             let sub_input = ValueInput::new(vec![items[item_idx].clone()]);
                             let mut sub_runtime =
                                 PegRuntime::new(sub_input, self.registry, self.grammar.clone());
-                            sub_runtime.bindings = self.bindings.clone();
+                            sub_runtime.rule_depth = 1;
                             sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                             let result = sub_runtime.match_pattern(pat, 0)?;
@@ -931,7 +949,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         let sub_input = ValueInput::new(vec![items[item_idx].clone()]);
                         let mut sub_runtime =
                             PegRuntime::new(sub_input, self.registry, self.grammar.clone());
-                        sub_runtime.bindings = self.bindings.clone();
+                        sub_runtime.rule_depth = 1;
                         sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                         let result = sub_runtime.match_pattern(inner_pat, 0)?;
@@ -1005,7 +1023,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                     let sub_input = ValueInput::new(remaining);
                     let mut sub_runtime =
                         PegRuntime::new(sub_input, self.registry, self.grammar.clone());
-                    sub_runtime.bindings = self.bindings.clone();
+                    sub_runtime.rule_depth = 1;
                     sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                     let result = sub_runtime.match_pattern(rest_pattern, 0)?;
@@ -1047,8 +1065,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         let sub_input = ValueInput::new(vec![value.clone()]);
                         let mut sub_runtime =
                             PegRuntime::new(sub_input, self.registry, self.grammar.clone());
-                        sub_runtime.bindings = self.bindings.clone();
-                        // Share the action evaluator with sub-runtime (Rc allows cloning)
+                        sub_runtime.rule_depth = 1;
                         sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                         let result = sub_runtime.match_pattern(pat, 0)?;
@@ -1092,8 +1109,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 let sub_input = ValueInput::new(sub_values);
                 let mut sub_runtime =
                     PegRuntime::new(sub_input, self.registry, self.grammar.clone());
-                sub_runtime.bindings = self.bindings.clone();
-                // Share the action evaluator with sub-runtime (Rc allows cloning)
+                sub_runtime.rule_depth = 1;
                 sub_runtime.action_evaluator = self.action_evaluator.clone();
 
                 let result = sub_runtime.match_pattern(inner, 0)?;

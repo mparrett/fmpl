@@ -266,8 +266,17 @@ impl Vm {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| Error::UndefinedProperty(name.to_string())),
+            Value::Tagged(tag, children) => {
+                // Allow introspection of tagged values for pattern matching
+                match name.as_str() {
+                    "tag" => Ok(Value::Symbol(tag.clone())),
+                    "children" => Ok(Value::List(children.clone())),
+                    "len" => Ok(Value::Int(children.len() as i64)),
+                    _ => Err(Error::UndefinedProperty(name.to_string())),
+                }
+            }
             _ => Err(Error::Type {
-                expected: "object or map".to_string(),
+                expected: "object, map, or tagged".to_string(),
                 got: obj.type_name().to_string(),
             }),
         }

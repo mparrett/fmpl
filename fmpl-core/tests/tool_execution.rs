@@ -49,7 +49,7 @@ fn test_pattern_dispatch_curl_get() {
 
     // Should return a result (may be error due to network, but should not crash)
     // The assertion accepts both success and error
-    assert!(value.is_ok() || matches!(value, Err(_)));
+    let _ = value;
 }
 
 /// T-2: Execute curl.post via pattern matching dispatch
@@ -68,7 +68,7 @@ fn test_pattern_dispatch_curl_post() {
     let value = run(code);
 
     // Should return a result (may be error due to network, but should not crash)
-    assert!(value.is_ok() || matches!(value, Err(_)));
+    assert!(value.is_ok());
 }
 
 /// T-3: Return error for unknown tools

@@ -150,6 +150,29 @@ fn main() {
             let rust_code =
                 String::from_utf8(output.stdout).expect("Generated code is not valid UTF-8");
 
+            // Wrap generated code in a module with #![allow] for style lints.
+            // The generator emits patterns that don't match Rust idioms but
+            // are correct — refactoring would obscure the patterns.
+            let rust_code = format!(
+                concat!(
+                    "// Generated code — clippy style lints suppressed.\n",
+                    "// SAFETY: this output is machine-generated; re-running the\n",
+                    "// generator can reshape these patterns, so suppress at file level.\n",
+                    "#[allow(clippy::all)]\n",
+                    "#[allow(clippy::pedantic)]\n",
+                    "#[allow(unused_parens)]\n",
+                    "#[allow(unused_variables)]\n",
+                    "#[allow(unused_assignments)]\n",
+                    "#[allow(dead_code)]\n",
+                    "mod __generated {{\n",
+                    "    use super::*;\n",
+                    "    {}\n",
+                    "}}\n",
+                    "pub use __generated::*;\n",
+                ),
+                rust_code,
+            );
+
             let dest_path = Path::new(&out_dir).join("generated_parser.rs");
             fs::write(&dest_path, &rust_code).expect("Failed to write generated parser");
 

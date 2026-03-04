@@ -8,7 +8,9 @@ use crate::error::Error;
 use crate::grammar::Grammar;
 use crate::grammar::parser::GrammarParser;
 use crate::lexer::{SpannedToken, Token};
+use crate::value::Value;
 use smol_str::SmolStr;
+use std::sync::Arc;
 
 // Local Result type for parser (same as crate::error::Result)
 type Result<T> = std::result::Result<T, Error>;
@@ -240,13 +242,13 @@ impl<'a> Parser<'a> {
             vec![SmolStr::new("")]
         } else {
             // Regular qualified name: foo::bar
-            vec![self.expect_ident()?]
+            vec![self.expect_ident_or_keyword()?]
         };
 
         // Continue parsing additional ::name parts
         while self.check(&Token::ColonColon) {
             self.advance();
-            parts.push(self.expect_ident()?);
+            parts.push(self.expect_ident_or_keyword()?);
         }
 
         Ok(QualifiedName { parts })
@@ -314,21 +316,17 @@ impl<'a> Parser<'a> {
                     // Extract the rule name from the last PropAccess
                     let (grammar, rule) = match grammar_expr {
                         Expr::PropAccess(base, prop) => (*base, prop),
-                        Expr::Qualified(qn) => {
+                        Expr::Qualified(qn) if qn.parts.len() >= 2 => {
                             // Handle qualified::name.rule case
-                            if qn.parts.len() >= 2 {
-                                // Last part is the rule name
-                                let rule = qn.parts.last().unwrap().clone();
-                                let grammar_parts = qn.parts[..qn.parts.len() - 1].to_vec();
-                                (
-                                    Expr::Qualified(QualifiedName {
-                                        parts: grammar_parts,
-                                    }),
-                                    rule,
-                                )
-                            } else {
-                                return Err(self.error("grammar application requires grammar.rule"));
-                            }
+                            // Last part is the rule name
+                            let rule = qn.parts.last().unwrap().clone();
+                            let grammar_parts = qn.parts[..qn.parts.len() - 1].to_vec();
+                            (
+                                Expr::Qualified(QualifiedName {
+                                    parts: grammar_parts,
+                                }),
+                                rule,
+                            )
                         }
                         _ => return Err(self.error("grammar application requires grammar.rule")),
                     };
@@ -679,7 +677,7 @@ impl<'a> Parser<'a> {
                     let mut parts = vec![s];
                     while self.check(&Token::ColonColon) {
                         self.advance();
-                        parts.push(self.expect_ident()?);
+                        parts.push(self.expect_ident_or_keyword()?);
                     }
                     Ok(Expr::Qualified(QualifiedName { parts }))
                 } else {
@@ -734,7 +732,7 @@ impl<'a> Parser<'a> {
                     let mut parts = vec![SmolStr::new("stream")];
                     while self.check(&Token::ColonColon) {
                         self.advance();
-                        parts.push(self.expect_ident()?);
+                        parts.push(self.expect_ident_or_keyword()?);
                     }
                     Ok(Expr::Qualified(QualifiedName { parts }))
                 } else if self.peek_ahead(1).map(|t| &t.token) == Some(&Token::LBrace) {
@@ -753,7 +751,7 @@ impl<'a> Parser<'a> {
                     let mut parts = vec![SmolStr::new("grammar")];
                     while self.check(&Token::ColonColon) {
                         self.advance();
-                        parts.push(self.expect_ident()?);
+                        parts.push(self.expect_ident_or_keyword()?);
                     }
                     Ok(Expr::Qualified(QualifiedName { parts }))
                 } else if self.peek_ahead(1).map(|t| &t.token) == Some(&Token::LBrace) {
@@ -776,10 +774,10 @@ impl<'a> Parser<'a> {
                 // Global qualified name: ::foo::bar
                 self.advance();
                 let mut parts = vec![SmolStr::new("")]; // Empty first part for global namespace
-                parts.push(self.expect_ident()?);
+                parts.push(self.expect_ident_or_keyword()?);
                 while self.check(&Token::ColonColon) {
                     self.advance();
-                    parts.push(self.expect_ident()?);
+                    parts.push(self.expect_ident_or_keyword()?);
                 }
                 Ok(Expr::Qualified(QualifiedName { parts }))
             }
@@ -850,10 +848,10 @@ impl<'a> Parser<'a> {
         if self.check(&Token::Inherits) {
             self.advance(); // consume <:
             // Consume the parent name (could be qualified like parent::name)
-            self.expect_ident()?;
+            self.expect_ident_or_keyword()?;
             while self.check(&Token::ColonColon) {
                 self.advance();
-                self.expect_ident()?;
+                self.expect_ident_or_keyword()?;
             }
         }
 

@@ -14,6 +14,9 @@
 //! 3. ir::compile(ir) -> CompiledCode
 //! 4. code::eval(code) -> result value
 
+// The grammar_interpreter_tests feature is not yet defined in Cargo.toml
+#![expect(unexpected_cfgs)]
+
 use fmpl_core::{Value, Vm, eval};
 
 // =============================================================================

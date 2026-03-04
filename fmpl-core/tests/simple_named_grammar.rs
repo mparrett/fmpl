@@ -1,5 +1,5 @@
 //! Test named grammar syntax
-use fmpl_core::{Value, Vm, eval};
+use fmpl_core::{Vm, eval};
 
 #[test]
 fn test_simple_named_grammar() {

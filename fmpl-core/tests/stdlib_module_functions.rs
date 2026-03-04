@@ -60,7 +60,7 @@ fn test_rand_int_module_call() {
 
     if let Ok(Value::Int(n)) = result {
         assert!(
-            n >= 1 && n <= 10,
+            (1..=10).contains(&n),
             "rand::int(1, 10) should return value in range, got: {}",
             n
         );
@@ -74,7 +74,7 @@ fn test_rand_float_module_call() {
 
     if let Ok(Value::Float(f)) = result {
         assert!(
-            f >= 0.0 && f < 1.0,
+            (0.0..1.0).contains(&f),
             "rand::float() should return value in [0, 1), got: {}",
             f
         );

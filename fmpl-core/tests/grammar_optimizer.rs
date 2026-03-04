@@ -32,19 +32,17 @@ fn test_grammar_optimizer() {
         // Print failures if any
         if let Some(Value::List(suites)) = m.get("suites") {
             for suite in suites.iter() {
-                if let Value::Map(s) = suite {
-                    if let Some(Value::List(failures)) = s.get("failures") {
-                        if !failures.is_empty() {
-                            if let Some(Value::String(name)) = s.get("suite") {
-                                println!("\n  Failures in {}:", name);
-                                for f in failures.iter() {
-                                    if let Value::Map(fm) = f {
-                                        if let Some(Value::String(n)) = fm.get("name") {
-                                            println!("    - {}", n);
-                                        }
-                                    }
-                                }
-                            }
+                if let Value::Map(s) = suite
+                    && let Some(Value::List(failures)) = s.get("failures")
+                    && !failures.is_empty()
+                    && let Some(Value::String(name)) = s.get("suite")
+                {
+                    println!("\n  Failures in {}:", name);
+                    for f in failures.iter() {
+                        if let Value::Map(fm) = f
+                            && let Some(Value::String(n)) = fm.get("name")
+                        {
+                            println!("    - {}", n);
                         }
                     }
                 }

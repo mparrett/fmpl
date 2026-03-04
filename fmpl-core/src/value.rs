@@ -496,6 +496,17 @@ impl Value {
                 .get(key.as_str())
                 .cloned()
                 .ok_or_else(|| Error::UndefinedProperty(key.to_string())),
+            (Value::Tagged(_, children), Value::Int(i)) => {
+                let i = if *i < 0 {
+                    (children.len() as i64 + i) as usize
+                } else {
+                    *i as usize
+                };
+                children
+                    .get(i)
+                    .cloned()
+                    .ok_or_else(|| Error::Runtime(format!("tagged index {} out of bounds", i)))
+            }
             (Value::String(s), Value::Int(i)) => {
                 let i = if *i < 0 {
                     (s.len() as i64 + i) as usize

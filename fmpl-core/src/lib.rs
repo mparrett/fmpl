@@ -8,6 +8,8 @@
 //! - Object database (in-memory prototype-based objects)
 //! - Grammar (OMeta-style extensible PEG grammars)
 
+#[macro_use]
+pub mod macros;
 pub mod ast;
 pub mod builtins;
 pub mod bytecode;
@@ -48,20 +50,92 @@ pub use vm::Vm;
 
 /// Evaluate FMPL source code and return the result.
 ///
-/// Uses the generated scannerless parser from fmpl_parser.fmpl.
-/// Set the environment variable `FMPL_USE_LEGACY_PARSER=1` to use the
-/// legacy hand-written recursive descent parser.
+/// Pipeline selection (in priority order):
+/// - `FMPL_USE_FMPL_COMPILER=1` — route source through the FMPL pipeline
+///   (ast::parse → ast_to_ir.fmpl → ir::compile → code::eval).
+/// - `FMPL_USE_LEGACY_PARSER=1` — use the hand-written parser instead of
+///   the generated parser. Compiler and VM are unchanged.
+/// - default — use the generated scannerless parser → native Compiler → VM.
 pub fn eval(vm: &mut Vm, source: &str) -> Result<Value> {
-    let use_legacy = std::env::var("FMPL_USE_LEGACY_PARSER")
+    if std::env::var("FMPL_USE_FMPL_COMPILER")
+        .map(|v| v == "1" || v == "true")
+        .unwrap_or(false)
+    {
+        return eval_via_fmpl_pipeline(vm, source);
+    }
+
+    eval_via_native(vm, source)
+}
+
+/// Evaluate via the native pipeline: parser → Compiler (Rust) → bytecode → VM.
+///
+/// Defaults to the legacy hand-written parser because the generated parser
+/// can drift across rebuilds of fmpl-bootstrap (see bootstrap_determinism.rs).
+/// Set `FMPL_USE_GENERATED_PARSER=1` to opt into the generated parser when
+/// you've verified bootstrap output is current.
+///
+/// The compiler (`crate::compiler::Compiler`) and VM are the same
+/// Rust-implemented runtime regardless of parser choice.
+pub fn eval_via_native(vm: &mut Vm, source: &str) -> Result<Value> {
+    let use_generated = std::env::var("FMPL_USE_GENERATED_PARSER")
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
 
-    let ast = if use_legacy {
+    let ast = if use_generated {
+        parser::generated_parse(source)?
+    } else {
         let tokens = Lexer::new(source).tokenize()?;
         Parser::with_source(&tokens, source).parse()?
-    } else {
-        parser::generated_parse(source)?
     };
+    let code = Compiler::new().compile(&ast)?;
+    vm.run(&code)
+}
+
+/// Backwards-compatible alias for `eval_via_native`.
+///
+/// Older code referred to this path as the "Rust compiler" path, contrasting
+/// with the FMPL pipeline. The name was misleading because the only thing
+/// "Rust" about it was the parser-and-compiler implementation language —
+/// `eval_via_fmpl_pipeline` also ultimately runs through the same compiler
+/// and VM. Prefer `eval_via_native` in new code.
+pub fn eval_via_rust_compiler(vm: &mut Vm, source: &str) -> Result<Value> {
+    eval_via_native(vm, source)
+}
+
+/// Evaluate via the FMPL pipeline:
+/// ast::parse → ast_to_ir.fmpl → ir::compile → code::eval.
+///
+/// Loads prelude.fmpl and ast_to_ir.fmpl into the VM on first call (cached
+/// per-VM via a sentinel binding). User source compiles through this
+/// pipeline; the wrapper code that drives the pipeline uses the legacy
+/// parser to avoid sensitivity to generated-parser regressions.
+pub fn eval_via_fmpl_pipeline(vm: &mut Vm, source: &str) -> Result<Value> {
+    use smol_str::SmolStr;
+
+    let bootstrap_marker = SmolStr::new("__fmpl_pipeline_bootstrapped");
+    let already_bootstrapped = eval_via_legacy_parser(vm, bootstrap_marker.as_str())
+        .ok()
+        .filter(|v| !matches!(v, Value::Null))
+        .is_some();
+    if !already_bootstrapped {
+        eval_via_legacy_parser(vm, r#"io::load("lib/core/prelude.fmpl")"#)?;
+        eval_via_legacy_parser(vm, r#"io::load("lib/core/ast_to_ir.fmpl")"#)?;
+        eval_via_legacy_parser(vm, &format!("let {} = true", bootstrap_marker))?;
+    }
+
+    let pipeline_source = format!(
+        r#"let (ast = ast::parse({:?})) let (ir = ast @ ast_to_ir.expr) let (code = ir::compile(ir)) code::eval(code)"#,
+        source
+    );
+    eval_via_legacy_parser(vm, &pipeline_source)
+}
+
+/// Evaluate using the legacy hand-written parser unconditionally.
+/// Used internally for bootstrap-sensitive code paths and externally as
+/// an escape hatch when the generated parser has regressed.
+pub fn eval_via_legacy_parser(vm: &mut Vm, source: &str) -> Result<Value> {
+    let tokens = Lexer::new(source).tokenize()?;
+    let ast = Parser::with_source(&tokens, source).parse()?;
     let code = Compiler::new().compile(&ast)?;
     vm.run(&code)
 }
