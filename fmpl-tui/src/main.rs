@@ -2763,12 +2763,12 @@ impl App {
                             "🤖 Assistant"
                         };
                         text.push_str(&format!("\n🔄 [{}] {} (MODIFIED)\n", i + 1, role_label));
-                        text.push_str(&format!("  ── Comparison branch:\n"));
+                        text.push_str(&"  ── Comparison branch:\n".to_string());
                         text.push_str(&format!(
                             "  {}\n",
                             comp.content.lines().next().unwrap_or("")
                         ));
-                        text.push_str(&format!("  ── Current branch:\n"));
+                        text.push_str(&"  ── Current branch:\n".to_string());
                         text.push_str(&format!(
                             "  {}\n",
                             curr.content.lines().next().unwrap_or("")
@@ -2815,7 +2815,7 @@ impl App {
             text.push('\n');
         }
 
-        text.push_str(&"\nPress Ctrl+D to exit diff view.\n");
+        text.push_str("\nPress Ctrl+D to exit diff view.\n");
         text
     }
 
@@ -2991,40 +2991,39 @@ fn parse_tool_request(text: &str) -> Option<Vec<ToolRequest>> {
         let request_str = &trimmed[5..]; // Skip "TOOL:" prefix
 
         // Try JSON format first
-        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(request_str) {
-            if let Some(obj) = json_val.as_object() {
-                if let Some(tool_id) = obj.get("tool").and_then(|v| v.as_str()) {
-                    let args = if let Some(args_obj) = obj.get("args").and_then(|v| v.as_object()) {
-                        // Convert JSON object args to string pairs
-                        let mut arg_vec = Vec::new();
-                        for (key, value) in args_obj {
-                            if let Some(str_val) = value.as_str() {
-                                arg_vec.push(format!("{}:{}", key, str_val));
-                            }
-                        }
-                        arg_vec
-                    } else if let Some(args_array) = obj.get("args").and_then(|v| v.as_array()) {
-                        // Convert JSON array args
-                        args_array
-                            .iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-
-                    requests.push(ToolRequest {
-                        tool_id: tool_id.to_string(),
-                        args,
-                    });
-                    continue;
+        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(request_str)
+            && let Some(obj) = json_val.as_object()
+            && let Some(tool_id) = obj.get("tool").and_then(|v| v.as_str())
+        {
+            let args = if let Some(args_obj) = obj.get("args").and_then(|v| v.as_object()) {
+                // Convert JSON object args to string pairs
+                let mut arg_vec = Vec::new();
+                for (key, value) in args_obj {
+                    if let Some(str_val) = value.as_str() {
+                        arg_vec.push(format!("{}:{}", key, str_val));
+                    }
                 }
-            }
+                arg_vec
+            } else if let Some(args_array) = obj.get("args").and_then(|v| v.as_array()) {
+                // Convert JSON array args
+                args_array
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            requests.push(ToolRequest {
+                tool_id: tool_id.to_string(),
+                args,
+            });
+            continue;
         }
 
         // Try simple format: TOOL:tool_id:arg1:arg2:...
         let parts: Vec<&str> = request_str.split(':').collect();
-        if parts.len() >= 1 {
+        if !parts.is_empty() {
             let tool_id = parts[0].to_string();
             let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
 
@@ -3061,7 +3060,7 @@ fn validate_tool_request(request: &ToolRequest, tools: &[Tool]) -> Result<(), St
             }
         }
         "file_read" => {
-            if request.args.len() < 1 {
+            if request.args.is_empty() {
                 return Err("file_read requires a file path".to_string());
             }
         }
@@ -3358,7 +3357,7 @@ impl App {
     }
 
     /// Format the command stream as text lines for rendering
-    fn format_command_stream(&self) -> Vec<Line> {
+    fn format_command_stream(&self) -> Vec<Line<'_>> {
         let mut lines = Vec::new();
 
         // Header
@@ -3952,10 +3951,10 @@ fn main() -> Result<(), io::Error> {
         app.check_approval_queue();
 
         // Handle input
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                app.handle_input(key);
-            }
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            app.handle_input(key);
         }
 
         // Check for quit

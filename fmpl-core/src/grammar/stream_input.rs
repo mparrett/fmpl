@@ -152,7 +152,7 @@ impl StreamPosition {
                 .open()
                 .expect("failed to open fjall database");
             let keyspace = db
-                .keyspace("positions", || fjall::KeyspaceCreateOptions::default())
+                .keyspace("positions", fjall::KeyspaceCreateOptions::default)
                 .expect("failed to open positions keyspace");
             FjallOverflow { keyspace }
         });
@@ -206,7 +206,7 @@ impl StreamPosition {
             .open()
             .expect("failed to open fjall keyspace for memo");
         let partition = keyspace
-            .keyspace("memo", || fjall::KeyspaceCreateOptions::default())
+            .keyspace("memo", fjall::KeyspaceCreateOptions::default)
             .expect("failed to open memo partition");
         let memo_fjall = Some(Arc::new(Mutex::new(MemoFjall(partition))));
 

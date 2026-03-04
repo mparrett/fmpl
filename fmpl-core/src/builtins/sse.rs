@@ -50,7 +50,7 @@ impl SseBuiltin {
                     events.push(json::from_json(json)?);
                 } else {
                     // If not valid JSON, store as raw string
-                    events.push(Value::String(SmolStr::new(current_data.trim().to_string())));
+                    events.push(Value::String(SmolStr::new(current_data.trim())));
                 }
                 current_data.clear();
             }
@@ -61,7 +61,7 @@ impl SseBuiltin {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&current_data) {
                 events.push(json::from_json(json)?);
             } else {
-                events.push(Value::String(SmolStr::new(current_data.trim().to_string())));
+                events.push(Value::String(SmolStr::new(current_data.trim())));
             }
         }
 

@@ -244,7 +244,7 @@ impl GrammarToRust {
                 }
 
                 code.push_str("    Ok((Value::List(Arc::new(results)), current_pos))\n");
-                code.push_str("}");
+                code.push('}');
                 Ok(code)
             }
 

@@ -128,7 +128,7 @@ pub enum Token {
         let mut chars = inner.chars();
         let mut last_was_backslash = false;
 
-        while let Some(c) = chars.next() {
+        for c in chars {
             if last_was_backslash {
                 match c {
                     'n' => result.push('\n'),

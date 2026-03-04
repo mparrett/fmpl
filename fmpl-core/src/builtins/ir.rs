@@ -548,10 +548,10 @@ impl IrCompiler {
                 match tag.as_str() {
                     "Var" => {
                         // Variable reference - check if it's free
-                        if let Some(Value::Symbol(name)) = children.first() {
-                            if !bound.contains(name) {
-                                free.insert(name.clone());
-                            }
+                        if let Some(Value::Symbol(name)) = children.first()
+                            && !bound.contains(name)
+                        {
+                            free.insert(name.clone());
                         }
                     }
                     "Let" => {
@@ -571,16 +571,16 @@ impl IrCompiler {
                     "Lambda" => {
                         // :Lambda([params], body_ir)
                         // Params are bound in the body
-                        if children.len() >= 2 {
-                            if let Value::List(params) = &children[0] {
-                                let mut new_bound = bound.clone();
-                                for p in params.iter() {
-                                    if let Value::Symbol(name) = p {
-                                        new_bound.insert(name.clone());
-                                    }
+                        if children.len() >= 2
+                            && let Value::List(params) = &children[0]
+                        {
+                            let mut new_bound = bound.clone();
+                            for p in params.iter() {
+                                if let Value::Symbol(name) = p {
+                                    new_bound.insert(name.clone());
                                 }
-                                Self::collect_free_vars(&children[1], &new_bound, free);
                             }
+                            Self::collect_free_vars(&children[1], &new_bound, free);
                         }
                     }
                     // For all other IR nodes, recurse into children

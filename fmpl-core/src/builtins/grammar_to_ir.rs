@@ -95,13 +95,10 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
             match cp {
                 CharPattern::Exact(c) => Ok(Value::Tagged(
                     SmolStr::new("ParseChar"),
-                    Arc::new(vec![Value::String(SmolStr::new(&c.to_string()))]),
+                    Arc::new(vec![Value::String(SmolStr::new(c.to_string()))]),
                 )),
                 CharPattern::Class(ranges) => {
-                    let range_values: Vec<Value> = ranges
-                        .iter()
-                        .map(|range| char_range_to_value(range))
-                        .collect();
+                    let range_values: Vec<Value> = ranges.iter().map(char_range_to_value).collect();
 
                     Ok(Value::Tagged(
                         SmolStr::new("ParseCharClass"),
@@ -112,10 +109,7 @@ fn pattern_to_ir(pattern: &Pattern) -> Result<Value> {
                     ))
                 }
                 CharPattern::NegatedClass(ranges) => {
-                    let range_values: Vec<Value> = ranges
-                        .iter()
-                        .map(|range| char_range_to_value(range))
-                        .collect();
+                    let range_values: Vec<Value> = ranges.iter().map(char_range_to_value).collect();
 
                     Ok(Value::Tagged(
                         SmolStr::new("ParseCharClass"),
@@ -294,8 +288,8 @@ fn char_range_to_value(range: &CharRange) -> Value {
             ]))
         }
         CharRange::Range(start, end) => Value::List(Arc::new(vec![
-            Value::String(SmolStr::new(&start.to_string())),
-            Value::String(SmolStr::new(&end.to_string())),
+            Value::String(SmolStr::new(start.to_string())),
+            Value::String(SmolStr::new(end.to_string())),
         ])),
     }
 }

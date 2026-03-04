@@ -141,19 +141,17 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             self.backtracking_mode && self.find_choice_entry_for_position(pos_index).is_some();
 
         // Check memo cache (unless backtracking should override)
-        if !skip_memo {
-            if let Some(entry) = self.input.get_memo(&pos, rule_name) {
-                return match entry {
-                    MemoEntry::InProgress => {
-                        // Left recursion detected - fail this branch
-                        Ok(ParseResult::Failure)
-                    }
-                    MemoEntry::Done(value, end_index) => match value {
-                        Some(v) => Ok(ParseResult::Success(v, end_index)),
-                        None => Ok(ParseResult::Failure),
-                    },
-                };
-            }
+        if !skip_memo && let Some(entry) = self.input.get_memo(&pos, rule_name) {
+            return match entry {
+                MemoEntry::InProgress => {
+                    // Left recursion detected - fail this branch
+                    Ok(ParseResult::Failure)
+                }
+                MemoEntry::Done(value, end_index) => match value {
+                    Some(v) => Ok(ParseResult::Success(v, end_index)),
+                    None => Ok(ParseResult::Failure),
+                },
+            };
         }
 
         // Mark as in progress for left recursion detection
@@ -442,26 +440,25 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 // PROLOG-STYLE BACKTRACKING:
                 // Check if there's already a choice point for this position on the stack.
                 // If so, return the next alternative from it instead of recomputing.
-                if let Some(entry_idx) = self.find_choice_entry_for_position(start_index) {
-                    if let Some(BacktrackEntry::Choice {
+                if let Some(entry_idx) = self.find_choice_entry_for_position(start_index)
+                    && let Some(BacktrackEntry::Choice {
                         alternatives,
                         next_index,
                         ..
                     }) = self.backtracking_stack.get(entry_idx)
-                    {
-                        if *next_index < alternatives.len() {
-                            let (value, end_pos) = alternatives[*next_index].clone();
-                            // Increment next_index for the next backtrack
-                            if let Some(BacktrackEntry::Choice { next_index: ni, .. }) =
-                                self.backtracking_stack.get_mut(entry_idx)
-                            {
-                                *ni += 1;
-                            }
-                            return Ok(ParseResult::Success(value, end_pos));
-                        } else {
-                            // All alternatives exhausted
-                            return Ok(ParseResult::Failure);
+                {
+                    if *next_index < alternatives.len() {
+                        let (value, end_pos) = alternatives[*next_index].clone();
+                        // Increment next_index for the next backtrack
+                        if let Some(BacktrackEntry::Choice { next_index: ni, .. }) =
+                            self.backtracking_stack.get_mut(entry_idx)
+                        {
+                            *ni += 1;
                         }
+                        return Ok(ParseResult::Success(value, end_pos));
+                    } else {
+                        // All alternatives exhausted
+                        return Ok(ParseResult::Failure);
                     }
                 }
 
@@ -972,7 +969,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
 
                     fn should_spread(results: &[Value]) -> bool {
                         // All results must be lists whose elements are all lists
-                        results.iter().all(|v| is_list_of_lists(v))
+                        results.iter().all(is_list_of_lists)
                     }
 
                     let collected =
@@ -1852,10 +1849,9 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                 position: entry_pos,
                 ..
             } = entry
+                && *entry_pos == position
             {
-                if *entry_pos == position {
-                    return Some(idx);
-                }
+                return Some(idx);
             }
         }
         None

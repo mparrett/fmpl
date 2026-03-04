@@ -98,6 +98,12 @@ pub struct MemoKey {
     pub rule: SmolStr,
 }
 
+impl Default for ParseState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ParseState {
     pub fn new() -> Self {
         Self {
@@ -210,12 +216,11 @@ impl ParseState {
 
     /// Get the current input item as a character (for text input).
     pub fn head_char(&self) -> Option<char> {
-        if let Some(frame) = self.input_stack.last() {
-            if let Value::String(s) = &frame.value {
-                if frame.position < s.len() {
-                    return s[frame.position..].chars().next();
-                }
-            }
+        if let Some(frame) = self.input_stack.last()
+            && let Value::String(s) = &frame.value
+            && frame.position < s.len()
+        {
+            return s[frame.position..].chars().next();
         }
         None
     }
@@ -244,12 +249,11 @@ impl ParseState {
 
     /// Get the text slice starting at current position (for literal matching).
     pub fn text_from(&self) -> Option<&str> {
-        if let Some(frame) = self.input_stack.last() {
-            if let Value::String(s) = &frame.value {
-                if frame.position <= s.len() {
-                    return Some(s.get(frame.position..).unwrap_or(""));
-                }
-            }
+        if let Some(frame) = self.input_stack.last()
+            && let Value::String(s) = &frame.value
+            && frame.position <= s.len()
+        {
+            return Some(s.get(frame.position..).unwrap_or(""));
         }
         None
     }
@@ -329,10 +333,10 @@ impl ParseState {
 
     /// Set the input position directly (for vm.rs)
     pub fn set_input_pos(&mut self, pos: Option<usize>) {
-        if let Some(frame) = self.input_stack.last_mut() {
-            if let Some(p) = pos {
-                frame.position = p;
-            }
+        if let Some(frame) = self.input_stack.last_mut()
+            && let Some(p) = pos
+        {
+            frame.position = p;
         }
     }
 

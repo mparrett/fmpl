@@ -1,8 +1,6 @@
 // Direct comparison: FMPL VM vs execution_tape VM
 // Cross-compiles FMPL IR to execution_tape and benchmarks both
 
-use std::time::Instant;
-
 fn main() {
     println!("=== FMPL VM vs execution_tape VM (Cross-Compiled) ===\n");
 
@@ -14,7 +12,7 @@ fn main() {
         ("100 - 50", "Subtraction"),
     ];
 
-    let iterations = 10000;
+    let _iterations = 10000;
 
     for (source, name) in tests {
         println!("=== Test: {} ===", name);
@@ -25,7 +23,7 @@ fn main() {
         let ast = fmpl_core::parser::Parser::with_source(&tokens, source)
             .parse()
             .unwrap();
-        let fmpl_code = fmpl_core::compiler::Compiler::new().compile(&ast).unwrap();
+        let _fmpl_code = fmpl_core::compiler::Compiler::new().compile(&ast).unwrap();
 
         #[cfg(feature = "cross_compile")]
         {

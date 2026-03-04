@@ -676,7 +676,7 @@ impl CompiledCode {
         self.constants[idx.0]
             .clone()
             .try_into()
-            .map_err(|e| Into::<crate::error::Error>::into(e))
+            .map_err(Into::<crate::error::Error>::into)
     }
 
     /// Add a rule entry point for grammar compilation.
@@ -1276,262 +1276,262 @@ impl Compiler {
         }
 
         // Special handling for builtin qualified calls like json::parse(), json::stringify(), and sse::parse()
-        if let Expr::Qualified(qn) = func {
-            if qn.parts.len() == 2 {
-                let module = &qn.parts[0];
-                let method = &qn.parts[1];
+        if let Expr::Qualified(qn) = func
+            && qn.parts.len() == 2
+        {
+            let module = &qn.parts[0];
+            let method = &qn.parts[1];
 
-                // Convert ast::parse(args) to __builtin_ast.parse(args)
-                if module == "ast" && method == "parse" {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_ast")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert ast::parse(args) to __builtin_ast.parse(args)
+            if module == "ast" && method == "parse" {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_ast")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert ir::compile(args) to __builtin_ir.compile(args)
-                if module == "ir" && method == "compile" {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_ir")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert ir::compile(args) to __builtin_ir.compile(args)
+            if module == "ir" && method == "compile" {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_ir")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert ir::to_rust(args) and ir::to_rust_expr(args) to __builtin_ir.method(args)
-                if module == "ir" && (method == "to_rust" || method == "to_rust_expr") {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_ir")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert ir::to_rust(args) and ir::to_rust_expr(args) to __builtin_ir.method(args)
+            if module == "ir" && (method == "to_rust" || method == "to_rust_expr") {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_ir")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert code::eval(args) to __builtin_code.eval(args)
-                if module == "code" && method == "eval" {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_code")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert code::eval(args) to __builtin_code.eval(args)
+            if module == "code" && method == "eval" {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_code")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert json::parse(args) and json::stringify(args) to __builtin_json.method(args)
-                if module == "json" && (method == "parse" || method == "stringify") {
-                    // Compile as if it were __builtin_json.method(args)
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_json")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert json::parse(args) and json::stringify(args) to __builtin_json.method(args)
+            if module == "json" && (method == "parse" || method == "stringify") {
+                // Compile as if it were __builtin_json.method(args)
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_json")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert sse::parse(args) to __builtin_sse.parse(args)
-                if module == "sse" && method == "parse" {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_sse")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert sse::parse(args) to __builtin_sse.parse(args)
+            if module == "sse" && method == "parse" {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_sse")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert time::sleep(args) to __builtin_time.sleep(args)
-                if module == "time" && method == "sleep" {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_time")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert time::sleep(args) to __builtin_time.sleep(args)
+            if module == "time" && method == "sleep" {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_time")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert rand::int(args) and rand::float(args) to __builtin_rand.method(args)
-                if module == "rand" && (method == "int" || method == "float") {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_rand")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert rand::int(args) and rand::float(args) to __builtin_rand.method(args)
+            if module == "rand" && (method == "int" || method == "float") {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_rand")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert stream::new(args), stream::observe(args) to __builtin_stream.method(args)
-                if module == "stream"
-                    && (method == "new"
-                        || method == "observe"
-                        || method == "fail"
-                        || method == "match_char"
-                        || method == "match_class"
-                        || method == "choice"
-                        || method == "star"
-                        || method == "plus"
-                        || method == "seq"
-                        || method == "not"
-                        || method == "lookahead"
-                        || method == "optional")
-                {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_stream")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert stream::new(args), stream::observe(args) to __builtin_stream.method(args)
+            if module == "stream"
+                && (method == "new"
+                    || method == "observe"
+                    || method == "fail"
+                    || method == "match_char"
+                    || method == "match_class"
+                    || method == "choice"
+                    || method == "star"
+                    || method == "plus"
+                    || method == "seq"
+                    || method == "not"
+                    || method == "lookahead"
+                    || method == "optional")
+            {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_stream")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert cursor::advance, cursor::rewind, cursor::position, cursor::current to __builtin_cursor.method(args)
-                if module == "cursor"
-                    && (method == "advance"
-                        || method == "rewind"
-                        || method == "position"
-                        || method == "current")
-                {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_cursor")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert cursor::advance, cursor::rewind, cursor::position, cursor::current to __builtin_cursor.method(args)
+            if module == "cursor"
+                && (method == "advance"
+                    || method == "rewind"
+                    || method == "position"
+                    || method == "current")
+            {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_cursor")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
+            }
 
-                // Convert io::load(args) to __builtin_io.load(args)
-                if module == "io" && method == "load" {
-                    let builtin_idx = self
-                        .code
-                        .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_io")));
-                    let mut arg_indices = Vec::with_capacity(args.len());
-                    for arg in args {
-                        match arg {
-                            Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
-                            Arg::Placeholder => unreachable!(),
-                        }
+            // Convert io::load(args) to __builtin_io.load(args)
+            if module == "io" && method == "load" {
+                let builtin_idx = self
+                    .code
+                    .emit(Instruction::LoadSymbol(SmolStr::new("__builtin_io")));
+                let mut arg_indices = Vec::with_capacity(args.len());
+                for arg in args {
+                    match arg {
+                        Arg::Expr(e) => arg_indices.push(self.compile_expr(e)?),
+                        Arg::Placeholder => unreachable!(),
                     }
-                    return Ok(self.code.emit(Instruction::MethodCall {
-                        receiver: builtin_idx,
-                        method: method.clone(),
-                        args: arg_indices,
-                    }));
                 }
+                return Ok(self.code.emit(Instruction::MethodCall {
+                    receiver: builtin_idx,
+                    method: method.clone(),
+                    args: arg_indices,
+                }));
             }
         }
 
         // Check for await_all(list) - special RLM primitive
-        if let Expr::Ident(name) = func {
-            if name == "await_all" {
-                if args.len() != 1 {
-                    return Err(Error::Compiler(format!(
-                        "await_all expects 1 argument, got {}",
-                        args.len()
-                    )));
+        if let Expr::Ident(name) = func
+            && name == "await_all"
+        {
+            if args.len() != 1 {
+                return Err(Error::Compiler(format!(
+                    "await_all expects 1 argument, got {}",
+                    args.len()
+                )));
+            }
+            match &args[0] {
+                Arg::Expr(e) => {
+                    let streams_idx = self.compile_expr(e)?;
+                    return Ok(self.code.emit(Instruction::AwaitAll {
+                        streams: streams_idx,
+                    }));
                 }
-                match &args[0] {
-                    Arg::Expr(e) => {
-                        let streams_idx = self.compile_expr(e)?;
-                        return Ok(self.code.emit(Instruction::AwaitAll {
-                            streams: streams_idx,
-                        }));
-                    }
-                    Arg::Placeholder => {
-                        return Err(Error::Compiler(
-                            "await_all does not support partial application".to_string(),
-                        ));
-                    }
+                Arg::Placeholder => {
+                    return Err(Error::Compiler(
+                        "await_all does not support partial application".to_string(),
+                    ));
                 }
             }
         }
@@ -4076,13 +4076,13 @@ impl Compiler {
             GP::Action { pattern: p, action } => {
                 let pattern_idx = self.compile_grammar_pattern(p)?;
                 let action_idx = self.compile_expr(action)?;
-                let match_action_idx = self.code.emit(Instruction::MatchAction {
-                    pattern: pattern_idx,
-                    action: action_idx,
-                });
+
                 // Return the match_action_idx, not the pattern_idx
                 // This is important for Choice compilation - we want to Return the MatchAction result
-                match_action_idx
+                self.code.emit(Instruction::MatchAction {
+                    pattern: pattern_idx,
+                    action: action_idx,
+                })
             }
 
             GP::Guard {
@@ -4160,7 +4160,7 @@ impl Compiler {
                     .any(|p| !matches!(p, GP::Bind { .. } | GP::Any))
                     || rest
                         .as_ref()
-                        .map_or(false, |r| !matches!(r.as_ref(), GP::Bind { .. } | GP::Any));
+                        .is_some_and(|r| !matches!(r.as_ref(), GP::Bind { .. } | GP::Any));
 
                 if has_complex_patterns {
                     // OMeta-style list matching with tree descent for complex patterns:

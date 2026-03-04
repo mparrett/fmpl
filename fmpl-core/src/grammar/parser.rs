@@ -236,7 +236,7 @@ impl<'a> GrammarParser<'a> {
             // Parse the body as an FMPL expression
             let body = self.parse_action()?;
 
-            let rule = Rule::function(params.into_iter().map(SmolStr::from).collect(), body);
+            let rule = Rule::function(params.into_iter().collect(), body);
 
             return Ok((name, rule));
         }
@@ -447,18 +447,17 @@ impl<'a> GrammarParser<'a> {
 
             // End symbol at whitespace, (, [, {, comma, semicolon, or newline
             // But NOT at | since | is allowed inside symbols
-            if in_symbol {
-                if c == ' '
+            if in_symbol
+                && (c == ' '
                     || c == '('
                     || c == '['
                     || c == '{'
                     || c == ','
                     || c == ';'
                     || c == '\n'
-                    || c == '\t'
-                {
-                    in_symbol = false;
-                }
+                    || c == '\t')
+            {
+                in_symbol = false;
             }
 
             match c {
@@ -702,9 +701,9 @@ impl<'a> GrammarParser<'a> {
                     };
                     let name = self.parse_ident()?;
                     pattern = Pattern::Bind {
-                        name: name,
+                        name,
                         pattern: Box::new(pattern),
-                        is_choice: is_choice,
+                        is_choice,
                     };
                 }
                 _ => break,
@@ -1576,7 +1575,7 @@ impl<'a> GrammarParser<'a> {
                     // Check if the next non-whitespace char starts a new pattern
                     // Patterns can start with: :Symbol, _, [, %, ident, ', "
                     let remaining = &self.source[self.pos + 1..];
-                    let trimmed = remaining.trim_start_matches(|c: char| c == ' ' || c == '\t');
+                    let trimmed = remaining.trim_start_matches([' ', '\t']);
                     if let Some(first) = trimmed.chars().next() {
                         // Break if we see a pattern-starting character at start of line
                         if first == ':'
@@ -1667,25 +1666,25 @@ impl<'a> GrammarParser<'a> {
         let start = self.pos;
 
         // First check if it's an operator symbol
-        if let Some(c) = self.peek_char() {
-            if matches!(
+        if let Some(c) = self.peek_char()
+            && matches!(
                 c,
                 '+' | '-' | '*' | '/' | '%' | '<' | '>' | '=' | '!' | '|' | '&'
-            ) {
-                // Parse operator characters
-                while let Some(c) = self.peek_char() {
-                    if matches!(
-                        c,
-                        '+' | '-' | '*' | '/' | '%' | '<' | '>' | '=' | '!' | '|' | '&'
-                    ) {
-                        self.advance();
-                    } else {
-                        break;
-                    }
+            )
+        {
+            // Parse operator characters
+            while let Some(c) = self.peek_char() {
+                if matches!(
+                    c,
+                    '+' | '-' | '*' | '/' | '%' | '<' | '>' | '=' | '!' | '|' | '&'
+                ) {
+                    self.advance();
+                } else {
+                    break;
                 }
-                if self.pos > start {
-                    return Ok(SmolStr::new(&self.source[start..self.pos]));
-                }
+            }
+            if self.pos > start {
+                return Ok(SmolStr::new(&self.source[start..self.pos]));
             }
         }
 

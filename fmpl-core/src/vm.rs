@@ -963,10 +963,10 @@ impl Vm {
                                 }
                             }
                             // Also check frame locals
-                            if found.is_none() {
-                                if let Some(val) = frame.locals.get(capture_name) {
-                                    found = Some(val.clone());
-                                }
+                            if found.is_none()
+                                && let Some(val) = frame.locals.get(capture_name)
+                            {
+                                found = Some(val.clone());
                             }
                             // If still not found, that's an error - but we'll handle it at runtime
                             if let Some(val) = found {
@@ -1196,10 +1196,10 @@ impl Vm {
                     let val_ref = frame.get_ref(value);
                     let matches = match val_ref {
                         Value::Tagged(t, children) => {
-                            *t == tag && expected_arity.map_or(true, |n| children.len() == n)
+                            *t == tag && expected_arity.is_none_or(|n| children.len() == n)
                         }
                         // Also match bare Value::Symbol when pattern is a bare symbol (no arity check)
-                        Value::Symbol(s) => *s == tag && expected_arity.map_or(true, |n| n == 0),
+                        Value::Symbol(s) => *s == tag && expected_arity.is_none_or(|n| n == 0),
                         _ => false,
                     };
                     if !matches {
@@ -1905,12 +1905,9 @@ impl Vm {
                         let grammar_name = grammar.name.clone();
                         let cache = self.compiled_grammars.lock().unwrap();
                         if let Some(compiled_code) = cache.get(&grammar_name).cloned() {
-                            if let Some(entry_point) = compiled_code.get_rule_entry(&rule_name_smol)
-                            {
-                                Some((compiled_code, entry_point))
-                            } else {
-                                None
-                            }
+                            compiled_code
+                                .get_rule_entry(&rule_name_smol)
+                                .map(|entry_point| (compiled_code, entry_point))
                         } else {
                             None
                         }
@@ -3078,7 +3075,7 @@ impl Vm {
                         input_value.clone(),
                         &grammar_arc,
                         &self.grammars,
-                        &rule,
+                        rule,
                         evaluator,
                     )?;
 
@@ -3361,7 +3358,7 @@ impl Vm {
                         vm.frames.pop(); // Clean up the frame on error
                     }
                     // Convert the () error to a Value error
-                    exec_result.map(|_| Value::Null).map_err(|e| e)
+                    exec_result.map(|_| Value::Null)
                 }
             }
             _ => Err(Error::Runtime(
@@ -3710,10 +3707,10 @@ impl Vm {
                     Some(Value::String(s)) => s.to_string(),
                     _ => "parse failure".to_string(),
                 };
-                return Err(Error::ParseFailed {
+                Err(Error::ParseFailed {
                     position: 0,
                     message: msg,
-                });
+                })
             }
             ("__builtin_stream", "match_char") => {
                 if args.len() != 2 {
@@ -3740,14 +3737,14 @@ impl Vm {
                 match head {
                     Value::String(ref c) if *c == expected => {
                         stream.advance(1);
-                        return Ok(Value::String(expected));
+                        Ok(Value::String(expected))
                     }
                     _ => {
                         let pos = stream.position();
-                        return Err(Error::ParseFailed {
+                        Err(Error::ParseFailed {
                             position: pos,
                             message: format!("expected '{}', got {:?}", expected, head),
-                        });
+                        })
                     }
                 }
             }
@@ -3780,21 +3777,21 @@ impl Vm {
                         let ch = c.chars().next().unwrap_or('\0');
                         if crate::parse_stream::char_in_class(ch, &class) {
                             stream.advance(1);
-                            return Ok(Value::String(c.clone()));
+                            Ok(Value::String(c.clone()))
                         } else {
                             let pos = stream.position();
-                            return Err(Error::ParseFailed {
+                            Err(Error::ParseFailed {
                                 position: pos,
                                 message: format!("expected [{}], got '{}'", class, c),
-                            });
+                            })
                         }
                     }
                     _ => {
                         let pos = stream.position();
-                        return Err(Error::ParseFailed {
+                        Err(Error::ParseFailed {
                             position: pos,
                             message: format!("expected [{}], got {:?}", class, head),
-                        });
+                        })
                     }
                 }
             }

@@ -40,7 +40,7 @@ pub fn transpile(ir: &Value) -> Result<String> {
 
     // Include runtime support
     output.push_str(RUNTIME_PRELUDE);
-    output.push_str("\n");
+    output.push('\n');
 
     // Main function
     output.push_str("fn main() {\n");
@@ -531,18 +531,19 @@ impl IrToRust {
                     current_body = &children[1];
                 }
                 Value::List(items) if !items.is_empty() => {
-                    if let Value::Symbol(tag) = &items[0] {
-                        if tag.as_str() == "Lambda" && items.len() >= 3 {
-                            // List format: [:Lambda, params, body]
-                            let inner_params = self.expect_list(&items[1])?;
-                            for p in &inner_params {
-                                if let Value::Symbol(name) = p {
-                                    all_params.push(sanitize_ident(name));
-                                }
+                    if let Value::Symbol(tag) = &items[0]
+                        && tag.as_str() == "Lambda"
+                        && items.len() >= 3
+                    {
+                        // List format: [:Lambda, params, body]
+                        let inner_params = self.expect_list(&items[1])?;
+                        for p in &inner_params {
+                            if let Value::Symbol(name) = p {
+                                all_params.push(sanitize_ident(name));
                             }
-                            current_body = &items[2];
-                            continue;
                         }
+                        current_body = &items[2];
+                        continue;
                     }
                     break;
                 }
@@ -800,10 +801,10 @@ impl IrToRust {
                 if let Some((func_tag, func_children)) = self.extract_tag_children(&children[0]) {
                     // Check for qualified calls like float.parse(x)
                     // Structure: Call(GetProp(Var(float), parse), [x])
-                    if func_tag.as_str() == "GetProp" && func_children.len() >= 2 {
-                        if let Some((var_tag, var_children)) = self.extract_tag_children(&func_children[0]) {
-                            if var_tag.as_str() == "Var" {
-                                if let (Some(Value::Symbol(obj)), Some(Value::Symbol(method))) =
+                    if func_tag.as_str() == "GetProp" && func_children.len() >= 2
+                        && let Some((var_tag, var_children)) = self.extract_tag_children(&func_children[0])
+                            && var_tag.as_str() == "Var"
+                                && let (Some(Value::Symbol(obj)), Some(Value::Symbol(method))) =
                                     (var_children.first(), func_children.get(1)) {
                                     // Handle known qualified helpers
                                     match (obj.as_str(), method.as_str()) {
@@ -813,11 +814,8 @@ impl IrToRust {
                                         _ => {}
                                     }
                                 }
-                            }
-                        }
-                    }
-                    if func_tag.as_str() == "Var" {
-                        if let Some(Value::Symbol(name)) = func_children.first() {
+                    if func_tag.as_str() == "Var"
+                        && let Some(Value::Symbol(name)) = func_children.first() {
                             match name.as_str() {
                                 "prepend" if arg_strs.len() == 2 => {
                                     return Ok(format!("prepend({}, {})", arg_strs[0], arg_strs[1]));
@@ -845,19 +843,17 @@ impl IrToRust {
                                 }
                                 "reduce" | "fold" if args.len() == 3 => {
                                     // For fold/reduce, if the first arg is a Lambda, generate a native Rust closure
-                                    if let Some((lambda_tag, lambda_children)) = self.extract_tag_children(&args[0]) {
-                                        if lambda_tag.as_str() == "Lambda" && lambda_children.len() >= 2 {
+                                    if let Some((lambda_tag, lambda_children)) = self.extract_tag_children(&args[0])
+                                        && lambda_tag.as_str() == "Lambda" && lambda_children.len() >= 2 {
                                             let closure = self.transpile_lambda_as_closure(&lambda_children[0], &lambda_children[1])?;
                                             return Ok(format!("fold({}, {}, {})", closure, arg_strs[1], arg_strs[2]));
                                         }
-                                    }
                                     // Fallback for non-lambda first arg
                                     return Ok(format!("fold({}, {}, {})", arg_strs[0], arg_strs[1], arg_strs[2]));
                                 }
                                 _ => {}
                             }
                         }
-                    }
                 }
 
                 // Default: call via Value's call method
@@ -887,9 +883,9 @@ impl IrToRust {
                 }
 
                 // Check for known builtin method calls like float.parse
-                if let Some((obj_tag, obj_children)) = self.extract_tag_children(&children[0]) {
-                    if obj_tag.as_str() == "Var" {
-                        if let Some(Value::Symbol(obj_name)) = obj_children.first() {
+                if let Some((obj_tag, obj_children)) = self.extract_tag_children(&children[0])
+                    && obj_tag.as_str() == "Var"
+                        && let Some(Value::Symbol(obj_name)) = obj_children.first() {
                             match (obj_name.as_str(), method.as_str()) {
                                 ("float", "parse") if arg_strs.len() == 1 => {
                                     return Ok(format!("float_parse({})", arg_strs[0]));
@@ -897,8 +893,6 @@ impl IrToRust {
                                 _ => {}
                             }
                         }
-                    }
-                }
 
                 let obj = self.transpile_ir(&children[0])?;
                 match method.as_str() {
@@ -920,8 +914,8 @@ impl IrToRust {
             "ParseChar" => {
                 let c = self.expect_string(&children[0])?;
                 let _c_char = c.chars().next().unwrap_or('\0');
-                let escaped_for_comparison = escape_string_for_rust(&c.to_string());
-                let escaped_for_error = escape_string_for_error_message(&c.to_string());
+                let escaped_for_comparison = escape_string_for_rust(c.as_ref());
+                let escaped_for_error = escape_string_for_error_message(c.as_ref());
                 Ok(format!(
                     "if input.get(pos..pos+1) == Some(\"{}\") {{ Ok((Value::String(SmolStr::new(\"{}\")), pos + 1)) }} else {{ Err(Error::Parser {{ token: pos, message: \"expected '{}'\".to_string() }}) }}",
                     escaped_for_comparison, escaped_for_comparison, escaped_for_error
@@ -1178,11 +1172,11 @@ macro_rules! trace_exit {
 
                 // Add helper functions used by semantic actions
                 code.push_str(GRAMMAR_HELPERS);
-                code.push_str("\n");
+                code.push('\n');
 
                 for rule in rules {
-                    if let Some((rule_tag, rule_children)) = self.extract_tag_children(&rule) {
-                        if rule_tag.as_str() == "ParseRuleDef" && rule_children.len() >= 2 {
+                    if let Some((rule_tag, rule_children)) = self.extract_tag_children(&rule)
+                        && rule_tag.as_str() == "ParseRuleDef" && rule_children.len() >= 2 {
                             let rule_name = self.expect_symbol(&rule_children[0])?;
                             let rule_body = self.transpile_ir(&rule_children[1])?;
                             let sanitized_name = sanitize_ident(&rule_name);
@@ -1193,7 +1187,6 @@ macro_rules! trace_exit {
                                 body = rule_body
                             ));
                         }
-                    }
                 }
 
                 // Add public entry point that wraps the main parsing rule
@@ -2174,16 +2167,16 @@ fn collect_free_vars(ir: &Value, bound: &HashSet<String>, free: &mut HashSet<Str
                 }
             }
             "Lambda" => {
-                if children.len() >= 2 {
-                    if let Value::List(params) = &children[0] {
-                        let mut new_bound = bound.clone();
-                        for p in params.iter() {
-                            if let Value::Symbol(name) = p {
-                                new_bound.insert(sanitize_ident(name));
-                            }
+                if children.len() >= 2
+                    && let Value::List(params) = &children[0]
+                {
+                    let mut new_bound = bound.clone();
+                    for p in params.iter() {
+                        if let Value::Symbol(name) = p {
+                            new_bound.insert(sanitize_ident(name));
                         }
-                        collect_free_vars(&children[1], &new_bound, free);
                     }
+                    collect_free_vars(&children[1], &new_bound, free);
                 }
             }
             _ => {

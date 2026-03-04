@@ -459,7 +459,7 @@ impl<'a> Parser<'a> {
             } else if self.check(&Token::Percent)
                 && !self
                     .peek_ahead(1)
-                    .map_or(false, |t| matches!(t.token, Token::LBrace))
+                    .is_some_and(|t| matches!(t.token, Token::LBrace))
             {
                 // Guard: %{ is a map literal, not modulo followed by block
                 BinOp::Mod
@@ -1098,24 +1098,22 @@ impl<'a> Parser<'a> {
             // List pattern: [a, b] -> has comma after first element
             // Character class: [a-z] -> has dash for ranges
             Token::LBracket => {
-                if let Some(second) = self.peek_ahead(2) {
-                    if let Some(third) = self.peek_ahead(3) {
-                        // [a, ...] is list pattern
-                        if matches!(second.token, Token::Ident(_))
-                            && matches!(third.token, Token::Comma)
-                        {
-                            return true;
-                        }
-                        // [a] => is list pattern (single element)
-                        if matches!(second.token, Token::Ident(_))
-                            && matches!(third.token, Token::RBracket)
-                        {
-                            if let Some(fourth) = self.peek_ahead(4) {
-                                if matches!(fourth.token, Token::Arrow | Token::When) {
-                                    return true;
-                                }
-                            }
-                        }
+                if let Some(second) = self.peek_ahead(2)
+                    && let Some(third) = self.peek_ahead(3)
+                {
+                    // [a, ...] is list pattern
+                    if matches!(second.token, Token::Ident(_))
+                        && matches!(third.token, Token::Comma)
+                    {
+                        return true;
+                    }
+                    // [a] => is list pattern (single element)
+                    if matches!(second.token, Token::Ident(_))
+                        && matches!(third.token, Token::RBracket)
+                        && let Some(fourth) = self.peek_ahead(4)
+                        && matches!(fourth.token, Token::Arrow | Token::When)
+                    {
+                        return true;
                     }
                 }
                 false
@@ -1201,15 +1199,15 @@ impl<'a> Parser<'a> {
                     // [expr for x in list if pred] -> not yet supported
 
                     // Check if first expression is just the variable reference
-                    if let Expr::Ident(ref name) = first {
-                        if name == &elem_var {
-                            // Simple filter: [x for x in list if pred]
-                            return Ok(Expr::Filter {
-                                elem_var,
-                                iterable: Box::new(iterable),
-                                body: Box::new(condition),
-                            });
-                        }
+                    if let Expr::Ident(ref name) = first
+                        && name == &elem_var
+                    {
+                        // Simple filter: [x for x in list if pred]
+                        return Ok(Expr::Filter {
+                            elem_var,
+                            iterable: Box::new(iterable),
+                            body: Box::new(condition),
+                        });
                     }
 
                     // For [expr for x in list if pred], we need to combine map and filter

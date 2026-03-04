@@ -84,6 +84,12 @@ pub struct ConstraintGenerator {
     next_var: usize,
 }
 
+impl Default for ConstraintGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConstraintGenerator {
     pub fn new() -> Self {
         Self { next_var: 0 }

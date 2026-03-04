@@ -15,8 +15,12 @@
 .opencode/
 data/
 
-# Ralph loop logs
+# Ralph loop logs and transient state
 .ralph-logs/
+.claude/.ralph-state.json
+
+# Python bytecode
+__pycache__/
 
 # Git worktrees
 .worktrees/

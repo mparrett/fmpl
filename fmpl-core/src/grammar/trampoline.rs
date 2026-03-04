@@ -490,23 +490,21 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
             self.backtracking_mode && self.find_choice_entry_for_position(pos).is_some();
 
         // Check memo cache
-        if !skip_memo {
-            if let Some(entry) = self.input.get_memo(&pos_obj, &rule_name) {
-                return match entry {
-                    MemoEntry::InProgress => {
-                        // Left recursion detected
-                        self.result_stack.push(WorkResult::Failure);
-                        Ok(())
+        if !skip_memo && let Some(entry) = self.input.get_memo(&pos_obj, &rule_name) {
+            return match entry {
+                MemoEntry::InProgress => {
+                    // Left recursion detected
+                    self.result_stack.push(WorkResult::Failure);
+                    Ok(())
+                }
+                MemoEntry::Done(value, end_index) => {
+                    match value {
+                        Some(v) => self.result_stack.push(WorkResult::Success(v, end_index)),
+                        None => self.result_stack.push(WorkResult::Failure),
                     }
-                    MemoEntry::Done(value, end_index) => {
-                        match value {
-                            Some(v) => self.result_stack.push(WorkResult::Success(v, end_index)),
-                            None => self.result_stack.push(WorkResult::Failure),
-                        }
-                        Ok(())
-                    }
-                };
-            }
+                    Ok(())
+                }
+            };
         }
 
         // Mark as in progress for left recursion detection
@@ -713,27 +711,26 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                         });
                     } else {
                         // Backtracking mode: check for existing choice point
-                        if let Some(entry_idx) = self.find_choice_entry_for_position(pos) {
-                            if let Some(BacktrackEntry::Choice {
+                        if let Some(entry_idx) = self.find_choice_entry_for_position(pos)
+                            && let Some(BacktrackEntry::Choice {
                                 alternatives,
                                 next_index,
                                 ..
                             }) = self.backtracking_stack.get(entry_idx)
-                            {
-                                if *next_index < alternatives.len() {
-                                    let (value, end_pos) = alternatives[*next_index].clone();
-                                    // Increment next_index
-                                    if let Some(BacktrackEntry::Choice { next_index: ni, .. }) =
-                                        self.backtracking_stack.get_mut(entry_idx)
-                                    {
-                                        *ni += 1;
-                                    }
-                                    self.result_stack.push(WorkResult::Success(value, end_pos));
-                                    return Ok(());
-                                } else {
-                                    self.result_stack.push(WorkResult::Failure);
-                                    return Ok(());
+                        {
+                            if *next_index < alternatives.len() {
+                                let (value, end_pos) = alternatives[*next_index].clone();
+                                // Increment next_index
+                                if let Some(BacktrackEntry::Choice { next_index: ni, .. }) =
+                                    self.backtracking_stack.get_mut(entry_idx)
+                                {
+                                    *ni += 1;
                                 }
+                                self.result_stack.push(WorkResult::Success(value, end_pos));
+                                return Ok(());
+                            } else {
+                                self.result_stack.push(WorkResult::Failure);
+                                return Ok(());
                             }
                         }
 
@@ -874,33 +871,32 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 match bp {
                     BinaryPattern::Byte(expected) => {
                         let pos_obj = self.input.position_at(pos);
-                        if let Some(item) = self.input.head(&pos_obj) {
-                            if let Some(b) = item.as_byte() {
-                                if b == *expected {
-                                    let new_pos = self.input.tail(&pos_obj);
-                                    self.result_stack.push(WorkResult::Success(
-                                        Value::Int(b as i64),
-                                        self.input.index(&new_pos),
-                                    ));
-                                    return Ok(());
-                                }
-                            }
+                        if let Some(item) = self.input.head(&pos_obj)
+                            && let Some(b) = item.as_byte()
+                            && b == *expected
+                        {
+                            let new_pos = self.input.tail(&pos_obj);
+                            self.result_stack.push(WorkResult::Success(
+                                Value::Int(b as i64),
+                                self.input.index(&new_pos),
+                            ));
+                            return Ok(());
                         }
                         self.result_stack.push(WorkResult::Failure);
                     }
                     BinaryPattern::ByteRange(lo, hi) => {
                         let pos_obj = self.input.position_at(pos);
-                        if let Some(item) = self.input.head(&pos_obj) {
-                            if let Some(b) = item.as_byte() {
-                                if b >= *lo && b <= *hi {
-                                    let new_pos = self.input.tail(&pos_obj);
-                                    self.result_stack.push(WorkResult::Success(
-                                        Value::Int(b as i64),
-                                        self.input.index(&new_pos),
-                                    ));
-                                    return Ok(());
-                                }
-                            }
+                        if let Some(item) = self.input.head(&pos_obj)
+                            && let Some(b) = item.as_byte()
+                            && b >= *lo
+                            && b <= *hi
+                        {
+                            let new_pos = self.input.tail(&pos_obj);
+                            self.result_stack.push(WorkResult::Success(
+                                Value::Int(b as i64),
+                                self.input.index(&new_pos),
+                            ));
+                            return Ok(());
                         }
                         self.result_stack.push(WorkResult::Failure);
                     }
@@ -939,13 +935,13 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                     ));
                 }
                 let pos_obj = self.input.position_at(pos);
-                if let Some(InputItem::Value(v)) = self.input.head(&pos_obj) {
-                    if &v == expected {
-                        let new_pos = self.input.tail(&pos_obj);
-                        self.result_stack
-                            .push(WorkResult::Success(v, self.input.index(&new_pos)));
-                        return Ok(());
-                    }
+                if let Some(InputItem::Value(v)) = self.input.head(&pos_obj)
+                    && &v == expected
+                {
+                    let new_pos = self.input.tail(&pos_obj);
+                    self.result_stack
+                        .push(WorkResult::Success(v, self.input.index(&new_pos)));
+                    return Ok(());
                 }
                 self.result_stack.push(WorkResult::Failure);
             }
@@ -987,15 +983,15 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                     ));
                 }
                 let pos_obj = self.input.position_at(pos);
-                if let Some(InputItem::Value(Value::Symbol(sym))) = self.input.head(&pos_obj) {
-                    if sym.as_str() == name.as_str() {
-                        let new_pos = self.input.tail(&pos_obj);
-                        self.result_stack.push(WorkResult::Success(
-                            Value::Symbol(sym),
-                            self.input.index(&new_pos),
-                        ));
-                        return Ok(());
-                    }
+                if let Some(InputItem::Value(Value::Symbol(sym))) = self.input.head(&pos_obj)
+                    && sym.as_str() == name.as_str()
+                {
+                    let new_pos = self.input.tail(&pos_obj);
+                    self.result_stack.push(WorkResult::Success(
+                        Value::Symbol(sym),
+                        self.input.index(&new_pos),
+                    ));
+                    return Ok(());
                 }
                 self.result_stack.push(WorkResult::Failure);
             }
@@ -1925,10 +1921,10 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
         if let Some(ref evaluator) = self.action_evaluator {
             evaluator.borrow_mut()(action, &self.bindings)
         } else {
-            if !self.bindings.is_empty() {
-                if let Some((_, v)) = self.bindings.iter().last() {
-                    return Ok(v.clone());
-                }
+            if !self.bindings.is_empty()
+                && let Some((_, v)) = self.bindings.iter().last()
+            {
+                return Ok(v.clone());
             }
             Ok(matched)
         }
@@ -1942,10 +1938,9 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 position: entry_pos,
                 ..
             } = entry
+                && *entry_pos == position
             {
-                if *entry_pos == position {
-                    return Some(idx);
-                }
+                return Some(idx);
             }
         }
         None
@@ -2011,15 +2006,15 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
             ));
         }
         let pos_obj = self.input.position_at(pos);
-        if let Some(item) = self.input.head(&pos_obj) {
-            if let Some(b) = item.as_byte() {
-                let new_pos = self.input.tail(&pos_obj);
-                self.result_stack.push(WorkResult::Success(
-                    Value::Int(b as i64),
-                    self.input.index(&new_pos),
-                ));
-                return Ok(());
-            }
+        if let Some(item) = self.input.head(&pos_obj)
+            && let Some(b) = item.as_byte()
+        {
+            let new_pos = self.input.tail(&pos_obj);
+            self.result_stack.push(WorkResult::Success(
+                Value::Int(b as i64),
+                self.input.index(&new_pos),
+            ));
+            return Ok(());
         }
         self.result_stack.push(WorkResult::Failure);
         Ok(())
@@ -2104,15 +2099,15 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
             ));
         }
         let pos_obj = self.input.position_at(pos);
-        if let Some(item) = self.input.head(&pos_obj) {
-            if let Some(b) = item.as_byte() {
-                let new_pos = self.input.tail(&pos_obj);
-                self.result_stack.push(WorkResult::Success(
-                    Value::Int(b as i8 as i64),
-                    self.input.index(&new_pos),
-                ));
-                return Ok(());
-            }
+        if let Some(item) = self.input.head(&pos_obj)
+            && let Some(b) = item.as_byte()
+        {
+            let new_pos = self.input.tail(&pos_obj);
+            self.result_stack.push(WorkResult::Success(
+                Value::Int(b as i8 as i64),
+                self.input.index(&new_pos),
+            ));
+            return Ok(());
         }
         self.result_stack.push(WorkResult::Failure);
         Ok(())
