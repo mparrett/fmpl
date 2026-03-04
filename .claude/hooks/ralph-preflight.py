@@ -77,7 +77,18 @@ def main():
             if m and int(m.group(1)) > 0:
                 tests_failing = True
 
-    # 2. Uncommitted changes: jj diff --stat
+    # 2. Health check: cargo clippy
+    _, clippy_output = run(
+        "cargo clippy -p fmpl-core 2>&1 | grep -v objfs | grep -E '^warning:' "
+        "| grep -v 'fmpl-core@' | grep -v 'generated.*warnings'",
+        timeout=120,
+    )
+    clippy_warnings = [
+        line.strip() for line in clippy_output.strip().split("\n") if line.strip()
+    ]
+    has_clippy_warnings = len(clippy_warnings) > 0
+
+    # 3. Uncommitted changes: jj diff --stat
     _, diff_output = run("jj diff --stat 2>&1")
     has_uncommitted = bool(diff_output.strip()) and "0 files changed" not in diff_output
 
@@ -96,7 +107,7 @@ def main():
                                  ".claude/settings.local.json"):
                         protected_files.append(fname)
 
-    # 3. Determine starting state
+    # 4. Determine starting state
     if tests_failing:
         start_state = "IMPLEMENT"
         health_fix = True
@@ -108,6 +119,20 @@ def main():
         health_fix = False
         context_parts.append("## Health Check: PASSED\n")
         context_parts.append(test_summary.strip() + "\n")
+
+    if has_clippy_warnings:
+        # Clippy warnings are a health check failure — fix before new tasks
+        if not tests_failing:
+            start_state = "IMPLEMENT"
+            health_fix = True
+        context_parts.append(f"\n## Clippy: FAILED — {len(clippy_warnings)} warnings\n")
+        context_parts.append(
+            "Zero warnings required. Fix all clippy warnings before picking a new task.\n"
+            "Run `cargo clippy --fix --allow-dirty -p fmpl-core` first, then fix remaining manually.\n"
+        )
+        context_parts.append("```\n" + "\n".join(clippy_warnings[:15]) + "\n```\n")
+    else:
+        context_parts.append("\n## Clippy: CLEAN\n")
 
     if has_uncommitted:
         context_parts.append("\n## Uncommitted Changes\n")
@@ -153,6 +178,7 @@ def main():
         "decomposed": False,
         "tests_passed": False,
         "clippy_passed": False,
+        "clippy_warning_count_at_start": len(clippy_warnings),
         "verify_failed": False,
         "protected_files": protected_files,
         "uncommitted_files": modified_files,
