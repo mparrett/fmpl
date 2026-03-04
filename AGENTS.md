@@ -207,6 +207,13 @@ All integration tests use `run(code).expect("runtime error")` or `map_err(|e| e.
 - `specs/indexed-rpn-conversion.md` — Indexed RPN design rationale
 - `specs/persistence.md` — Fjall-backed storage and continuations
 
+## Codebase Discovery Docs
+
+`docs/codebase/` contains consolidated implementation patterns discovered during development.
+**Read these before exploring the codebase** — they save significant research time.
+
+- `docs/codebase/fjall-persistence-patterns.md` — Save/load patterns, serde serialization, keyspace layout, test setup
+
 ## Current Limitations (Mar 2026)
 
 - **Bootstrap pipeline**: `ast_to_ir.fmpl` handles core expressions but several AST node types still produce incorrect IR (lists, lambdas, maps, sequences, match, for, while, try/catch, pipe, slice, block). 21 parity tests track progress.

@@ -2,6 +2,15 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/ralph-gate.py"
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
@@ -16,6 +25,17 @@
           {
             "type": "command",
             "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.file_path // empty'); if echo \"$FILE\" | grep -qF '.cargo/registry'; then echo 'BLOCKED: Use context7 (resolve-library-id + query-docs) for external crate APIs, not ~/.cargo/registry' >&2; exit 2; fi"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/ralph-transition.py"
           }
         ]
       }

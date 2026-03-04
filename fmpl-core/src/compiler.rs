@@ -688,6 +688,34 @@ impl CompiledCode {
     pub fn get_rule_entry(&self, rule_name: &str) -> Option<InstrIndex> {
         self.rule_entry_points.get(rule_name).copied()
     }
+
+    /// Save compiled bytecode to a Fjall keyspace under the given key.
+    #[cfg(feature = "fjall-persistence")]
+    pub fn save_to_fjall(&self, keyspace: &fjall::Keyspace, key: &str) -> Result<()> {
+        let bytes =
+            serde_json::to_vec(self).map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
+        keyspace
+            .insert(key.as_bytes(), bytes)
+            .map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Load compiled bytecode from a Fjall keyspace by key.
+    /// Returns None if the key does not exist.
+    #[cfg(feature = "fjall-persistence")]
+    pub fn load_from_fjall(keyspace: &fjall::Keyspace, key: &str) -> Result<Option<Self>> {
+        let bytes = keyspace
+            .get(key.as_bytes())
+            .map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
+        match bytes {
+            Some(b) => {
+                let code: CompiledCode = serde_json::from_slice(&b)
+                    .map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
+                Ok(Some(code))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 impl Default for CompiledCode {

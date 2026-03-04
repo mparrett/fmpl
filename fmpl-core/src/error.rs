@@ -58,6 +58,9 @@ pub enum Error {
 
     #[error("Object persistence error: {0}")]
     ObjectPersistenceError(String),
+
+    #[error("Bytecode persistence error: {0}")]
+    BytecodePersistenceError(String),
 }
 
 impl Error {

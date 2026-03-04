@@ -154,6 +154,8 @@ INTERRUPTED=false
 
 cleanup() {
     echo ""
+    # Clean up state machine
+    python3 .claude/hooks/ralph-preflight.py --clear 2>/dev/null || true
     if [[ "$INTERRUPTED" == "true" ]]; then
         log "Interrupted by user (Ctrl-C)"
     fi
@@ -166,13 +168,13 @@ trap cleanup EXIT
 trap 'INTERRUPTED=true; exit 130' INT
 
 while true; do
-    ITERATION=$((ITERATION + 1))
-
     # Check max iterations (0 = unlimited)
-    if [[ "$MAX_ITERATIONS" -gt 0 && "$ITERATION" -gt "$MAX_ITERATIONS" ]]; then
+    if [[ "$MAX_ITERATIONS" -gt 0 && "$ITERATION" -ge "$MAX_ITERATIONS" ]]; then
         log "Reached max iterations ($MAX_ITERATIONS)"
         break
     fi
+
+    ITERATION=$((ITERATION + 1))
 
     log "--- Iteration $ITERATION ---"
     ITER_START=$(date +%s)
@@ -180,10 +182,15 @@ while true; do
     RAW_LOG="$LOG_DIR/iter-$TIMESTAMP-$ITER_NUM.jsonl"
     SUMMARY="$LOG_DIR/iter-$TIMESTAMP-$ITER_NUM.summary.txt"
 
+    # Pre-flight: run health check, detect uncommitted changes, init state machine.
+    # Outputs the user-message for claude on stdout, state on stderr.
+    PREFLIGHT_MSG=$(python3 .claude/hooks/ralph-preflight.py 2>>"$SESSION_LOG")
+    log "Pre-flight: $(python3 -c "import json; s=json.load(open('.claude/.ralph-state.json')); print(f\"state={s['state']} protected={len(s.get('protected_files',[]))} uncommitted={len(s.get('uncommitted_files',[]))}\")" 2>/dev/null || echo "no state")"
+
     # Phase 1: Run claude with PROMPT.md as system prompt (cacheable),
-    # minimal user message to trigger execution.
+    # pre-flight context as user message.
     PROMPT_CONTENT=$(cat "$PROMPT_FILE")
-    echo "Execute the task loop. Output COMPLETED:<id>, BLOCKED:<id>, or CLOSED:<id> when done." | \
+    echo "$PREFLIGHT_MSG" | \
         claude $CLAUDE_FLAGS -p \
             --append-system-prompt "$PROMPT_CONTENT" \
             --output-format=stream-json 2>/dev/null | \

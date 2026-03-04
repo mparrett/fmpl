@@ -4,71 +4,52 @@ This is a headless automation loop. Skip ALL process/interactive skills (where-w
 
 @a study specs/README.md
 
-## Step 0: Health Check
+## State Machine
 
-Run `cargo test -p fmpl-core 2>&1 | grep -E '^(test result:|FAILED)' | head -5` first.
+A hook-enforced state machine controls which tools you can use at each step.
+You will see `[STATE -> X]` messages after tool calls indicating transitions,
+followed by instructions for the new state. Follow them.
 
-If there are ANY test failures, **fixing them is your task for this iteration.** Do not pick
-a new task from the issue tracker. Do not dismiss failures as "pre-existing." The build must
-be green before new work begins. Create an issue for the fix if one doesn't exist, fix it,
-commit it, and output `COMPLETED:<id> fix: <description>`.
+```
+                    ┌─── IMPLEMENT → VERIFY → REVIEW → COMMIT
+PICK_TASK → TRIAGE ─┤        ↑          │
+    ↑          │    └─── RESEARCH → DOCUMENT → COMMIT
+    └──close───┘
+```
 
-If tests pass, proceed to Step 1.
+**Two arcs from TRIAGE:**
+- **Implementation arc**: Task requires code → IMPLEMENT → VERIFY → REVIEW → COMMIT
+- **Research arc**: Task needs discovery first → RESEARCH → DOCUMENT → COMMIT
 
-## Step 1: Pick Task
+The health check runs **before you start** (in pre-flight). Your starting state and
+instructions are in the user message.
 
-`jj issue ready | head -2` → pick the top task → `jj issue show <id>`.
+## Pre-flight Context
 
-The issue description IS your research. Do NOT re-read files already quoted in the issue.
+Your user message contains:
+- **Health check results** (pass/fail with test output)
+- **Uncommitted changes** (files modified outside the loop)
+- **Protected files** that you MUST NOT overwrite or revert
+- **Current step instructions** for your starting state
 
-**You are now committed to this task.** You may not pick a different task (except via Step 2 close-and-pick).
+If protected files are listed, the state machine will block Write/Edit on them.
 
-## Step 2: Triage
+## Rules
 
-Check if the issue is already done. Max 3 close-and-pick loops total:
+- The issue description IS your research. Do NOT re-read files already quoted in it.
+- Check `docs/codebase/` before coding — Write/Edit blocked until you do.
+- Use Explore subagents for research, not serial Read/Grep.
+- `jj status` creates checkpoints. `jj undo` rolls back.
+- Consolidate discoveries to `docs/codebase/` before committing.
 
-- If comments say the work is done → verify with one test → if pass, close and loop to Step 1.
-- If subtasks exist and are all closed → close parent, loop to Step 1.
-- If a test already passes → close and loop to Step 1.
+## Budget
 
-If not already done → go to Step 3. **Do not go back to Step 1.**
+- 40 tool calls max per iteration
+- 3 close-and-pick loops max in triage
+- 3-strike rule: same error 3 times → write spec, comment on issue, stop
+- Do NOT use TodoWrite — the issue tracker is the task list
 
-## Step 3: Scope and Implement
-
-You MUST produce code in this step. Triage and decomposition are not deliverables.
-
-**If the task is single-crate**: implement it directly.
-
-**If the task spans multiple crates** or is too large for one iteration:
-1. Decompose into subtasks (`jj issue create '<title>' --description="<desc>"`).
-2. Pick the first subtask.
-3. Implement it — write code, write tests.
-
-Either way, you must have **committed code** before moving to Step 4.
-
-**Use subagents for non-conflicting work:**
-- Use `Explore` subagent to understand code structure before editing.
-- Use `codebase-analyzer` to trace call chains or find usage patterns.
-- Use `context7` for external crate API docs (never grep `~/.cargo/registry`).
-- Use subagents for research in parallel while you plan your edits.
-- Do NOT use subagents to write code in files you're also editing (conflicts).
-
-**Anti-avoidance rules:**
-- "It's cross-crate" is not a reason to skip. Decompose and implement the first piece.
-- "I'll decompose now and implement next iteration" is not allowed.
-- "Let me pick something easier" is not allowed. You are committed from Step 1.
-- If you catch yourself creating subtasks without writing code, stop and write code.
-- Using a subagent for research does not count as implementation work.
-
-## Step 4: Verify & Commit
-
-1. ONE `cargo test` run (filtered). Must pass.
-2. ONE `cargo clippy` run (filtered). Must pass, zero warnings.
-3. Commit with jj (use jj-workflow skill for commit message conventions).
-
-If the build is broken, fix it. Do not declare done while broken.
-
-## Step 5: Output
+## Output
 
 Print exactly one line:
 ```
@@ -79,10 +60,3 @@ Or if blocked:
 ```
 BLOCKED:<id> <reason>
 ```
-
-## Budget
-
-- 40 tool calls max per iteration
-- 3 close-and-pick loops max in Step 2
-- 3-strike rule: same error 3 times → write spec, comment on issue, stop
-- Do NOT use TodoWrite — the issue tracker is the task list
