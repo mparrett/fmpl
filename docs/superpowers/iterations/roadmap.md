@@ -61,40 +61,127 @@
 - STORY-0010 (ast_optimizer.fmpl integration — needs list-based AST refactor; STORY-0012 consolidated into STORY-0010 as duplicate)
 - Removing `FMPL_USE_FMPL_COMPILER` opt-in and making FMPL pipeline the default everywhere
 
-### ITER-0004b — Lists-Everywhere AST Refactor and Optimizer Integration
+### ITER-0004b — Single Canonical Representation (Lists Everywhere + Burn the Bridge)
 
-**Stories:** STORY-0010 (STORY-0012 consolidated into STORY-0010 — duplicate scope)
-**Rationale:** The "lists everywhere" goal was never actually landed despite earlier auto-memory notes suggesting it was. The current system uses `Value::Tagged` end-to-end (`expr_to_value`, `ast_to_ir.fmpl`, `ast_optimizer.fmpl` all use Tagged). This iteration completes the move: `expr_to_value` flips to emit lists in one shot; all consumers (Rust + FMPL) update to match; the optimizer rewrites to its original list-pattern form; everything wires into the FMPL pipeline. **This iteration MUST land before ITER-0005** — see "Why before persistence" below.
+**Stories:** STORY-0010 (consolidated: STORY-0012 absorbed as duplicate scope; STORY-0010c absorbed because the cutover and the cleanup are one refactor)
+**Rationale:** Today FMPL has two interchangeable shapes for tagged/structured data: `Value::Tagged(tag, children)` and `Value::List([Symbol(tag), ...children])`, plus two parser surfaces: `:Tag(args)` and `[:Tag, args]`. This iteration collapses both axes to a single canonical representation: list-shaped values, list-shaped patterns. After this iteration there is exactly one way to represent and pattern-match structured data, no parallel codepaths, no parser ambiguity, no runtime ambiguity. **This iteration MUST land before ITER-0005** — see "Why before persistence" below.
+
+The cutover (make `ast::parse` emit lists; FMPL pipeline consume lists; integrate the optimizer) and the cleanup (delete `Value::Tagged`, `Expr::Tagged`, `Pattern::Constructor`, the `:Tag(args)` parser productions, tagged bytecode, `Pattern::TagMatch`) are one refactor. Splitting them was attempted in the 2026-05-08 session and produced a worse interim state (parallel representations, dual codepaths, more code to maintain) than either before or after the full cleanup. They land together or not at all.
+
 **Status:** pending
 **Impacted scenarios:** SCENARIO-0003, SCENARIO-0016, SCENARIO-0039, SCENARIO-0103 (NEW)
 **Depends on:** ITER-0004 (compiler cutover wired)
-**Look-ahead check:** Locks in `Value::List` as the canonical AST/IR representation BEFORE ITER-0005 starts persisting things — snapshots get one shape, not two.
+**Look-ahead check:** Locks in `Value::List([Symbol(tag), ...])` as the canonical AST/IR representation BEFORE ITER-0005 starts persisting things — snapshots get one shape, not two. Also unblocks ITER-0006 (self-compile seed): the seed bytecode references one canonical AST/IR shape.
 
-**Scope (revised after second PAR review on actual codebase state):**
+**Scope:**
 
-1. **Flip `expr_to_value` to emit lists.** `fmpl-core/src/builtins/ast.rs` rewritten so every `Value::Tagged("Tag", [...])` becomes `Value::List([Value::Symbol("Tag"), ...])`. Tag becomes the first list element instead of a separate enum arm. The `ast_node!` macro at `fmpl-core/src/macros.rs:17` already does exactly this; use it consistently.
+**Strategy:** Transformer-driven rewrite, not hand-edit-driven. The 2026-05-08 attempt confirmed that hand-editing ~349 sites mid-session burns context faster than it converges. The plan below uses two structural code transformers that do the bulk of the work mechanically, leaving only the irreducibly novel work (helper additions, deletions, optimizer integration) for hand-editing.
 
-2. **Update `ir::compile_node` to read lists.** `fmpl-core/src/builtins/ir.rs` currently has both Tagged and list dispatch paths. Remove the Tagged path; list-head dispatch becomes the only path. Use the `ast_match!` macro at `fmpl-core/src/macros.rs:54`.
+- **Rust side:** [ast-grep](https://ast-grep.github.io/) (already installed at `~/.cargo/bin/ast-grep`). Pattern-based structural rewrite using YAML rule files. Idempotent — re-running on its output yields no diff.
+- **FMPL side:** A small FMPL-in-FMPL transformer (a tree grammar) that rewrites `:Tag(args)` → `[:Tag, args]` for both expressions and patterns. Lives at `tools/list-transform/list_transform.fmpl`. Built on FMPL's own parser; dogfoods the language. Also idempotent.
 
-3. **Rewrite `lib/core/ast_to_ir.fmpl` to list patterns.** `:Binary(:+, expr:l, expr:r) => :Add(l, r)` becomes `[:Binary, :+, expr:l, expr:r] => [:Add, l, r]`. The pattern shape `[head, ...children]` matches the list representation directly.
+Both transformers are rules + driver, not from-scratch tools. Total transformer code is well under a few hundred lines; the win is having the rewrite be mechanical and re-runnable, not having a fancy tool.
 
-4. **Rewrite `lib/core/ast_optimizer.fmpl` to list patterns.** Restore the original list-pattern intent (`[:Binary, :+, [:Int, a], [:Int, b]] => [:Int, a+b]`). Keep the `&{ b != 0 }` div-by-zero guard and the INT_MIN guard from the previous attempt.
+---
 
-5. **Wire optimizer into `eval_via_fmpl_pipeline`** at the correct slot: `ast::parse → ast_optimizer.optimize → ast_to_ir.expr → ir::compile → code::eval`.
+**Phase A — Build and validate the transformers:**
 
-6. **Add SCENARIO-0103: full parity corpus passes with optimizer enabled.**
+1. **Add helpers on `Value`.** `Value::list_node(tag, children) -> Value` constructor producing `Value::List([Symbol(tag), ...children])`. `Value::as_node(&self) -> Option<(&str, &[Value])>` accessor that destructures it. Both transformer outputs depend on these existing first.
 
-7. **Verify all existing tests pass.** Hundreds of test failures expected initially (every consumer of `ast::parse` output sees a different shape). All must pass before commit.
+2. **Write ast-grep rule files at `tools/list-transform/rust-rules/`.** One YAML file per pattern:
 
-8. **Document optimizer coverage gap** (TODO in `ast_optimizer.fmpl`): Lambda bodies, Let, Match, Call, List, Map, Block fall through unchanged — constants inside them don't fold. Tracked for a future iteration.
+   - `producer-with-args.yml` — matches `Value::Tagged(SmolStr::new($TAG), Arc::new(vec![$$$ARGS]))` → rewrites to `Value::list_node($TAG, vec![$$$ARGS])`. Verified working in the 2026-05-08 session.
+   - `producer-empty.yml` — matches `Value::Tagged(SmolStr::new($TAG), Arc::new(Vec::new()))` → rewrites to `Value::list_node($TAG, vec![])`.
+   - `producer-non-literal-vec.yml` — matches `Value::Tagged(SmolStr::new($TAG), Arc::new($EXPR))` (where `$EXPR` is not `vec![...]` or `Vec::new()`) → rewrites to `Value::list_node($TAG, $EXPR.to_vec())` or similar. Edge cases captured in `manual-review.md` for human review.
+   - `consumer-iflet.yml` — matches `if let Value::Tagged($TAG, $CHILDREN) = $V { $$$BODY }` → rewrites to `if let Some(($TAG, $CHILDREN)) = $V.as_node() { $$$BODY }` (with appropriate `&str`/`&[Value]` reference adjustment).
+   - `consumer-match-arm-guard.yml` — matches `match $V { Value::Tagged($T, $C) if $T.as_str() == $TAG => $BODY, $$$REST }` → rewrites to use `$V.as_node()` then if-let-chain on the literal tag.
+   - `consumer-match-arm-bind.yml` — matches `Value::Tagged($T, $C) => $BODY` arms in matches → rewrites to use `as_node()`.
+   - `display-tagged-string.yml` — matches `format!("{:?}", Value::Tagged(...))` and similar formatter assumptions → flagged in `manual-review.md` because Display output changes.
+
+   Run with `ast-grep scan --rule tools/list-transform/rust-rules/*.yml --update-all` repeatedly until idempotent (no further diffs).
+
+3. **Write the FMPL transformer at `tools/list-transform/list_transform.fmpl`.** A tree grammar that rewrites FMPL ASTs. Two rules:
+
+   ```
+   let list_transform = grammar list_transform {
+       expr = :Tagged(any:tag, expr*:args) => [tag, args]
+            | :Pattern(:Constructor(any:tag, pattern*:pats)) => [:Pattern, [:List, [tag, pats]]]
+            | any:other => other  -- recurse via descend rule
+
+       pattern = :Constructor(any:tag, pattern*:pats) => [:List, [tag, pats]]
+               | any:other => other
+   }
+   ```
+
+   Driver: a CLI (`tools/list-transform/transform.rs`, ~50 lines) that walks `lib/**/*.fmpl`, parses each file, applies the transformer, pretty-prints back. Comment-preserving by working at AST-trivia level rather than reformatting.
+
+   **Special-case rules** the transformer applies after the basic rewrite:
+   - **Trailing comma for single-element list patterns.** `[expr*:xs] => xs` → `[expr*:xs,] => xs`. Required to disambiguate from char classes in the grammar parser.
+   - **Pair sentinel wrap.** `[_:k, expr:v] => [k_ir, v_ir]` (where both children of the result are list-shaped) → `[_:k, expr:v] => [:Pair, k_ir, v_ir]`. Required to prevent the runtime "list-of-lists ⇒ spread" collapse.
+   - **List-pattern binding repair.** Bare identifiers in tag-child position become bindings; in list-pattern position they're rule references. Where the input was `:Tag(name)` (binding `name`), the output `[:Tag, name]` would be a rule reference. Rewrite to `[:Tag, any:name]`.
+
+   The special-case rules can be expressed as additional grammar rules in `list_transform.fmpl` (recommended) or as post-processing passes in the driver.
+
+4. **Validate dry-runs.** Both transformers run in `--check` mode and produce:
+   - Diff stats: files changed, sites rewritten per rule
+   - `tools/list-transform/manual-review.md` listing sites that need human attention
+   - Idempotency confirmation: a second run produces zero diffs
+
+5. **Hand-test the transformers** on a small subset (`fmpl-core/src/builtins/ir.rs` for ast-grep; `lib/core/ast_to_ir.fmpl` for the FMPL transformer). Verify the output compiles and tests pass for those files.
+
+---
+
+**Phase B — Apply the transformers; integrate the optimizer:**
+
+6. **Run the Rust transformer for real.** `ast-grep scan --rule tools/list-transform/rust-rules/*.yml --update-all` over the workspace. Expected: ~349 mechanical rewrites land in one pass. Cargo build still works because `Value::list_node` and `Value::as_node` work alongside the still-defined `Value::Tagged` variant.
+
+7. **Run the FMPL transformer for real.** Rewrites `lib/**/*.fmpl` and any inline FMPL string literals in Rust tests (the FMPL transformer's driver scans for FMPL string literals via tree-sitter or a simpler regex). Output: list-pattern syntax everywhere.
+
+8. **Hand-edit the manual-review sites.** The transformer's `manual-review.md` lists sites it couldn't safely rewrite — typically: complex nested patterns, comments referencing Tagged, Display assertions. Walk through these.
+
+9. **Update `expr_to_value` and `ir::compile_node` for list-only dispatch.** The transformer already converted producers and most consumers; this step removes the now-dead Tagged code paths in these two specific files. Use the `ast_node!` and `ast_match!` macros from `fmpl-core/src/macros.rs`.
+
+10. **Wire the optimizer into `eval_via_fmpl_pipeline`** at the correct slot: `ast::parse → ast_optimizer.optimize → ast_to_ir.expr → ir::compile → code::eval`. The optimizer (`lib/core/ast_optimizer.fmpl`) is already in list-pattern form post-transformer; this step adds the call site.
+
+11. **Verify Phase B is green.** Full `cargo test --workspace` passes. The 55 ast_to_ir parity tests pass with optimizer enabled. Tree is in a stable state (lists everywhere, but `Value::Tagged` variant still defined and unused). **This is a natural pause point** — if a session ends here, Phase C is a follow-on, not a redo.
+
+12. **Add SCENARIO-0103: full parity corpus passes with optimizer enabled.**
+
+---
+
+**Phase C — Burn the bridge (delete the dual representation):**
+
+After Phase B the transformer has eliminated almost all `Value::Tagged` references. Now delete the variants, AST nodes, parser productions, and bytecode. Each deletion surfaces a small number of remaining sites the transformer missed; fix those by hand.
+
+13. **Delete `Value::Tagged` enum variant** in `fmpl-core/src/value.rs`, plus its `Display`, `equals`, `index`, `is_truthy`, `type_name`, and unit-test arms. Cargo errors will surface any sites the transformer missed (rare; should be near zero after a clean transformer pass).
+
+14. **Delete `Expr::Tagged`** AST variant. Drop the parser production for `:Tag(args)` value-constructor syntax. Update `compile_expr` and `expr_to_value` to remove the `Expr::Tagged` arms.
+
+15. **Delete `Pattern::Constructor`** AST variant. Drop the parser production for `:Tag(p1, p2)` pattern syntax. Update `compile_match_bindings` to remove the `Pattern::Constructor` arms.
+
+16. **Delete tagged bytecode**: `Instruction::MakeTagged`, `MatchTag`, `ExtractTaggedChild`, `MatchTagged`, `MatchTaggedWithBindings`. The compiler currently emits `MatchTag` for `Pattern::Symbol` and `Pattern::Constructor` — switch the `Pattern::Symbol` case to use list-head dispatch, or rename `MatchTag` to `MatchListNode`.
+
+17. **Delete `Pattern::TagMatch`** from `fmpl-core/src/pattern/mod.rs`. Delete its handlers in `fmpl-core/src/grammar/runtime.rs:784` and `fmpl-core/src/grammar/trampoline.rs:999`. `Pattern::ListMatch` already covers the shape.
+
+18. **Delete grammar parser's `:Tag(args)` pattern production** in `fmpl-core/src/grammar/parser.rs::parse_value_pattern`.
+
+19. **Document optimizer coverage gap** (TODO in `ast_optimizer.fmpl`): Lambda bodies, Let, Match, Call, List, Map, Block fall through unchanged — constants inside them don't fold. Tracked for a future iteration.
+
+20. **Final verification.** Full `cargo test --workspace` passes, zero `Value::Tagged` references in source (`grep -r "Value::Tagged" .` returns no source matches; only doc references in `docs/` remain).
 
 **Explicitly OUT OF SCOPE:**
 
-- **Removing `Value::Tagged` enum arm.** 231+ call sites across grammar runtime, builtins, generated parser. Keep the arm in place (unused by ast::parse path post-refactor) and let a future iteration remove it. The persistence concern (ITER-0005) is addressed by STORY-0099 envelope versioning — schemas can evolve without requiring enum cleanup first.
-- **Removing `FMPL_USE_FMPL_COMPILER` opt-in flag.** Default `eval()` still uses `eval_via_native`. AC-2 scope is "for the parity test corpus through the FMPL pipeline," not "for the full 1160-test default suite." Promotion to default is a separate iteration.
+- **Removing `FMPL_USE_FMPL_COMPILER` opt-in flag.** Default `eval()` still uses `eval_via_native`. Promotion to default is a separate iteration.
+
+**Implementation discipline:**
+
+- **Phases A and B can land independently.** Phase A (transformers) is a small, reviewable, self-contained tool. Phase B (apply transformers + optimizer integration) lands on top and produces a coherent state (lists everywhere; Tagged variant still defined but unused). If a session ends after Phase B, Phase C is a clean follow-on, not a redo. **This is the key benefit of the transformer approach** — it converts a "single huge atomic refactor" into "two reviewable artifacts" without producing an incoherent interim state.
+- **Phase C should still be atomic.** Deleting `Value::Tagged` and the parser productions is a single coordinated change.
+- **Don't try to keep tests green during Phase C deletions.** Get the build green first (drive cargo error count to zero), then run tests.
+- **Tooling first.** Build the transformers fully before running them in anger. A dry-run with manual review of the diff is the cheap insurance.
 
 **Why before persistence:**
-ITER-0005 will serialize `ObjectDb`, `CompiledCode`, `GrammarRegistry`, and the full VM image — all of which transitively contain `Value`. With `expr_to_value` emitting Tagged today, snapshots taken now would be locked to a shape the user wants to abandon. Landing the list refactor first means ITER-0005 persists `Value::List`, the canonical shape going forward.
+ITER-0005 will serialize `ObjectDb`, `CompiledCode`, `GrammarRegistry`, and the full VM image — all of which transitively contain `Value`. With `Value::Tagged` still present, snapshots taken now would be locked to a shape we want to abandon. Landing the canonical-representation refactor first means ITER-0005 persists `Value::List`, the only shape going forward.
 
 ### ITER-0005 — Image Persistence (Consolidated)
 
@@ -102,7 +189,7 @@ ITER-0005 will serialize `ObjectDb`, `CompiledCode`, `GrammarRegistry`, and the 
 **Rationale:** Consolidated from old ITER-0007/0008/0009. Persist all compiler state to Fjall in one iteration: ObjectDb (objects already derive Serialize/Deserialize), compiled bytecode (rkyv support exists), grammar definitions and memo tables (hardest — semantic actions contain AST expressions), and full VM snapshot/restore. Enable fjall-persistence feature flag. Verify full image survives process restart.
 **Status:** pending
 **Impacted scenarios:** SCENARIO-0007, SCENARIO-0008, SCENARIO-0009, SCENARIO-0010, SCENARIO-0011, SCENARIO-0099, SCENARIO-0100, SCENARIO-0101, SCENARIO-0102
-**Depends on:** ITER-0004b (representation stability — see ITER-0004b "Why before persistence")
+**Depends on:** ITER-0004b (single canonical representation — see ITER-0004b "Why before persistence")
 **Look-ahead check:** Unblocks self-compile seed creation (ITER-0006).
 
 **Build order within iteration (STORY-0099 and STORY-0100 are foundational):**
@@ -118,7 +205,7 @@ ITER-0005 will serialize `ObjectDb`, `CompiledCode`, `GrammarRegistry`, and the 
 **Rationale:** Create seed snapshot from current Rust compiler (Stage 0). Add --snapshot and --from-seed flags to fmpl-bootstrap. Write fmpl_compiler.fmpl — the FMPL compiler driver that orchestrates the full pipeline (fmpl_parser.fmpl → ast_to_ir.fmpl → ast_optimizer.fmpl → ir::compile). Verify round-trip: snapshot → restore → compile "1 + 2" → get 3.
 **Status:** pending
 **Impacted scenarios:** SCENARIO-0020
-**Depends on:** ITER-0004 (compiler cutover), ITER-0004b (representation stability), and ITER-0005 (persistence)
+**Depends on:** ITER-0004 (compiler cutover), ITER-0004b (single canonical representation), and ITER-0005 (persistence)
 **Look-ahead check:** Unblocks fixpoint verification.
 
 ### ITER-0007 — Fixpoint Verification

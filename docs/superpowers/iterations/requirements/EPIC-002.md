@@ -105,23 +105,70 @@
 ## STORY-0010
 
 **Epic:** EPIC-002 — Compiler Cutover
-**Title:** Integrate ast_optimizer.fmpl into bootstrap compilation pipeline
+**Title:** Single canonical representation — lists everywhere, optimizer integrated, dual-shape eliminated
 
-**As a** FMPL developer
-**I want** the ast_optimizer.fmpl constant folding pass to be part of the standard compilation pipeline
-**So that** the self-hosted compiler includes optimization and optimized code produces identical results
+**As a** FMPL maintainer
+**I want** structured data (AST, IR, user constructors) represented by exactly one shape — `Value::List([Symbol(tag), ...children])` — and matched by exactly one pattern syntax — `[:Tag, p1, p2]`
+**So that** the self-hosted compiler has a single canonical representation, the optimizer runs against the same shape it emits, and there is no runtime/parser ambiguity between `Value::Tagged` and `Value::List`
+
+**Background:** Today FMPL has two interchangeable shapes for tagged/structured data: `Value::Tagged(tag, children)` and `Value::List([Symbol(tag), ...children])`, plus two parser surfaces: `:Tag(args)` and `[:Tag, args]`. This story collapses both axes to the list-shaped value with list-pattern syntax. The cutover (make the AST pipeline emit/consume lists; integrate the optimizer) and the cleanup (delete the dual representation and the syntax that produces it) are one refactor; splitting them produces a worse interim state than either before or after the full work. They land together.
 
 **Acceptance criteria:**
-- AC-1: ast_optimizer.fmpl runs between `ast::parse` and `ast_to_ir.expr` in the FMPL pipeline (NOT between ast_to_ir and ir::compile — the optimizer matches AST shapes like `[:Binary, :+, ...]`, not IR shapes like `:LoadInt`/`:Add`). Pipeline order: `ast::parse → ast_optimizer.optimize → ast_to_ir.expr → ir::compile → code::eval` · impact:`local` · seam:`integration` · scenario:`SCENARIO-0103`
-- AC-2: An end-to-end test verifies an actual fold fires when real `ast::parse` output is fed through the optimizer (not just the synthetic list-literal tests in `lib/core/ast_optimizer_test.fmpl`) — proves the Tagged↔List shape mismatch has been resolved · impact:`local` · seam:`integration` · scenario:`SCENARIO-0103`
-- AC-3: The optimizer guards against `INT_MIN` overflow in `:Unary(:-, [:Int, a])` and against division/modulo by zero in `:Binary(:/, ...)` and `:Binary(:%, ...)` — these patterns must fall through to the recursive identity case rather than producing incorrect or panicking folds · impact:`cross-surface` · seam:`integration`
-- AC-4: All 55 ast_to_ir parity tests pass when the FMPL pipeline runs with the optimizer enabled — optimization preserves execution semantics across the full parity corpus · impact:`cross-surface` · seam:`integration` · scenario:`SCENARIO-0103`
-- AC-5: A TODO comment in `lib/core/ast_optimizer.fmpl` lists the AST node kinds that currently fall through `x => x` without folding (Lambda bodies, Let, Match, Call, List, Map, Block) so the coverage gap is visible for a future iteration · impact:`none` · seam:`unit`
+
+*Phase A — cutover and optimizer integration:*
+- AC-1: `ast::parse` emits list-shaped AST values exclusively. Every `Value::Tagged("X", [...])` previously produced by `expr_to_value` is replaced by `Value::list_node("X", [...])` · impact:`local` · seam:`integration` · scenario:`SCENARIO-0103`
+- AC-2: `ir::compile` consumes list-shaped IR values exclusively (no Tagged dispatch path) · impact:`local` · seam:`integration` · scenario:`SCENARIO-0103`
+- AC-3: `lib/core/ast_to_ir.fmpl` and `lib/core/ast_optimizer.fmpl` are rewritten to list patterns (`[:Binary, :+, expr:l, expr:r] => [:Add, l, r]`). The optimizer keeps INT_MIN-overflow and division/modulo-by-zero guards · impact:`cross-surface` · seam:`integration` · scenario:`SCENARIO-0103`
+- AC-4: `ast_optimizer.fmpl` runs between `ast::parse` and `ast_to_ir.expr` in `eval_via_fmpl_pipeline`. Pipeline order: `ast::parse → ast_optimizer.optimize → ast_to_ir.expr → ir::compile → code::eval` · impact:`local` · seam:`integration` · scenario:`SCENARIO-0103`
+- AC-5: An end-to-end test verifies an actual fold fires when real `ast::parse` output is fed through the optimizer · impact:`local` · seam:`integration` · scenario:`SCENARIO-0103`
+- AC-6: All 55 ast_to_ir parity tests pass with the optimizer enabled · impact:`cross-surface` · seam:`integration` · scenario:`SCENARIO-0103`
+- AC-7: A TODO comment in `lib/core/ast_optimizer.fmpl` lists the AST node kinds that fall through unchanged (Lambda bodies, Let, Match, Call, List, Map, Block) · impact:`none` · seam:`unit`
+
+*Phase B — burn the bridge:*
+- AC-8: `Value::Tagged` enum variant is removed from `fmpl-core/src/value.rs`. All ~349 source-and-test sites that referenced it use `Value::list_node(tag, children)` (producer) or `Value::as_node()` (consumer) · impact:`cross-surface` · seam:`integration`
+- AC-9: `Expr::Tagged` AST variant is removed. The parser production for `:Tag(args)` value-constructor syntax is deleted; bare `:foo` symbol literals (`Expr::Symbol`) remain · impact:`cross-surface` · seam:`integration`
+- AC-10: `Pattern::Constructor(tag, [pats])` is removed. The parser productions for `:Tag(p1, p2)` pattern syntax are deleted; `[:Tag, p1, p2]` list-pattern syntax is the only way to match structured data · impact:`cross-surface` · seam:`integration`
+- AC-11: Tagged-specific bytecode instructions (`MakeTagged`, `MatchTag`, `ExtractTaggedChild`, `MatchTagged`, `MatchTaggedWithBindings`) are removed (or the surviving ones renamed to reflect list-node semantics) · impact:`local` · seam:`integration`
+- AC-12: `Pattern::TagMatch` and its grammar runtime/trampoline handlers are removed; `Pattern::ListMatch` is the only constructor-shape matcher · impact:`local` · seam:`integration`
+- AC-13: All FMPL stdlib files (`lib/core/*.fmpl`) use list-pattern syntax exclusively — no `:Tag(args)` patterns or constructions remain · impact:`cross-surface` · seam:`integration`
+- AC-14: All Rust tests use `Value::list_node` for construction and `value.as_node()` for shape assertions — no `Value::Tagged(...)` literals remain in test code · impact:`local` · seam:`unit`
+- AC-15: Full test suite passes with zero `Value::Tagged` references remaining in the repo (`grep -r "Value::Tagged" .` returns no source matches; only documentation references in `docs/` remain) · impact:`cross-surface` · seam:`integration`
+
+**Implementation strategy (transformer-driven, from ITER-0004b 2026-05-08 attempt):**
+
+The bulk rewrite (~349 sites) is mechanical and gets done by two transformers, not by hand. This converts what was a "multi-hour atomic refactor" into "build a tool, run it, verify, then delete the dead code." The roadmap entry for ITER-0004b describes the three phases (build transformers → apply + integrate optimizer → delete dead code) in detail.
+
+1. **ast-grep handles the Rust side.** Already installed at `~/.cargo/bin/ast-grep`. Pattern files at `tools/list-transform/rust-rules/*.yml`:
+   - `Value::Tagged(SmolStr::new($TAG), Arc::new(vec![$$$ARGS]))` → `Value::list_node($TAG, vec![$$$ARGS])` — verified working 2026-05-08
+   - `if let Value::Tagged($T, $C) = $V { ... }` → `if let Some(($T, $C)) = $V.as_node() { ... }`
+   - `match v { Value::Tagged(t, c) if t.as_str() == "X" => ... }` → if-let-chain on `as_node()`
+   - Run `ast-grep scan --rule tools/list-transform/rust-rules/*.yml --update-all` repeatedly until idempotent.
+
+2. **A small FMPL transformer handles the FMPL stdlib.** Tree grammar at `tools/list-transform/list_transform.fmpl` rewrites `:Tag(args)` → `[:Tag, args]` for both expressions and patterns. Driver in Rust (~50 lines) walks `lib/**/*.fmpl`. Special-case rules in the transformer:
+   - **Trailing comma** for single-element list patterns (`exprs = [expr*:xs,] => xs`) to disambiguate from char classes.
+   - **Pair sentinel wrap** (`pair => [:Pair, k_ir, v_ir]`) to prevent the runtime "list-of-lists ⇒ spread" flatten.
+   - **List-pattern binding repair** — `[:Tag, name]` → `[:Tag, any:name]` where `name` was a binding (list-pattern bare identifiers are rule references, not bindings).
+
+3. **Add helpers first.** `Value::list_node(tag, children)` and `Value::as_node() -> Option<(&str, &[Value])>` on `Value`. Both transformer outputs depend on these.
+
+4. **Phase B is a natural pause point.** After applying the transformers and integrating the optimizer, the tree is coherent (lists everywhere, but `Value::Tagged` variant still defined and unused). If a session ends, Phase C is a clean follow-on.
+
+5. **Don't try to keep tests green during Phase C deletions.** Get the build green first (drive cargo error count to zero), then run tests.
+
+**FMPL-specific gotchas:**
+- **List-pattern bare identifiers are rule references**, not bindings (unlike tag-child patterns). Use `any:n` or `_:n` to bind to any single element, or `expr:l` to recursively transform.
+- **Single-element list patterns require trailing comma** to disambiguate from char classes (`exprs = [expr*:xs,] => xs`). The grammar parser's lookahead requires comma or pipe to commit to list-pattern interpretation.
+- **Map pair sentinel:** runtime "list-of-lists ⇒ spread" collapse means pair-emitting rules must wrap with a sentinel symbol (`pair = [_:k, expr:v] => [:Pair, [:LoadString, k], v]`) and the consumer must unwrap.
 
 **Sources:**
-- ITER-0004b PAR scope review (this conversation, 2026-05-08)
+- ITER-0004b PAR scope review (2026-05-08)
 - `lib/core/ast_optimizer.fmpl` (existing optimizer)
 - `fmpl-core/src/lib.rs:112` (`eval_via_fmpl_pipeline` integration point)
+- `fmpl-core/src/value.rs` (`Value::Tagged` variant; needs deletion)
+- `fmpl-core/src/builtins/ast.rs:14` (`expr_to_value`; needs to emit lists)
+- `fmpl-core/src/builtins/ir.rs` (`compile_ir`; collapse to list-only dispatch)
+- `fmpl-core/src/grammar/runtime.rs:794` (`Pattern::TagMatch` handler; delete)
+- `fmpl-core/src/vm.rs:1176, 1195` (`ExtractTaggedChild`/`MatchTag`; delete or rename)
 
 **Status:** pending
 
