@@ -1643,12 +1643,24 @@ impl<'a> Parser<'a> {
         Ok(Expr::Lambda(params, Box::new(body)))
     }
 
-    /// Parse short lambda (\x expr).
+    /// Parse short lambda (\x expr) or multi-param short lambda (\x, y expr).
     fn parse_short_lambda(&mut self) -> Result<Expr> {
         self.expect(&Token::Backslash)?;
-        let param = self.expect_ident_or_underscore()?;
-        let body = self.parse_expr()?;
-        Ok(Expr::ShortLambda(param, Box::new(body)))
+        let first_param = self.expect_ident_or_underscore()?;
+
+        // Check for comma-separated additional params
+        if self.check(&Token::Comma) {
+            let mut params = vec![first_param];
+            while self.check(&Token::Comma) {
+                self.advance(); // consume comma
+                params.push(self.expect_ident_or_underscore()?);
+            }
+            let body = self.parse_expr()?;
+            Ok(Expr::Lambda(params, Box::new(body)))
+        } else {
+            let body = self.parse_expr()?;
+            Ok(Expr::ShortLambda(first_param, Box::new(body)))
+        }
     }
 
     /// Parse return statement.

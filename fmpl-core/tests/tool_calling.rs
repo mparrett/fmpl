@@ -333,3 +333,47 @@ fn test_json_stringify_no_args() {
         panic!("Expected error Map, got {:?}", value);
     }
 }
+
+/// AC-P3-1: human.approve() builtin tests
+
+#[tokio::test]
+async fn test_human_approve_returns_stream() {
+    let mut vm = Vm::with_runtime(tokio::runtime::Handle::current());
+
+    // Call human.approve with a request map
+    let code = r#"human.approve(%{action: "delete", details: "Delete file?"})"#;
+
+    let result = eval(&mut vm, code).unwrap();
+
+    // Should return a map with source key containing AsyncStream
+    match result {
+        Value::Map(m) => {
+            assert!(m.contains_key("source"), "result should have 'source' key");
+            match m.get("source") {
+                Some(Value::AsyncStream(_)) => {
+                    // Success - got async stream
+                }
+                other => panic!("expected AsyncStream, got {:?}", other),
+            }
+        }
+        other => panic!("expected Map, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_human_approve_string_request() {
+    let mut vm = Vm::with_runtime(tokio::runtime::Handle::current());
+
+    // Call human.approve with just a string
+    let code = r#"human.approve("Delete this file?")"#;
+
+    let result = eval(&mut vm, code).unwrap();
+
+    // Should still return a map with source
+    match result {
+        Value::Map(m) => {
+            assert!(m.contains_key("source"), "should have 'source' key");
+        }
+        other => panic!("expected Map, got {:?}", other),
+    }
+}

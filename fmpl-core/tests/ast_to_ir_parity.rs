@@ -35,6 +35,12 @@ fn assert_ir_parity(rust_source: &str, ir_source: &str) {
 
 /// Setup helper: loads prelude and ast_to_ir into VM, returns VM ready for pipeline
 fn setup_fmpl_pipeline() -> Vm {
+    // cargo test sets cwd to the crate directory (fmpl-core/), but lib/ is at workspace root
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    std::env::set_current_dir(workspace_root).expect("failed to set cwd to workspace root");
+
     let mut vm = Vm::new();
     eval(&mut vm, r#"io::load("lib/core/prelude.fmpl")"#).expect("failed to load prelude");
     eval(&mut vm, r#"io::load("lib/core/ast_to_ir.fmpl")"#).expect("failed to load ast_to_ir");

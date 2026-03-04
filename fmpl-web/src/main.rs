@@ -4,11 +4,13 @@ use axum::{
     Form, Router,
     extract::Extension,
     http::StatusCode,
-    response::{Html, IntoResponse},
+    response::{Html, IntoResponse, Json},
     routing::{get, post},
 };
-use fmpl_core::{Vm, eval};
-use serde::Deserialize;
+use fmpl_core::builtins::human::APPROVAL_QUEUE;
+use fmpl_core::{StreamEvent, Value, Vm, eval};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tower_http::services::ServeDir;
 use tower_sessions::{MemoryStore, Session, SessionManagerLayer};
@@ -36,6 +38,8 @@ async fn main() {
         .route("/", get(index))
         .route("/eval", post(eval_code))
         .route("/reset", post(reset_vm))
+        .route("/approval/pending", get(get_pending_approval))
+        .route("/approval/respond", post(submit_approval_response))
         .nest_service("/static", ServeDir::new("static"))
         .layer(Extension(state.clone()))
         .merge(storylet)
@@ -144,6 +148,93 @@ async fn get_or_create_session_id(session: &Session) -> String {
             let _ = session.insert("session_id", &id).await;
             id
         }
+    }
+}
+
+/// Response for pending approval
+#[derive(Serialize)]
+struct ApprovalPending {
+    id: u64,
+    action: String,
+    details: Option<String>,
+}
+
+/// Request to submit approval response
+#[derive(Deserialize)]
+struct ApprovalResponse {
+    approved: bool,
+    reason: Option<String>,
+}
+
+/// Get the next pending approval request from the queue.
+/// Returns JSON with pending approval details or empty response if no approval pending.
+async fn get_pending_approval() -> Json<Option<ApprovalPending>> {
+    let pending = APPROVAL_QUEUE.with(|q| {
+        let queue = q.lock().unwrap();
+        queue.first().map(|req| ApprovalPending {
+            id: req.id,
+            action: req.action.clone(),
+            details: None, // Could extract from request if needed
+        })
+    });
+    Json(pending)
+}
+
+/// Submit an approval response back to the waiting stream.
+/// Sends the response via the approval request's tx channel.
+async fn submit_approval_response(Json(response): Json<ApprovalResponse>) -> impl IntoResponse {
+    // Pop the first request from the queue
+    let request = APPROVAL_QUEUE.with(|q| {
+        let mut queue = q.lock().unwrap();
+        if !queue.is_empty() {
+            Some(queue.remove(0))
+        } else {
+            None
+        }
+    });
+
+    if let Some(request) = request {
+        let tx = request.tx.clone();
+        let response_value = if response.approved {
+            let mut map = HashMap::new();
+            map.insert("approved".to_string(), Value::Bool(true));
+            Value::Map(std::sync::Arc::new(
+                map.into_iter()
+                    .map(|(k, v)| (smol_str::SmolStr::new(k), v))
+                    .collect(),
+            ))
+        } else {
+            let mut map = HashMap::new();
+            map.insert(
+                "denied".to_string(),
+                Value::String(smol_str::SmolStr::new(
+                    response.reason.as_deref().unwrap_or("User denied"),
+                )),
+            );
+            Value::Map(std::sync::Arc::new(
+                map.into_iter()
+                    .map(|(k, v)| (smol_str::SmolStr::new(k), v))
+                    .collect(),
+            ))
+        };
+
+        // Send response through the channel
+        tokio::spawn(async move {
+            let mut guard = tx.lock().await;
+            if let Some(sender) = guard.take() {
+                let _ = sender.send(StreamEvent::Ok(response_value)).await;
+            }
+        });
+
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "submitted"})),
+        )
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "no pending approval"})),
+        )
     }
 }
 

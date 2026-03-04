@@ -15,6 +15,18 @@ The issue description IS your research. Do NOT re-read files already quoted in t
 If there's an obvious test that would verify completion, run it (ONE test, filtered).
 If it passes → `jj issue close <id>` with a comment, then pick next task. Max 3 close-and-pick loops.
 
+## Step 2b: Decompose If Too Large
+
+If the task requires changes across multiple crates or has unclear design boundaries,
+**do not skip it for an easier task.** Instead:
+
+1. Break it into subtasks using `jj issue create -p <parent-id> -t "subtask title" -d "description"`.
+2. Each subtask should be completable in one iteration (one crate, one concern).
+3. Implement the first subtask in this iteration.
+4. Output `COMPLETED:<subtask-id> <message>` for the subtask you finished.
+
+You are not allowed to abandon a task because it's hard. You ARE allowed to decompose it.
+
 ## Step 3: Implement
 
 - Read ONLY files not quoted in the issue. Read generously, once per file.

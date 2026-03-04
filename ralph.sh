@@ -20,6 +20,7 @@ PROMPT_FILE="PROMPT.md"
 LOG_DIR=".ralph-logs"
 DRY_RUN=false
 ANALYZE_ONLY=""
+PURGE=false
 CLAUDE_FLAGS="--dangerously-skip-permissions --verbose"
 
 # --- Parse arguments ---
@@ -37,6 +38,10 @@ while [[ $# -gt 0 ]]; do
             ANALYZE_ONLY="$2"
             shift 2
             ;;
+        --purge)
+            PURGE=true
+            shift
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -52,12 +57,7 @@ Phase 1 (execute):
 
 Phase 2 (analyze):
   --analyze LOGFILE        Analyze a previous iteration log (skip phase 1)
-
-Logs are written to .ralph-logs/:
-  iter-*.jsonl             Raw stream-json from claude (phase 2 input)
-  iter-*.summary.txt       Extracted summary from ralph-analyze.py
-  session-*.log            Human-readable session log
-  results-*.jsonl          Machine-readable results per iteration
+  --purge                  Remove raw .jsonl logs, keep summaries and session logs
 HELP
             exit 0
             ;;
@@ -83,6 +83,26 @@ if [[ -n "$ANALYZE_ONLY" ]]; then
         echo "Error: $ANALYZE_SCRIPT not found" >&2
         exit 1
     fi
+    exit 0
+fi
+
+# --- Purge mode ---
+if [[ "$PURGE" == "true" ]]; then
+    if [[ ! -d "$LOG_DIR" ]]; then
+        echo "Nothing to purge: $LOG_DIR does not exist"
+        exit 0
+    fi
+    # Delete raw stream-json logs but keep summaries (*.summary.txt)
+    RAW_COUNT=$(find "$LOG_DIR" \( -name 'iter-*.jsonl' -o -name 'iter-*.txt' \) -not -name '*.summary.txt' | wc -l | tr -d ' ')
+    RAW_SIZE=$(find "$LOG_DIR" \( -name 'iter-*.jsonl' -o -name 'iter-*.txt' \) -not -name '*.summary.txt' -exec stat -f%z {} + 2>/dev/null | awk '{s+=$1} END {printf "%.1fMB", s/1048576}')
+    if [[ "$RAW_COUNT" -eq 0 ]]; then
+        echo "Nothing to purge"
+        exit 0
+    fi
+    echo "Purging $RAW_COUNT raw logs ($RAW_SIZE)"
+    echo "Keeping: *.summary.txt, session-*.log, results-*.jsonl"
+    find "$LOG_DIR" \( -name 'iter-*.jsonl' -o -name 'iter-*.txt' \) -not -name '*.summary.txt' -delete
+    echo "Done"
     exit 0
 fi
 
@@ -130,14 +150,20 @@ CLOSED=0
 
 log "Ralph loop started: prompt=$PROMPT_FILE max=$MAX_ITERATIONS"
 
+INTERRUPTED=false
+
 cleanup() {
     echo ""
+    if [[ "$INTERRUPTED" == "true" ]]; then
+        log "Interrupted by user (Ctrl-C)"
+    fi
     log "=== Ralph Loop Summary ==="
     log "Iterations: $ITERATION  Completed: $COMPLETED  Blocked: $BLOCKED  Closed: $CLOSED"
     log "Session: $SESSION_LOG"
     log "========================="
 }
 trap cleanup EXIT
+trap 'INTERRUPTED=true; exit 130' INT
 
 while true; do
     ITERATION=$((ITERATION + 1))
@@ -226,7 +252,11 @@ while true; do
         log "NO STRUCTURED OUTPUT (${ITER_DURATION}s, \$$COST, ${TURNS} turns) — check $RAW_LOG"
         echo "{\"iteration\":$ITERATION,\"type\":\"unstructured\",\"issue\":\"\",\"message\":\"no result line\",\"duration\":$ITER_DURATION,\"cost\":$COST,\"turns\":$TURNS,\"log\":\"$RAW_LOG\"}" >> "$RESULTS_LOG"
 
-        # Don't stop on unstructured output — the work may have been done,
-        # just the output format wasn't followed. Continue to next iteration.
+        # Stop if claude produced nothing (startup failure, auth issue, etc.)
+        if [[ "$RAW_LINES" -eq 0 ]]; then
+            log "Stopping: claude produced no output"
+            break
+        fi
+        # Otherwise continue — work may have been done, just output format not followed.
     fi
 done

@@ -829,6 +829,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smol_str",
+ "tokio",
 ]
 
 [[package]]
@@ -842,6 +843,7 @@ dependencies = [
  "fmpl-core",
  "serde",
  "serde_json",
+ "smol_str",
  "tokio",
  "tower",
  "tower-http",

@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); CMD=$(echo \"$INPUT\" | jq -r '.command // empty'); if echo \"$CMD\" | grep -qE 'cargo\\s+(build|test|check|clippy)' && ! echo \"$CMD\" | grep -qE 'grep|head|tail'; then echo 'BLOCKED: Filter cargo output. Append: 2>&1 | grep -v objfs | grep -E '\"'\"'^(error|warning:.*fmpl|Compiling fmpl|test |test result:)'\"'\"' | head -30' >&2; exit 2; fi; if echo \"$CMD\" | grep -qF '.cargo/registry'; then echo 'BLOCKED: Use context7 (resolve-library-id + query-docs) for external crate APIs, not ~/.cargo/registry' >&2; exit 2; fi; if echo \"$CMD\" | grep -qE 'cargo\\s+doc.*--open'; then echo 'BLOCKED: cargo doc --open has no effect headless. Use context7 or fetch docs.rs' >&2; exit 2; fi; if echo \"$CMD\" | grep -qE 'rustc\\s.*/tmp/'; then echo 'BLOCKED: Do not compile standalone temp files with rustc. Add a test to the workspace or check docs' >&2; exit 2; fi"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); FILE=$(echo \"$INPUT\" | jq -r '.file_path // empty'); if echo \"$FILE\" | grep -qF '.cargo/registry'; then echo 'BLOCKED: Use context7 (resolve-library-id + query-docs) for external crate APIs, not ~/.cargo/registry' >&2; exit 2; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

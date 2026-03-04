@@ -5,6 +5,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use fmpl_core::builtins::human::{APPROVAL_QUEUE, ApprovalRequest};
 use fmpl_core::{StreamEvent, Value, Vm, eval};
 use ratatui::{
     Frame, Terminal,
@@ -280,6 +281,10 @@ struct App {
     command_edit_mode: bool,       // When true, editing selected command
     expanded_command: Option<CommandId>, // Command to show details for
     command_stream_mode: bool,     // When true, show command stream instead of code editor
+    // Human-in-the-loop approval
+    pending_approval: Option<ApprovalRequest>, // Current approval request awaiting user input
+    denial_reason: String,                     // Buffer for denial reason text
+    approval_mode: bool,                       // When true, showing approval prompt
 }
 
 impl App {
@@ -350,6 +355,10 @@ impl App {
             command_edit_mode: false,
             expanded_command: None,
             command_stream_mode: false,
+            // Human-in-the-loop approval
+            pending_approval: None,
+            denial_reason: String::new(),
+            approval_mode: false,
         }
     }
 
@@ -1161,7 +1170,135 @@ impl App {
         Ok(())
     }
 
+    /// Check APPROVAL_QUEUE for pending requests and promote to active
+    fn check_approval_queue(&mut self) {
+        if self.pending_approval.is_some() {
+            return; // Already handling one
+        }
+        APPROVAL_QUEUE.with(|q| {
+            let mut queue = q.lock().unwrap();
+            if !queue.is_empty() {
+                let request = queue.remove(0);
+                self.output = format!(
+                    "🔔 APPROVAL REQUIRED\n\nAction: {}\n\n[y] Approve  [n] Deny  [r] Deny with reason",
+                    request.action
+                );
+                self.pending_approval = Some(request);
+                self.approval_mode = true;
+                self.denial_reason.clear();
+            }
+        });
+    }
+
+    /// Send approval response through the request's tx channel
+    fn send_approval_response(&mut self, approved: bool, reason: Option<String>) {
+        if let Some(request) = self.pending_approval.take() {
+            let tx = request.tx.clone();
+            let response = if approved {
+                let mut map = HashMap::new();
+                map.insert(SmolStr::new("approved"), Value::Bool(true));
+                Value::Map(Arc::new(map))
+            } else {
+                let mut map = HashMap::new();
+                map.insert(
+                    SmolStr::new("denied"),
+                    Value::String(SmolStr::new(reason.as_deref().unwrap_or("User denied"))),
+                );
+                Value::Map(Arc::new(map))
+            };
+
+            // Send response through the channel (try_lock since we're sync)
+            let response_clone = response.clone();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    let mut guard = tx.lock().await;
+                    if let Some(sender) = guard.take() {
+                        let _ = sender.send(StreamEvent::Ok(response_clone)).await;
+                    }
+                });
+            });
+
+            self.approval_mode = false;
+            self.denial_reason.clear();
+            self.output = if approved {
+                "✅ Approved".to_string()
+            } else {
+                format!(
+                    "❌ Denied: {}",
+                    reason.unwrap_or_else(|| "User denied".to_string())
+                )
+            };
+        }
+    }
+
+    /// Handle key input during approval mode
+    fn handle_approval_input(&mut self, key: KeyEvent) {
+        if self.denial_reason.is_empty() {
+            // Waiting for initial y/n/r decision
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') => {
+                    self.send_approval_response(true, None);
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') => {
+                    self.send_approval_response(false, None);
+                }
+                KeyCode::Char('r') | KeyCode::Char('R') => {
+                    self.output = "🔔 DENIAL REASON\n\nType reason and press Enter:".to_string();
+                    self.denial_reason = " ".to_string(); // Non-empty to enter reason mode
+                }
+                KeyCode::Esc => {
+                    self.send_approval_response(false, Some("Cancelled".to_string()));
+                }
+                _ => {}
+            }
+        } else {
+            // Typing denial reason
+            match key.code {
+                KeyCode::Enter => {
+                    let reason = self.denial_reason.trim().to_string();
+                    self.send_approval_response(
+                        false,
+                        Some(if reason.is_empty() {
+                            "User denied".to_string()
+                        } else {
+                            reason
+                        }),
+                    );
+                }
+                KeyCode::Char(c) => {
+                    if self.denial_reason == " " {
+                        self.denial_reason = String::new();
+                    }
+                    self.denial_reason.push(c);
+                    self.output = format!(
+                        "🔔 DENIAL REASON\n\nType reason and press Enter:\n> {}",
+                        self.denial_reason
+                    );
+                }
+                KeyCode::Backspace => {
+                    if self.denial_reason != " " {
+                        self.denial_reason.pop();
+                    }
+                    self.output = format!(
+                        "🔔 DENIAL REASON\n\nType reason and press Enter:\n> {}",
+                        self.denial_reason
+                    );
+                }
+                KeyCode::Esc => {
+                    self.send_approval_response(false, Some("Cancelled".to_string()));
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn handle_input(&mut self, key: KeyEvent) {
+        // Intercept input during approval mode
+        if self.approval_mode {
+            self.handle_approval_input(key);
+            return;
+        }
         match key.code {
             KeyCode::Char('q') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.should_quit = true;
@@ -3810,6 +3947,9 @@ fn main() -> Result<(), io::Error> {
     loop {
         // Draw UI
         terminal.draw(|f| draw_ui(f, &app))?;
+
+        // Check for pending human approval requests
+        app.check_approval_queue();
 
         // Handle input
         if event::poll(Duration::from_millis(100))? {
