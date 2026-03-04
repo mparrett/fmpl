@@ -4,9 +4,20 @@ This is a headless automation loop. Skip ALL process/interactive skills (where-w
 
 @a study specs/README.md
 
+## Step 0: Health Check
+
+Run `cargo test -p fmpl-core 2>&1 | grep -E '^(test result:|FAILED)' | head -5` first.
+
+If there are ANY test failures, **fixing them is your task for this iteration.** Do not pick
+a new task from the issue tracker. Do not dismiss failures as "pre-existing." The build must
+be green before new work begins. Create an issue for the fix if one doesn't exist, fix it,
+commit it, and output `COMPLETED:<id> fix: <description>`.
+
+If tests pass, proceed to Step 1.
+
 ## Step 1: Pick Task
 
-`jj issue ready | head -2` → pick the top task → `jj issue show <id>`. Tasks that are [open] are ready.
+`jj issue ready | head -2` → pick the top task → `jj issue show <id>`.
 
 The issue description IS your research. Do NOT re-read files already quoted in the issue.
 
@@ -56,6 +67,7 @@ BLOCKED:<id> <reason>
 
 ## Budget
 
-- 20 tool calls max per iteration
+- 40 tool calls max per iteration
 - 3 close-and-pick loops max in Step 2
 - 3-strike rule: same error 3 times → write spec, comment on issue, stop
+- Do NOT use TodoWrite — the issue tracker is the task list

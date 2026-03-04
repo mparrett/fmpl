@@ -14,14 +14,37 @@ FMPL is a streaming-first DSL for building AI agents with grammars, capabilities
 
 ## Architecture
 
-**Rust workspace** with 4 crates:
+**Rust workspace** with 6 crates:
 
 - `fmpl-core/` — Lexer, parser, compiler, bytecode VM, object system, grammar engine
+  - `builtins/` — 16 builtin modules (ast, ir, io, curl, grammar_to_ir, ir_to_rust, human, etc.)
+  - `grammar/` — OMeta-style PEG engine (parser, runtime, optimizer, trampoline, incremental)
+  - `instructions/` — Bytecode instruction definitions (arithmetic, control_flow, functions, objects)
+  - `pattern/` — Pattern matching implementation
+  - `vm_internal/` — VM internals (frame, parse_state)
 - `fmpl-cli/` — REPL with rustyline history
-- `fmpl-web/` — Axum server with HTMX frontend
-- `fmpl-tui/` — Ratatui TUI for agentic LLM interaction (Ctrl+L for chat mode)
+- `fmpl-web/` — Axum server with HTMX frontend, per-user sessions, approval queue, storylet system
+- `fmpl-tui/` — Ratatui TUI with DAG-based conversation management (Ctrl+L for chat mode)
+- `fmpl-bootstrap/` — Minimal interpreter for build-time parser generation (avoids circular deps)
+- `benches/` — Performance benchmarks (pattern matching, VM comparison)
+
+**FMPL standard library** (`lib/`):
+
+- `lib/core/` — Compiler pipeline modules written in FMPL
+  - `prelude.fmpl` — Standard library prelude
+  - `ast_to_ir.fmpl` — AST→IR tree grammar transformer
+  - `fmpl_parser.fmpl` — Metacircular FMPL parser
+  - `parser_generator.fmpl`, `grammar_optimizer.fmpl`, `ast_optimizer.fmpl`
+  - `ir_to_rust.fmpl`, `ir_to_execution_tape.fmpl` — Backend code generators
+- `lib/anthropic.fmpl` — Claude API client (requires `ANTHROPIC_API_KEY`)
+- `lib/ollama.fmpl` — Ollama local LLM client
+- `lib/llm-common.fmpl` — Shared LLM utilities
+- `lib/rlm.fmpl` — Reinforcement learning module
+- `lib/json.fmpl`, `lib/yaml.fmpl` — Format parsers in FMPL
 
 **Core flow**: Source → Lexer (logos) → Parser (recursive descent) → AST → Compiler → Indexed RPN bytecode → VM execution
+
+**Bootstrap pipeline**: `ast::parse(source)` → `ast @ ast_to_ir.expr` → `ir::compile(ir)` → `code::eval(code)` — the FMPL-in-FMPL compilation pipeline being built toward self-hosting
 
 ## Development Conventions
 
@@ -29,6 +52,7 @@ FMPL is a streaming-first DSL for building AI agents with grammars, capabilities
 
 - **TDD**: Write tests first, then implementation. In green mode, don't fix failing tests by changing the test.
 - **DRY, KISS, YAGNI**: Don't over-engineer. Only implement what's needed now.
+- **Green build is a precondition, not a postcondition.** If tests are failing when you start, fixing them is your first task. There is no such thing as a "pre-existing" failure — if it's failing, it's your problem.
 - **cargo test must pass before commit**. Run full suite once before commit; targeted tests during development.
 - **cargo clippy must pass before commit**. Apply all suggestions. If you need `#[allow(...)]`, add it at the file top with a comment explaining why.
 - **Zero warnings**: There MUST be no warnings while building.
@@ -98,7 +122,8 @@ cargo run -p fmpl-tui            # Launch TUI (Ctrl+L for LLM chat)
 ### Test Organization
 
 - **Unit tests**: Inline in source files (`#[cfg(test)] mod tests`)
-- **Integration tests**: `fmpl-core/tests/` — `tool_calling.rs`, `async_curl.rs`, `exceptions.rs`, `streaming_parse.rs`, `apply_operator.rs`
+- **Integration tests**: `fmpl-core/tests/` — 60+ test files covering parser, compiler, VM, grammar, streaming, async, objects, patterns, tool calling
+- **Parity tests**: `fmpl-core/tests/ast_to_ir_parity.rs` — Verifies FMPL bootstrap pipeline produces identical results to Rust compiler
 - **Test helpers**: Use `eval(&mut vm, source)` for VM tests, `parse(source)` for parser tests
 - **Mock HTTP**: Use `wiremock` for async HTTP tests (see `fmpl-core/tests/async_curl.rs`)
 - **Always run tests after changes**: `cargo test -p fmpl-core`
@@ -106,6 +131,8 @@ cargo run -p fmpl-tui            # Launch TUI (Ctrl+L for LLM chat)
 ### Feature Flags
 
 - `fjall-persistence` — Enable Fjall-backed durable storage (optional)
+- `trampolined-grammar` — Bounded stack usage for grammar evaluation
+- `cross_compile` — Cross-compilation to execution_tape (disabled by default)
 
 ## Critical Patterns
 
@@ -124,58 +151,18 @@ Add { lhs: InstrIndex(5), rhs: InstrIndex(7) }  // Add results from instructions
 
 When adding instructions, operands MUST be `InstrIndex` references to previous results, not immediate values.
 
-### 2. Async Operations Return Streams
+### 2. Grammars in FMPL, Not Rust
 
-Async calls (`<- expr`) return `Value::AsyncStream` that must be consumed:
+Parsers should be written in FMPL using the grammar system, not hardcoded in Rust. Use Rust builtins only for low-level I/O, external system interfaces, and performance-critical primitives. See `docs/design/language-guide.md` for language features and `specs/grammar-system.md` for grammar implementation details.
 
-- In REPL: `wait_for_async()` blocks until stream completes
-- In code: Use `@` operator to pattern-match stream events
-- Example: `@ http_response { %{ok: data} => process(data), %{error: e} => handle(e) }`
-
-### 3. Grammar Application with `@`
-
-The `@` operator unifies parsing, pattern matching, and tree transformation:
-
-```fmpl
-"hello world" @ grammar.rule    -- Parse text
-obj @ { %{type: t} => t }       -- Pattern match (fully functional)
-stream @ parser.incremental     -- Streaming parse
-```
-
-**Note**: Map/list patterns (`%{k: v}`, `[a, b]`) work in both `let` destructuring and `@` blocks. See `specs/pattern-matching.md`.
-
-### 4. Grammars in FMPL, Not Rust
-
-**CRITICAL**: Parsers should be written in FMPL using the grammar system, not hardcoded in Rust. This includes:
-
-- JSON parsing (currently `json::parse` is a Rust builtin, should migrate to FMPL grammar)
-- Protocol parsers (HTTP, SSE, etc.)
-- File format parsers (PNG, etc.)
-- DSL parsers and transformers
-
-See `specs/grammar-system.md` for JSON grammar example and `fmpl-core/tests/fmpl/fmpl_grammar.fmpl` for metacircular FMPL parser.
-
-**When to use Rust builtins**:
-
-- Low-level I/O (curl, file operations, environment variables)
-- External system interfaces (LLM APIs, databases)
-- Performance-critical primitives (hashing, crypto)
-
-**When to use FMPL grammars**:
-
-- Any parsing task (text, binary, or tree structures)
-- Data transformation and validation
-- Protocol implementation
-- DSL embedding
-
-### 5. String and Memory Management
+### 3. String and Memory Management
 
 - **Use `SmolStr`** for identifiers and small strings (< 23 bytes, stack-allocated)
 - **Use `Arc<T>`** for shared data (lists, maps, compiled code)
 - **Use `rkyv`** for zero-copy serialization (bytecode, persistence)
 - **Use `serde_json`** for JSON I/O with external systems
 
-### 6. Error Handling Patterns
+### 4. Error Handling Patterns
 
 Use `thiserror` for error types, `Result<T>` returns:
 
@@ -196,9 +183,17 @@ All integration tests use `run(code).expect("runtime error")` or `map_err(|e| e.
 - `fmpl-core/src/compiler.rs` — AST → Indexed RPN bytecode compilation
 - `fmpl-core/src/vm.rs` — Indexed RPN VM execution with async support
 - `fmpl-core/src/value.rs` — Runtime value enum (`Int`, `String`, `Map`, `AsyncStream`, etc.)
-- `fmpl-core/src/grammar/mod.rs` — OMeta-style PEG grammar system
+- `fmpl-core/src/grammar/mod.rs` — OMeta-style PEG grammar system entry point
+- `fmpl-core/src/grammar/runtime.rs` — Grammar pattern matching engine (TagMatch, ListMatch, Repeat)
+- `fmpl-core/src/grammar/optimizer.rs` — Grammar optimization (first-set computation)
+- `fmpl-core/src/builtins/ir.rs` — `ir::compile` builtin (IR tagged values → bytecode)
+- `fmpl-core/src/builtins/ast.rs` — `ast::parse` builtin (source → AST tagged values)
+- `fmpl-core/src/ir_builder.rs` — IR construction utilities
 - `fmpl-core/src/error.rs` — Unified error types with `thiserror`
 - `fmpl-core/src/object.rs` — Prototype-based object system (spawn, facets)
+- `lib/core/prelude.fmpl` — Standard library prelude
+- `lib/core/ast_to_ir.fmpl` — FMPL-in-FMPL AST→IR tree grammar
+- `lib/core/fmpl_parser.fmpl` — Metacircular FMPL parser
 - `lib/anthropic.fmpl` — Claude API client (requires `ANTHROPIC_API_KEY`)
 - `lib/ollama.fmpl` — Ollama local LLM client
 
@@ -212,94 +207,14 @@ All integration tests use `run(code).expect("runtime error")` or `map_err(|e| e.
 - `specs/indexed-rpn-conversion.md` — Indexed RPN design rationale
 - `specs/persistence.md` — Fjall-backed storage and continuations
 
-## Current Limitations (Jan 2026)
+## Current Limitations (Mar 2026)
 
-- **Assignment syntax**: `=` for variable mutation is implemented (supports simple variable and object property assignment)
+- **Bootstrap pipeline**: `ast_to_ir.fmpl` handles core expressions but several AST node types still produce incorrect IR (lists, lambdas, maps, sequences, match, for, while, try/catch, pipe, slice, block). 21 parity tests track progress.
 - **Recursive let bindings**: Lambda self-reference requires special handling (e.g., `let rec` in ML or Y combinator pattern)
-- Some operators partially implemented (`&&`, `||`, `!=`)
 - Object system persistence not fully integrated with Fjall backend
 
-## Grammar Structure (Historical Reference)
+## Language & REPL Reference
 
-The original grammar defines a language with:
-
-- **Expressions** (`<exp>`): Core construct supporting arithmetic, logical, comparison, and composition operators
-- **Control flow**: if/then/else, while/do, do/while, return
-- **Functions**: Named functions, lambdas (`\x expr`), function calls with parameter lists
-- **Data structures**: Lists `[]`, hash tables `htable()`, objects with tagged properties
-- **Bindings**: let-bindings, object property bindings with public/private modifiers
-- **Object system**: Object definitions with inheritance (`<olist>`) and sparse structures
-
-## Grammar Conventions
-
-- Optional elements use `[ ]` brackets
-- Alternatives separated by newlines (not `|`)
-- `<error>` productions handle malformed input
-- Optional separators: commas between list items are often optional
-- Optional semicolons between statements (`<optsemi>`)
-
-## Using the REPL
-
-The FMPL CLI (`cargo run -p fmpl-cli`) provides an interactive REPL with rustyline history.
-
-### REPL Commands
-
-- `:help`, `:h`, `:?` — Show help
-- `:quit`, `:q`, `:exit` — Exit the REPL
-- `:clear` — Clear the screen
-- `:reset` — Reset VM state (clears all variables)
-- `:objects` — List all named objects
-
-### Loading Files
-
-Use `io::load("path/to/file.fmpl")` to load and execute FMPL code from a file:
-
-```fmpl
-fmpl> io::load("lib/anthropic.fmpl")
-=> :__builtin_io
-fmpl> let (response = anthropic::messages.create(...))
-```
-
-### Examples
-
-```fmpl
-// Basic arithmetic
-fmpl> 1 + 2
-=> 3
-
-// Let bindings
-fmpl> let x = 42
-=> 42
-fmpl> x + 1
-=> 43
-
-// Pattern matching
-// Note: Expressions starting with : must be bound first (REPL limitation)
-fmpl> let x = :Binary(:+, :Int(1), :Int(2))
-=> :Binary(:+, :Int(1), :Int(2))
-fmpl> x @ { :Binary(op, a, b) => [op, a, b] }
-=> [:+, :Int(1), :Int(2)]
-
-// Metaprogramming pipeline
-fmpl> let ast = ast::parse("1 + 2")
-=> :Binary(:+, :Int(1), :Int(2))
-fmpl> let ir = ast @ { :Binary(:+, :Int(a), :Int(b)) => :Add(:LoadInt(a), :LoadInt(b)) }
-=> :Add(:LoadInt(1), :LoadInt(2))
-fmpl> let code = ir::compile(ir)
-=> <code>
-fmpl> code::eval(code)
-=> 3
-
-// Async operations (auto-wait in REPL)
-fmpl> <- http::get("https://example.com")
-=> %{status: 200, body: "..."}
-```
-
-### Current Limitations
-
-- Expressions starting with `:` are interpreted as REPL commands — bind to variable first
-- No `-e` flag for one-liners
-- No direct file execution (`fmpl script.fmpl`)
-- No stdin input for piping
-- No multiline input (single expressions only)
-- Use `io::load()` for loading files within the REPL session
+- `docs/design/language-guide.md` — Language features, syntax, examples
+- `fmpl.ebnf` — Formal grammar (reference only, not used by parser)
+- `specs/fmpl-cli.md` — REPL commands, features, keybindings

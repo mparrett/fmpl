@@ -279,12 +279,12 @@ let stream = <- http.get(url)
 
 -- Transform streams
 stream
-  |> map(|chunk| parse(chunk))
-  |> filter(|x| x.valid)
+  |> map(\chunk parse(chunk))
+  |> filter(\x x.valid)
   |> collect
 
 -- Await all parallel results
-tasks |> map(|t| spawn(process, t)) |> await_all
+tasks |> map(\t spawn(process, t)) |> await_all
 ```
 
 ---
@@ -339,27 +339,30 @@ resume_from(saved_checkpoint)
 
 ---
 
-## 11. Currying and Partials
+## 11. Lambda Syntax
+
+Three forms with different semantics:
 
 ```fmpl
-add(a, b, c): a + b + c
+-- Nested short lambdas (curried, partially applicable)
+\x \y x + y             -- \x returns a lambda awaiting y
+let (f = \x \y x + y)
+f(1)(2)                 -- 3 (call one arg at a time)
+f(1)                    -- returns lambda awaiting y
 
-add(1)(2)(3)        -- 6
-add(1, 2)(3)        -- 6
-add(_, 5, _)        -- partial: \a c -> add(a, 5, c)
+-- Multi-parameter short lambda (NOT curried)
+\x, y x + y             -- single lambda, two params
+let (g = \x, y x + y)
+g(2, 3)                 -- 5 (must provide all args)
+
+-- Long-form lambda (NOT curried)
+lambda (a, b) a + b      -- explicit multi-param
+let (h = lambda (a, b) a + b)
+h(3, 4)                 -- 7 (must provide all args)
 ```
 
----
-
-## 12. Lambda Syntax
-
-Multi-argument lambdas use `->` as delimiter:
-
-```fmpl
-\x y -> x + y           -- two arguments
-\x -> x + 1             -- single argument
-\f g x -> f(g(x))       -- multiple arguments
-```
+**No automatic currying**: `\x, y` and `lambda (a, b)` require all arguments at once.
+Only nested `\x \y` gives partial application. Placeholder `_` syntax is not yet implemented.
 
 ---
 
@@ -381,7 +384,9 @@ Multi-argument lambdas use `->` as delimiter:
 | `list[a..]` | Slice from a to end |
 | `list[..b]` | Slice from start to b-1 |
 | `&{ code }` | Semantic predicate |
-| `\x -> expr` | Lambda |
+| `\x expr` | Short lambda (single param) |
+| `\x, y expr` | Short lambda (multi-param, not curried) |
+| `lambda (a, b) expr` | Long-form lambda (not curried) |
 | `obj.as(:facet)` | Get restricted view |
 | `.#private/.#public/.#facets` | Visibility markers |
 | `bcom(^ctor(...))` | Functional state update |
