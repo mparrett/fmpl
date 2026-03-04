@@ -3190,6 +3190,7 @@ impl Vm {
         // Check builtins last (allows user variables to shadow builtin module names)
         match name {
             "curl" => return Ok(Value::Symbol(SmolStr::new("__builtin_curl"))),
+            "human" => return Ok(Value::Symbol(SmolStr::new("__builtin_human"))),
             "io" => return Ok(Value::Symbol(SmolStr::new("__builtin_io"))),
             "json" => return Ok(Value::Symbol(SmolStr::new("__builtin_json"))),
             "ast" => return Ok(Value::Symbol(SmolStr::new("__builtin_ast"))),
@@ -3443,6 +3444,15 @@ impl Vm {
                 // Optional fourth argument: options map with headers
                 let options = args.get(3);
                 crate::builtins::CurlBuiltin::post(url, body, handle, options)
+            }
+            ("__builtin_human", "approve") => {
+                let request = args.first().ok_or_else(|| {
+                    Error::Runtime("human.approve requires request argument".to_string())
+                })?;
+                let handle = self.runtime.as_ref().ok_or_else(|| {
+                    Error::Runtime("human.approve requires runtime handle".to_string())
+                })?;
+                crate::builtins::HumanBuiltin::approve(request, handle)
             }
             ("__builtin_io", "load") => {
                 let path = match args.first() {

@@ -94,6 +94,14 @@ pub enum StreamSource {
         /// Reference to persisted stream buffer for backtracking.
         buffer: Option<StreamBuffer>,
     },
+    /// Human approval request - awaits user input.
+    HumanApproval {
+        action: SmolStr,
+        /// Details about the approval request (serialized as JSON).
+        details: SmolStr,
+        /// Reference to persisted stream buffer for backtracking.
+        buffer: Option<StreamBuffer>,
+    },
     /// In-memory mock stream (for testing) - cannot be resumed.
     Mock,
     /// Stream created programmatically - cannot be resumed.
@@ -114,7 +122,8 @@ impl StreamSource {
             StreamSource::WebSocket { .. } => true,
             StreamSource::File { .. } => true,
             StreamSource::LlmCompletion { .. } => true,
-            StreamSource::HttpPost { .. } => false, // POST may not be idempotent
+            StreamSource::HumanApproval { .. } => false, // Approval requests are ephemeral
+            StreamSource::HttpPost { .. } => false,      // POST may not be idempotent
             StreamSource::Mock => false,
             StreamSource::Ephemeral => false,
             StreamSource::Disconnected { .. } => false,
@@ -129,6 +138,7 @@ impl StreamSource {
             StreamSource::WebSocket { buffer, .. } => buffer.as_ref(),
             StreamSource::File { buffer, .. } => buffer.as_ref(),
             StreamSource::LlmCompletion { buffer, .. } => buffer.as_ref(),
+            StreamSource::HumanApproval { buffer, .. } => buffer.as_ref(),
             StreamSource::Mock => None,
             StreamSource::Ephemeral => None,
             StreamSource::Disconnected { .. } => None,

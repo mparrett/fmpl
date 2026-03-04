@@ -7,6 +7,7 @@ pub mod codegen;
 pub mod curl;
 pub mod grammar_to_ir;
 pub mod grammar_to_rust;
+pub mod human;
 pub mod io;
 pub mod ir;
 pub mod ir_to_rust;
@@ -17,6 +18,7 @@ pub mod time;
 
 pub use bridge::{CompiledExpr, FmplBridge, FunctionRegistry, RustFunction, eval_fmpl};
 pub use curl::CurlBuiltin;
+pub use human::HumanBuiltin;
 pub use io::{EnvBuiltin, IoBuiltin};
 pub use rand::RandBuiltin;
 pub use sse::SseBuiltin;
