@@ -64,6 +64,10 @@ impl IrCompiler {
                 let s = self.expect_string(&children[0])?;
                 Ok(self.emit(Instruction::LoadString(s)))
             }
+            "LoadSymbol" => {
+                let s = self.expect_symbol(&children[0])?;
+                Ok(self.emit(Instruction::LoadSymbol(s)))
+            }
             "LoadVar" => {
                 let name = self.expect_symbol(&children[0])?;
                 Ok(self.emit(Instruction::LoadVar(name)))

@@ -12,8 +12,9 @@ let ast_to_ir = grammar ast_to_ir {
          | :Bool(b) => :LoadBool(b)
          | :Null() => :LoadNull
          | :String(s) => :LoadString(s)
-         | :Symbol(s) => :LoadSymbol(s)
-         | :Var(name) => :Var(name)
+          | :Symbol(s) => :LoadSymbol(s)
+          | :Tagged(tag, expr*:args) => :MakeTagged(tag, args)
+          | :Var(name) => :Var(name)
          | :QualifiedName(parts) => :QualifiedName(parts)
          -- Binary operators
          | :Binary(:+, expr:l, expr:r) => :Add(l, r)
