@@ -82,6 +82,7 @@
 pub mod driver;
 pub mod incremental;
 pub mod input;
+pub mod optimizer;
 pub mod parser;
 pub mod runtime;
 pub mod stream_input;

@@ -23,7 +23,7 @@
 
 use super::input::{BinaryInput, InputItem, MemoEntry, PegInput, TextInput, ValueInput};
 use super::runtime::ActionEvaluator;
-use super::{CharRange, Grammar, GrammarRegistry, ParseResult, Pattern, Rule};
+use super::{Grammar, GrammarRegistry, ParseResult, Pattern, Rule};
 use crate::ast::Expr;
 use crate::error::{Error, Result};
 use crate::pattern::{BinaryPattern, CharPattern, RepeatKind};
@@ -243,6 +243,7 @@ impl From<ParseResult> for WorkResult {
 #[derive(Debug, Clone)]
 enum BacktrackEntry {
     /// A single target to resume parsing from.
+    #[allow(dead_code)]
     Single { position: usize, value: Value },
     /// A choice point with multiple successful alternatives.
     Choice {
@@ -738,7 +739,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
 
                         // Collect all backtracking alternatives
                         let mut remaining = alternatives;
-                        let (first, first_bt) = remaining.remove(0);
+                        let (first, _first_bt) = remaining.remove(0);
                         self.work_stack.push(WorkItem::ChoiceContinue {
                             remaining,
                             start_pos: pos,
@@ -852,7 +853,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
 
             Pattern::Action {
                 pattern: ref inner,
-                action: ref action,
+                ref action,
             } => {
                 self.work_stack.push(WorkItem::ActionContinue {
                     action: action.clone(),
@@ -1351,7 +1352,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
         mut collected: Vec<Value>,
         current_pos: usize,
         require_one: bool,
-        checking_progress: bool,
+        _checking_progress: bool,
     ) -> Result<()> {
         let result = self
             .result_stack
@@ -2309,7 +2310,7 @@ pub fn apply_grammar_to_value_with_evaluator<'e>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grammar::{CharRange, Rule};
+    use crate::grammar::Rule;
 
     #[test]
     fn test_parse_digit() {

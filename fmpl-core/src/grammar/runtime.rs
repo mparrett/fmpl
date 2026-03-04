@@ -859,7 +859,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
 
                 for pat in patterns {
                     // Check if this is a Repeat pattern (possibly wrapped in Bind)
-                    let (inner_pat, is_star, is_plus, bind_name) = match pat {
+                    let (inner_pat, _is_star, is_plus, bind_name) = match pat {
                         Pattern::Repeat {
                             pattern: inner,
                             kind: RepeatKind::ZeroOrMore,
