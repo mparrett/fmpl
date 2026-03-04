@@ -103,7 +103,7 @@ impl ConstraintGenerator {
         (ty, constraints)
     }
 
-    fn walk(&mut self, expr: &Expr, cs: &mut Vec<TypeConstraint>) -> Type {
+    pub fn walk(&mut self, expr: &Expr, cs: &mut Vec<TypeConstraint>) -> Type {
         match expr {
             // Literals have known types.
             Expr::Int(_) => Type::Int,

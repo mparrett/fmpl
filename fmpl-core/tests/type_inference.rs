@@ -137,7 +137,7 @@ fn cg_prop_access_has_property() {
 fn cg_let_x_1_plus_2() {
     // Construct AST directly: let x = 1 + 2; x
     use fmpl_core::ast::{BinOp, Expr, LetBinding};
-    let add_expr = Expr::BinOp(Box::new(Expr::Int(1)), BinOp::Add, Box::new(Expr::Int(2)));
+    let add_expr = Expr::Binary(Box::new(Expr::Int(1)), BinOp::Add, Box::new(Expr::Int(2)));
     let let_expr = Expr::Let(
         vec![LetBinding::Simple(
             SmolStr::new("x"),
