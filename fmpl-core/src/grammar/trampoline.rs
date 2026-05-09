@@ -1005,6 +1005,14 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 let pos_obj = self.input.position_at(pos);
                 let (value_tag, children) = match self.input.head(&pos_obj) {
                     Some(InputItem::Value(Value::Tagged(t, c))) => (t, (*c).clone()),
+                    Some(InputItem::Value(Value::List(items))) if !items.is_empty() => {
+                        if let Value::Symbol(tag_sym) = &items[0] {
+                            (tag_sym.clone(), items[1..].to_vec())
+                        } else {
+                            self.result_stack.push(WorkResult::Failure);
+                            return Ok(());
+                        }
+                    }
                     _ => {
                         self.result_stack.push(WorkResult::Failure);
                         return Ok(());

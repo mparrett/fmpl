@@ -800,7 +800,7 @@ mod phase2_ast_transform {
         // Parse "[1, 2, 3]" and check AST structure
         let result = eval(&mut vm, r#"ast::parse("[1, 2, 3]")"#).unwrap();
         // Should produce :List([...])
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "List");
         } else {
             panic!("expected Tagged(:List), got {:?}", result);
@@ -814,7 +814,7 @@ mod phase2_ast_transform {
         // Parse "%{a: 1}" and check AST structure
         let result = eval(&mut vm, r#"ast::parse("%{a: 1}")"#).unwrap();
         // Should produce :Map([...])
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Map");
         } else {
             panic!("expected Tagged(:Map), got {:?}", result);
@@ -828,7 +828,7 @@ mod phase2_ast_transform {
         // Parse "list[0]" - need to use a full expression
         let result = eval(&mut vm, r#"ast::parse("x[0]")"#).unwrap();
         // Should produce :Index(...)
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Index");
         } else {
             panic!("expected Tagged(:Index), got {:?}", result);
@@ -885,7 +885,7 @@ mod phase3_calls {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("\x x + 1")"#).unwrap();
         // Should produce :Lambda(...)
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Lambda");
         } else {
             panic!("expected Tagged(:Lambda), got {:?}", result);
@@ -898,7 +898,7 @@ mod phase3_calls {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("f(1, 2)")"#).unwrap();
         // Should produce :Call(...)
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Call");
         } else {
             panic!("expected Tagged(:Call), got {:?}", result);
@@ -911,7 +911,7 @@ mod phase3_calls {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("x.foo(1)")"#).unwrap();
         // Should produce :MethodCall(...)
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "MethodCall");
         } else {
             panic!("expected Tagged(:MethodCall), got {:?}", result);
@@ -1028,7 +1028,7 @@ mod phase4_control_flow {
     fn parse_while_ast() {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("while true do 1")"#).unwrap();
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "While");
         } else {
             panic!("expected Tagged(:While), got {:?}", result);
@@ -1040,7 +1040,7 @@ mod phase4_control_flow {
     fn parse_return_ast() {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("return 42")"#).unwrap();
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Return");
         } else {
             panic!("expected Tagged(:Return), got {:?}", result);
@@ -1184,7 +1184,7 @@ mod phase6_property_access {
     fn parse_prop_access_ast() {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("obj.prop")"#).unwrap();
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "PropAccess");
         } else {
             panic!("expected Tagged(:PropAccess), got {:?}", result);
@@ -1200,7 +1200,7 @@ mod phase6_qualified_names {
     fn parse_qualified_name_ast() {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("foo::bar")"#).unwrap();
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Qualified");
         } else {
             panic!("expected Tagged(:Qualified), got {:?}", result);
@@ -1240,7 +1240,7 @@ mod phase6_async {
     fn parse_async_call_ast() {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("<- expr")"#).unwrap();
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "AsyncCall");
         } else {
             panic!("expected Tagged(:AsyncCall), got {:?}", result);
@@ -1707,7 +1707,7 @@ mod full_pipeline_lists_maps {
     fn parse_index_expression() {
         let mut vm = Vm::new();
         let result = eval(&mut vm, r#"ast::parse("list[0]")"#).unwrap();
-        if let Value::Tagged(tag, _) = &result {
+        if let Some((tag, _)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Index");
         } else {
             panic!("expected Tagged(:Index, ...), got {:?}", result);
@@ -1923,7 +1923,7 @@ mod grammar_star_pattern {
                 assert_eq!(items.len(), 3);
                 // Check each item is LoadInt
                 for (i, item) in items.iter().enumerate() {
-                    if let Value::Tagged(t, c) = item {
+                    if let Some((t, c)) = item.as_node() {
                         assert_eq!(t.as_str(), "LoadInt");
                         assert_eq!(c[0], Value::Int(i as i64 + 1));
                     } else {
@@ -1956,7 +1956,7 @@ mod grammar_star_pattern {
         if let Some((tag, children)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Call");
             // First child should be :Var(:f)
-            if let Value::Tagged(func_tag, _) = &children[0] {
+            if let Some((func_tag, _)) = &children[0].as_node() {
                 assert_eq!(func_tag.as_str(), "Var");
             } else {
                 panic!("expected Tagged(:Var), got {:?}", children[0]);
@@ -1964,7 +1964,7 @@ mod grammar_star_pattern {
             // Second child should be [:LoadInt(1)]
             if let Value::List(args) = &children[1] {
                 assert_eq!(args.len(), 1, "expected 1 argument, got {}", args.len());
-                if let Value::Tagged(arg_tag, arg_children) = &args[0] {
+                if let Some((arg_tag, arg_children)) = &args[0].as_node() {
                     assert_eq!(arg_tag.as_str(), "LoadInt");
                     assert_eq!(arg_children[0], Value::Int(1));
                 } else {
@@ -2051,7 +2051,7 @@ mod grammar_star_pattern {
         if let Some((tag, children)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Lambda");
             // Body should be transformed
-            if let Value::Tagged(body_tag, _) = &children[1] {
+            if let Some((body_tag, _)) = &children[1].as_node() {
                 assert_eq!(body_tag.as_str(), "Add");
             } else {
                 panic!("expected body to be :Add, got {:?}", children[1]);
@@ -2079,13 +2079,13 @@ mod grammar_star_pattern {
         if let Some((tag, children)) = &result.as_node() {
             assert_eq!(tag.as_str(), "While");
             // Condition should be transformed
-            if let Value::Tagged(cond_tag, _) = &children[0] {
+            if let Some((cond_tag, _)) = &children[0].as_node() {
                 assert_eq!(cond_tag.as_str(), "Lt");
             } else {
                 panic!("expected cond to be :Lt, got {:?}", children[0]);
             }
             // Body should be transformed
-            if let Value::Tagged(body_tag, _) = &children[1] {
+            if let Some((body_tag, _)) = &children[1].as_node() {
                 assert_eq!(body_tag.as_str(), "Add");
             } else {
                 panic!("expected body to be :Add, got {:?}", children[1]);
@@ -2112,7 +2112,7 @@ mod grammar_star_pattern {
         // Should produce :Return(:Add(:LoadInt(1), :LoadInt(2)))
         if let Some((tag, children)) = &result.as_node() {
             assert_eq!(tag.as_str(), "Return");
-            if let Value::Tagged(expr_tag, _) = &children[0] {
+            if let Some((expr_tag, _)) = &children[0].as_node() {
                 assert_eq!(expr_tag.as_str(), "Add");
             } else {
                 panic!("expected return expr to be :Add, got {:?}", children[0]);
@@ -2139,7 +2139,7 @@ mod grammar_star_pattern {
         // Should produce :AsyncCall(:Call(:Var(:fetch), [:LoadString("url")]))
         if let Some((tag, children)) = &result.as_node() {
             assert_eq!(tag.as_str(), "AsyncCall");
-            if let Value::Tagged(inner_tag, _) = &children[0] {
+            if let Some((inner_tag, _)) = &children[0].as_node() {
                 assert_eq!(inner_tag.as_str(), "Call");
             } else {
                 panic!("expected inner to be :Call, got {:?}", children[0]);
@@ -2169,7 +2169,7 @@ mod grammar_star_pattern {
             if let Value::List(stmts) = &children[0] {
                 assert_eq!(stmts.len(), 3);
                 // Third statement should be transformed
-                if let Value::Tagged(stmt_tag, _) = &stmts[2] {
+                if let Some((stmt_tag, _)) = &stmts[2].as_node() {
                     assert_eq!(stmt_tag.as_str(), "Add");
                 } else {
                     panic!("expected third stmt to be :Add, got {:?}", stmts[2]);

@@ -223,7 +223,7 @@ fn test_ast_parse_int_literal() {
     let mut vm = Vm::new();
     let result = eval(&mut vm, r#"ast::parse("42")"#).unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, _) if tag == "Int"),
+        matches!(result.as_node(), Some((t, _)) if t == "Int"),
         "expected :Int(...), got {:?}",
         result
     );
@@ -246,7 +246,7 @@ fn test_ast_parse_lambda() {
     let mut vm = Vm::new();
     let result = eval(&mut vm, r#"ast::parse("\\x x + 1")"#).unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, _) if tag == "Lambda"),
+        matches!(result.as_node(), Some((t, _)) if t == "Lambda"),
         "expected :Lambda(...), got {:?}",
         result
     );
@@ -257,7 +257,7 @@ fn test_ast_parse_let() {
     let mut vm = Vm::new();
     let result = eval(&mut vm, r#"ast::parse("let (x = 1) x + 1")"#).unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, _) if tag == "Let"),
+        matches!(result.as_node(), Some((t, _)) if t == "Let"),
         "expected :Let(...), got {:?}",
         result
     );
@@ -268,7 +268,7 @@ fn test_ast_parse_if() {
     let mut vm = Vm::new();
     let result = eval(&mut vm, r#"ast::parse("if true then 1 else 2")"#).unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, _) if tag == "If"),
+        matches!(result.as_node(), Some((t, _)) if t == "If"),
         "expected :If(...), got {:?}",
         result
     );
@@ -279,7 +279,7 @@ fn test_ast_parse_list() {
     let mut vm = Vm::new();
     let result = eval(&mut vm, r#"ast::parse("[1, 2, 3]")"#).unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, _) if tag == "List"),
+        matches!(result.as_node(), Some((t, _)) if t == "List"),
         "expected :List(...), got {:?}",
         result
     );
@@ -290,7 +290,7 @@ fn test_ast_parse_map() {
     let mut vm = Vm::new();
     let result = eval(&mut vm, r#"ast::parse("%{a: 1, b: 2}")"#).unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, _) if tag == "Map"),
+        matches!(result.as_node(), Some((t, _)) if t == "Map"),
         "expected :Map(...), got {:?}",
         result
     );
@@ -301,7 +301,7 @@ fn test_ast_parse_call() {
     let mut vm = Vm::new();
     let result = eval(&mut vm, r#"ast::parse("foo(1, 2)")"#).unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, _) if tag == "Call"),
+        matches!(result.as_node(), Some((t, _)) if t == "Call"),
         "expected :Call(...), got {:?}",
         result
     );
@@ -312,7 +312,7 @@ fn test_ast_parse_method_call() {
     let mut vm = Vm::new();
     let result = eval(&mut vm, r#"ast::parse("obj.method()")"#).unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, _) if tag == "MethodCall"),
+        matches!(result.as_node(), Some((t, _)) if t == "MethodCall"),
         "expected :MethodCall(...), got {:?}",
         result
     );

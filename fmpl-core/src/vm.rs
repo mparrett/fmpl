@@ -1174,11 +1174,21 @@ impl Vm {
                     frame.set_current(value);
                 }
                 Instruction::ExtractTaggedChild { source, index } => {
-                    // Use get_ref to avoid cloning the entire tagged value, only clone the extracted child
+                    // Accept both `Value::Tagged(_, children)` and the
+                    // equivalent list shape `[Symbol(tag), child1, ...]`
+                    // (ITER-0004b). For the list shape, child indexing skips
+                    // the head symbol.
                     let tagged_ref = frame.get_ref(source);
                     let value = match tagged_ref {
                         Value::Tagged(_, children) => {
                             children.get(index).cloned().ok_or_else(|| {
+                                Error::Runtime(format!("child index {} out of bounds", index))
+                            })?
+                        }
+                        Value::List(items)
+                            if !items.is_empty() && matches!(items[0], Value::Symbol(_)) =>
+                        {
+                            items.get(index + 1).cloned().ok_or_else(|| {
                                 Error::Runtime(format!("child index {} out of bounds", index))
                             })?
                         }
@@ -1198,13 +1208,22 @@ impl Vm {
                     fail_target,
                     expected_arity,
                 } => {
-                    // Use get_ref to avoid cloning when just checking the tag
+                    // Accept both `Value::Tagged` and the equivalent list shape
+                    // `[Symbol(tag), child1, ...]` (ITER-0004b). Bare
+                    // `Value::Symbol` still matches when the pattern is a bare
+                    // symbol with no arity check.
                     let val_ref = frame.get_ref(value);
                     let matches = match val_ref {
                         Value::Tagged(t, children) => {
                             *t == tag && expected_arity.is_none_or(|n| children.len() == n)
                         }
-                        // Also match bare Value::Symbol when pattern is a bare symbol (no arity check)
+                        Value::List(items) if !items.is_empty() => {
+                            if let Value::Symbol(t) = &items[0] {
+                                *t == tag && expected_arity.is_none_or(|n| items.len() - 1 == n)
+                            } else {
+                                false
+                            }
+                        }
                         Value::Symbol(s) => *s == tag && expected_arity.is_none_or(|n| n == 0),
                         _ => false,
                     };

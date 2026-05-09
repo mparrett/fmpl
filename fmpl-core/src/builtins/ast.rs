@@ -10,7 +10,10 @@ use crate::value::Value;
 use smol_str::SmolStr;
 use std::sync::Arc;
 
-/// Convert an Expr AST node to a Value::Tagged representation.
+/// Convert an Expr AST node to a list-shaped Value representation.
+///
+/// Each node becomes `Value::List([Value::Symbol("Tag"), child1, child2, ...])`,
+/// the canonical shape consumed by `lib/core/ast_to_ir.fmpl` and `ir::compile`.
 pub fn expr_to_value(expr: &Expr) -> Value {
     match expr {
         Expr::Int(n) => Value::list_node("Int", vec![Value::Int(*n)]),
@@ -265,16 +268,16 @@ pub fn expr_to_value(expr: &Expr) -> Value {
                     cases
                         .iter()
                         .map(|c| {
-                            Value::Tagged(
-                                SmolStr::new("Case"),
-                                Arc::new(vec![
+                            Value::list_node(
+                                "Case",
+                                vec![
                                     pattern_to_value(&c.pattern),
                                     c.guard
                                         .as_ref()
                                         .map(|g| expr_to_value(g))
                                         .unwrap_or(Value::Null),
                                     expr_to_value(&c.body),
-                                ]),
+                                ],
                             )
                         })
                         .collect(),
@@ -313,16 +316,16 @@ pub fn expr_to_value(expr: &Expr) -> Value {
                     cases
                         .iter()
                         .map(|c| {
-                            Value::Tagged(
-                                SmolStr::new("Case"),
-                                Arc::new(vec![
+                            Value::list_node(
+                                "Case",
+                                vec![
                                     pattern_to_value(&c.pattern),
                                     c.guard
                                         .as_ref()
                                         .map(|g| expr_to_value(g))
                                         .unwrap_or(Value::Null),
                                     expr_to_value(&c.body),
-                                ]),
+                                ],
                             )
                         })
                         .collect(),
@@ -380,19 +383,17 @@ fn pattern_to_value(pat: &Pattern) -> Value {
                     .unwrap_or(Value::Null),
             ],
         ),
-        Pattern::Map(entries) => Value::Tagged(
-            SmolStr::new("PatMap"),
-            Arc::new(
-                entries
-                    .iter()
-                    .map(|(k, v)| {
-                        Value::List(Arc::new(vec![
-                            Value::Symbol(k.clone()),
-                            pattern_to_value(v),
-                        ]))
-                    })
-                    .collect(),
-            ),
+        Pattern::Map(entries) => Value::list_node(
+            "PatMap",
+            entries
+                .iter()
+                .map(|(k, v)| {
+                    Value::List(Arc::new(vec![
+                        Value::Symbol(k.clone()),
+                        pattern_to_value(v),
+                    ]))
+                })
+                .collect(),
         ),
         Pattern::Constructor(tag, pats) => Value::list_node(
             "PatConstructor",

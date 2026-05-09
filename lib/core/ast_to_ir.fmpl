@@ -1,89 +1,105 @@
--- AST to IR transformer using named tree grammar with explicit recursion
--- Transforms AST tagged values from fmpl_parser into IR nodes for compilation
+-- AST to IR transformer using named tree grammar with explicit recursion.
+-- Transforms list-based AST values from ast::parse into list-based IR nodes
+-- ready for ir::compile.
 -- Requires: lib/core/prelude.fmpl loaded first
 --
--- Tree grammar explicit recursion: Use `rule:binding` syntax to apply a rule
--- to child values. E.g., :Binary(:+, expr:l, expr:r) applies `expr` rule to
--- the left and right children, binding the results to `l` and `r`.
+-- ITER-0004b: AST and IR are uniform list values: `[:Tag, child1, child2, ...]`.
+-- In list patterns, bare identifiers are *rule references*, so to bind an
+-- element to a name we use either `any:n` (matches any single element) or
+-- `expr:l` (recursively transform via the `expr` rule). Where an AST child
+-- is itself a list of expressions (e.g. Call args, List items, Block stmts),
+-- we match that nested list with the `exprs` rule, which destructures the
+-- inner list and runs `expr` on each element.
 
 let ast_to_ir = grammar ast_to_ir {
     -- Main expression transformer
-    expr = :Int(n) => :LoadInt(n)
-         | :Bool(b) => :LoadBool(b)
-         | :Null() => :LoadNull
-         | :String(s) => :LoadString(s)
-          | :Symbol(s) => :LoadSymbol(s)
-          | :Tagged(tag, expr*:xs) => :MakeTagged(tag, xs)
-          | :Var(name) => :Var(name)
-         | :QualifiedName(parts) => :QualifiedName(parts)
+    expr = [:Int, any:n] => [:LoadInt, n]
+         | [:Bool, any:b] => [:LoadBool, b]
+         | [:Null] => [:LoadNull]
+         | [:String, any:s] => [:LoadString, s]
+         | [:Symbol, any:s] => [:LoadSymbol, s]
+         | [:Tagged, any:tag, exprs:xs] => [:MakeTagged, tag, xs]
+         | [:Var, any:name] => [:Var, name]
+         | [:QualifiedName, any:parts] => [:QualifiedName, parts]
          -- Binary operators
-         | :Binary(:+, expr:l, expr:r) => :Add(l, r)
-         | :Binary(:-, expr:l, expr:r) => :Sub(l, r)
-         | :Binary(:*, expr:l, expr:r) => :Mul(l, r)
-         | :Binary(:/, expr:l, expr:r) => :Div(l, r)
-         | :Binary(:%, expr:l, expr:r) => :Mod(l, r)
-         | :Binary(:==, expr:l, expr:r) => :Eq(l, r)
-         | :Binary(:!=, expr:l, expr:r) => :NotEq(l, r)
-         | :Binary(:<, expr:l, expr:r) => :Lt(l, r)
-         | :Binary(:>, expr:l, expr:r) => :Gt(l, r)
-         | :Binary(:<=, expr:l, expr:r) => :LtEq(l, r)
-         | :Binary(:>=, expr:l, expr:r) => :GtEq(l, r)
-         | :Binary(:&&, expr:l, expr:r) => :And(l, r)
-         | :Binary(:||, expr:l, expr:r) => :Or(l, r)
-         | :Binary(:|>, expr:l, expr:r) => :Pipe(l, r)
+         | [:Binary, :+, expr:l, expr:r] => [:Add, l, r]
+         | [:Binary, :-, expr:l, expr:r] => [:Sub, l, r]
+         | [:Binary, :*, expr:l, expr:r] => [:Mul, l, r]
+         | [:Binary, :/, expr:l, expr:r] => [:Div, l, r]
+         | [:Binary, :%, expr:l, expr:r] => [:Mod, l, r]
+         | [:Binary, :==, expr:l, expr:r] => [:Eq, l, r]
+         | [:Binary, :!=, expr:l, expr:r] => [:NotEq, l, r]
+         | [:Binary, :<, expr:l, expr:r] => [:Lt, l, r]
+         | [:Binary, :>, expr:l, expr:r] => [:Gt, l, r]
+         | [:Binary, :<=, expr:l, expr:r] => [:LtEq, l, r]
+         | [:Binary, :>=, expr:l, expr:r] => [:GtEq, l, r]
+         | [:Binary, :&&, expr:l, expr:r] => [:And, l, r]
+         | [:Binary, :||, expr:l, expr:r] => [:Or, l, r]
+         | [:Binary, :|>, expr:l, expr:r] => [:Pipe, l, r]
          -- Unary operators
-         | :Unary(:-, expr:e) => :Neg(e)
-         | :Unary(:!, expr:e) => :Not(e)
+         | [:Unary, :-, expr:e] => [:Neg, e]
+         | [:Unary, :!, expr:e] => [:Not, e]
          -- Control flow
-         | :If(expr:c, expr:t, expr:e) => :If(c, t, e)
-         -- Let bindings: :Let([:Binding(name, value), ...], body)
-         | :Let([:Binding(name, expr:value)], expr:body) => :Let(name, value, body)
-         -- Indexing: :Index(collection, key)
-         | :Index(expr:coll, expr:key) => :Index(coll, key)
-         -- Function calls: :Call(func, [arglist])
-         | :Call(expr:func, expr*:a) => :Call(func, a)
-         -- Method calls: :MethodCall(receiver, method, [arglist])
-         | :MethodCall(expr:recv, method, expr*:a) => :MethodCall(recv, method, a)
-         -- List literals: :List([elements])
-         | :List(expr*:items) => :MakeList(items)
-         -- Map literals: :Map([[key, val], ...])
-         | :Map(pair*:pairs) => :MakeMap(pairs)
-         -- Property access: :PropAccess(obj, prop)
-         | :PropAccess(expr:obj, prop) => :GetProp(obj, prop)
-         -- Lambdas: :Lambda(params, body) - params is a list of symbols
-         | :Lambda(params, expr:body) => :Lambda(params, body)
+         | [:If, expr:c, expr:t, expr:e] => [:If, c, t, e]
+         -- Let bindings: single-binding form only (matches existing scope).
+         -- AST: [:Let, [[:Binding, name, value]], body]
+         | [:Let, [[:Binding, any:name, expr:value]], expr:body] => [:Let, name, value, body]
+         -- Indexing: [:Index, collection, key]
+         | [:Index, expr:coll, expr:key] => [:Index, coll, key]
+         -- Function calls: args is a nested list child
+         | [:Call, expr:func, exprs:a] => [:Call, func, a]
+         -- Method calls
+         | [:MethodCall, expr:recv, any:method, exprs:a] => [:MethodCall, recv, method, a]
+         -- List literals
+         | [:List, exprs:items] => [:MakeList, items]
+         -- Map literals
+         | [:Map, pairs:p] => [:MakeMap, p]
+         -- Property access
+         | [:PropAccess, expr:obj, any:prop] => [:GetProp, obj, prop]
+         -- Lambdas: params stays as the raw symbol list
+         | [:Lambda, any:params, expr:body] => [:Lambda, params, body]
          -- Control flow (passthrough with recursive transformation)
-         | :While(expr:cond, expr:body) => :While(cond, body)
-         | :DoWhile(expr:body, expr:cond) => :DoWhile(body, cond)
-         | :For(pat, expr:iter, expr:body) => :For(pat, iter, body)
-         | :Return(expr:e) => :Return(e)
-         | :Return() => :Return(:LoadNull)
-         -- Match expressions
-         | :Match(expr:e, case*:cases) => :Match(e, cases)
+         | [:While, expr:cond, expr:body] => [:While, cond, body]
+         | [:DoWhile, expr:body, expr:cond] => [:DoWhile, body, cond]
+         | [:For, any:pat, expr:iter, expr:body] => [:For, pat, iter, body]
+         | [:Return, expr:e] => [:Return, e]
+         | [:Return] => [:Return, [:LoadNull]]
+         -- Match expressions: cases is a nested list of [:Case, ...]
+         | [:Match, expr:e, cases:c] => [:Match, e, c]
          -- Async operations
-         | :AsyncCall(expr:e) => :AsyncCall(e)
-         | :SyncCall(expr:e) => :SyncCall(e)
+         | [:AsyncCall, expr:e] => [:AsyncCall, e]
+         | [:SyncCall, expr:e] => [:SyncCall, e]
          -- Try/catch
-         | :TryCatch(expr:body, catch_var, expr:catch_body) => :TryCatch(body, catch_var, catch_body)
+         | [:TryCatch, expr:body, any:catch_var, expr:catch_body] => [:TryCatch, body, catch_var, catch_body]
          -- Pipe
-         | :Pipe(expr:arg, expr:func) => :Pipe(arg, func)
-         -- Slice (start/end may be null for open-ended slices, passed through)
-         | :Slice(expr:coll, start, end) => :Slice(coll, start, end)
+         | [:Pipe, expr:arg, expr:func] => [:Pipe, arg, func]
+         -- Slice (start/end may be null)
+         | [:Slice, expr:coll, any:start, any:end] => [:Slice, coll, start, end]
          -- Assignment
-         | :Assign(target, expr:value) => :Assign(target, value)
+         | [:Assign, any:target, expr:value] => [:Assign, target, value]
          -- Block/sequence
-         | :Block(expr*:stmts) => :Block(stmts)
-         | :Sequence(expr*:stmts) => :Block(stmts)
-         | :Seq(expr:first, expr:rest) => :Seq(first, rest)
+         | [:Block, exprs:stmts] => [:Block, stmts]
+         | [:Sequence, exprs:stmts] => [:Block, stmts]
+         | [:Seq, expr:first, expr:rest] => [:Seq, first, rest]
 
-    -- Transform a [key, val] pair
-    -- Map keys in AST are raw symbols (:a), not tagged (:Symbol(:a))
-    -- They need to become :LoadString for ir::compile
-    pair = [_:k, expr:v] => [:LoadString(k), v]
+    -- Apply `expr` to every element of a nested list child.
+    -- AST shape: a single list value `[c1, c2, ...]` where each ci is an expr.
+    -- Trailing comma forces list-pattern parsing (single-element starts with
+    -- an alphabetic rule reference, which would otherwise read as a char class).
+    exprs = [expr*:xs,] => xs
 
-    -- Transform match cases
-    -- Parser emits :Case(pat, guard_or_null, body) with 3 children
-    -- Pass through the guard (may be null) without applying expr to it
-    case = :Case(pat, guard, expr:body) => :Case(pat, guard, body)
-         | :CaseGuard(pat, expr:guard, expr:body) => :CaseGuard(pat, guard, body)
+    -- Pair list for Map: [[k1, v1], [k2, v2], ...]
+    pairs = [pair*:ps,] => ps
+
+    -- Transform a [key, val] pair (raw symbol key, expression value).
+    -- Wrap with a sentinel symbol so the runtime's "list-of-lists ⇒ spread"
+    -- collapse does not flatten the pairs together.
+    pair = [_:k, expr:v] => [:Pair, [:LoadString, k], v]
+
+    -- Match cases list
+    cases = [case*:cs,] => cs
+
+    -- Transform match cases (parser emits 3-child form with possibly null guard)
+    case = [:Case, any:pat, any:guard, expr:body] => [:Case, pat, guard, body]
+         | [:CaseGuard, any:pat, expr:guard, expr:body] => [:CaseGuard, pat, guard, body]
 }

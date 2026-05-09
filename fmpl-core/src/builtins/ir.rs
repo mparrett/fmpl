@@ -349,19 +349,30 @@ impl IrCompiler {
                 Ok(self.emit(Instruction::MakeTagged { tag, args }))
             }
             "MakeMap" => {
-                // :MakeMap([[key_ir1, val_ir1], [key_ir2, val_ir2], ...])
+                // Accepts either bare pairs `[[k, v], ...]` (legacy Tagged form)
+                // or sentinel-wrapped pairs `[[:Pair, k, v], ...]` (ITER-0004b
+                // — required because the runtime's "list-of-lists ⇒ spread"
+                // collapse would otherwise flatten the bare-pair list).
                 let pair_list = self.expect_list(&children[0])?;
                 let mut pairs = Vec::new();
                 for pair in pair_list {
-                    let pair_items = self.expect_list(&pair)?;
-                    if pair_items.len() != 2 {
-                        return Err(Error::Runtime(format!(
-                            "MakeMap pair must have 2 elements, got {}",
-                            pair_items.len()
-                        )));
-                    }
-                    let key = self.compile_ir(&pair_items[0])?;
-                    let val = self.compile_ir(&pair_items[1])?;
+                    let (key_ir, val_ir) = match pair.as_node() {
+                        Some((tag, parts)) if tag.as_str() == "Pair" && parts.len() == 2 => {
+                            (parts[0].clone(), parts[1].clone())
+                        }
+                        _ => {
+                            let pair_items = self.expect_list(&pair)?;
+                            if pair_items.len() != 2 {
+                                return Err(Error::Runtime(format!(
+                                    "MakeMap pair must have 2 elements, got {}",
+                                    pair_items.len()
+                                )));
+                            }
+                            (pair_items[0].clone(), pair_items[1].clone())
+                        }
+                    };
+                    let key = self.compile_ir(&key_ir)?;
+                    let val = self.compile_ir(&val_ir)?;
                     pairs.push((key, val));
                 }
                 Ok(self.emit(Instruction::MakeMap { pairs }))
@@ -541,11 +552,11 @@ impl IrCompiler {
             }
             "For" => {
                 // :For(pat, iter_ir, body_ir) — pat may be :PatVar(:x) or bare :x
-                let pat_name = match &children[0] {
-                    Value::Tagged(tag, inner) if tag.as_str() == "PatVar" => {
+                let pat_name = match children[0].as_node() {
+                    Some((tag, inner)) if tag.as_str() == "PatVar" && !inner.is_empty() => {
                         self.expect_symbol(&inner[0])?
                     }
-                    other => self.expect_symbol(other)?,
+                    _ => self.expect_symbol(&children[0])?,
                 };
                 let iter_idx = self.compile_ir(&children[1])?;
 
@@ -676,7 +687,7 @@ impl IrCompiler {
                 let mut jump_to_end_indices = Vec::new();
 
                 for case in &cases {
-                    if let Value::Tagged(case_tag, case_children) = case
+                    if let Some((case_tag, case_children)) = case.as_node()
                         && (case_tag.as_str() == "Case" || case_tag.as_str() == "CaseGuard")
                     {
                         let (pat, body_ir) = if case_children.len() == 3 {
@@ -691,8 +702,8 @@ impl IrCompiler {
 
                         // Check if this is a wildcard pattern
                         let is_wildcard = matches!(
-                            pat,
-                            Value::Tagged(t, _) if t.as_str() == "PatWildcard"
+                            pat.as_node(),
+                            Some((t, _)) if t.as_str() == "PatWildcard"
                         );
 
                         if is_wildcard {
@@ -760,7 +771,7 @@ impl IrCompiler {
                                     let val_ref2 =
                                         self.emit(Instruction::LoadVar(match_val_var.clone()));
                                     for (idx, sub_pat) in sub_patterns.iter().enumerate() {
-                                        if let Value::Tagged(sp_tag, sp_children) = sub_pat
+                                        if let Some((sp_tag, sp_children)) = sub_pat.as_node()
                                             && sp_tag.as_str() == "PatVar"
                                             && !sp_children.is_empty()
                                         {
@@ -1010,52 +1021,56 @@ impl IrCompiler {
         bound: &std::collections::HashSet<SmolStr>,
         free: &mut std::collections::HashSet<SmolStr>,
     ) {
-        match ir {
-            Value::Tagged(tag, children) => {
-                match tag.as_str() {
-                    "Var" => {
-                        // Variable reference - check if it's free
-                        if let Some(Value::Symbol(name)) = children.first()
-                            && !bound.contains(name)
-                        {
-                            free.insert(name.clone());
-                        }
+        // First try to interpret as a node (list-shape `[Symbol(tag), ...]`
+        // or legacy `Value::Tagged(tag, ...)`) and dispatch on tag.
+        if let Some((tag, children)) = ir.as_node() {
+            match tag.as_str() {
+                "Var" => {
+                    if let Some(Value::Symbol(name)) = children.first()
+                        && !bound.contains(name)
+                    {
+                        free.insert(name.clone());
                     }
-                    "Let" => {
-                        // :Let(:name, value_ir, body_ir)
-                        // The name is bound in the body but not in the value
-                        if children.len() >= 3 {
-                            // Collect from value (name not yet bound)
-                            Self::collect_free_vars(&children[1], bound, free);
-                            // Collect from body (name is bound)
-                            if let Value::Symbol(name) = &children[0] {
-                                let mut new_bound = bound.clone();
-                                new_bound.insert(name.clone());
-                                Self::collect_free_vars(&children[2], &new_bound, free);
-                            }
-                        }
-                    }
-                    "Lambda" => {
-                        // :Lambda([params], body_ir)
-                        // Params are bound in the body
-                        if children.len() >= 2
-                            && let Value::List(params) = &children[0]
-                        {
+                }
+                "Let" => {
+                    // :Let(:name, value_ir, body_ir)
+                    // The name is bound in the body but not in the value
+                    if children.len() >= 3 {
+                        Self::collect_free_vars(&children[1], bound, free);
+                        if let Value::Symbol(name) = &children[0] {
                             let mut new_bound = bound.clone();
-                            for p in params.iter() {
-                                if let Value::Symbol(name) = p {
-                                    new_bound.insert(name.clone());
-                                }
+                            new_bound.insert(name.clone());
+                            Self::collect_free_vars(&children[2], &new_bound, free);
+                        }
+                    }
+                }
+                "Lambda" => {
+                    // :Lambda([params], body_ir)
+                    if children.len() >= 2
+                        && let Value::List(params) = &children[0]
+                    {
+                        let mut new_bound = bound.clone();
+                        for p in params.iter() {
+                            if let Value::Symbol(name) = p {
+                                new_bound.insert(name.clone());
                             }
-                            Self::collect_free_vars(&children[1], &new_bound, free);
                         }
+                        Self::collect_free_vars(&children[1], &new_bound, free);
                     }
-                    // For all other IR nodes, recurse into children
-                    _ => {
-                        for child in children.iter() {
-                            Self::collect_free_vars(child, bound, free);
-                        }
+                }
+                _ => {
+                    for child in children.iter() {
+                        Self::collect_free_vars(child, bound, free);
                     }
+                }
+            }
+            return;
+        }
+        // Fallback: walk children of any non-node compound value.
+        match ir {
+            Value::Tagged(_, children) => {
+                for child in children.iter() {
+                    Self::collect_free_vars(child, bound, free);
                 }
             }
             Value::List(items) => {
@@ -1063,7 +1078,7 @@ impl IrCompiler {
                     Self::collect_free_vars(item, bound, free);
                 }
             }
-            // Other values (Int, Bool, String, etc.) have no free variables
+            // Atomic values (Int, Bool, String, etc.) have no free variables.
             _ => {}
         }
     }

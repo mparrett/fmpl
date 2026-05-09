@@ -789,9 +789,18 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                     ));
                 }
 
-                // Get the tagged value from input
+                // Get the tagged value from input. Accept both
+                // `Value::Tagged(tag, children)` and the equivalent list shape
+                // `[Symbol(tag), child1, ...]` (ITER-0004b).
                 let (value_tag, children) = match self.input.head(&pos) {
                     Some(InputItem::Value(Value::Tagged(t, c))) => (t, (*c).clone()),
+                    Some(InputItem::Value(Value::List(items))) if !items.is_empty() => {
+                        if let Value::Symbol(tag_sym) = &items[0] {
+                            (tag_sym.clone(), items[1..].to_vec())
+                        } else {
+                            return Ok(ParseResult::Failure);
+                        }
+                    }
                     _ => return Ok(ParseResult::Failure),
                 };
 
