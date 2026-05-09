@@ -69,13 +69,6 @@ impl ParseStream {
                     Value::Null
                 }
             }
-            Value::Tagged(_, _) => {
-                if self.position == 0 {
-                    self.source.clone()
-                } else {
-                    Value::Null
-                }
-            }
             // Single value: treat as one-element stream
             other => {
                 if self.position == 0 {
@@ -129,7 +122,6 @@ impl ParseStream {
         match &self.source {
             Value::String(s) => self.position >= s.len(),
             Value::List(items) => self.position >= items.len(),
-            Value::Tagged(_, _) => self.position >= 1,
             _ => self.position >= 1,
         }
     }

@@ -742,20 +742,6 @@ impl SourceRepr for Value {
             Value::Lambda(lambda) => lambda.source_repr(),
             Value::Partial(partial) => partial.source_repr(),
             Value::Grammar(g) => format!("{}", GrammarRepr(g)),
-            Value::Tagged(tag, children) => {
-                let mut result = format!(":{}", tag);
-                if !children.is_empty() {
-                    result.push('(');
-                    for (i, child) in children.iter().enumerate() {
-                        if i > 0 {
-                            result.push_str(", ");
-                        }
-                        result.push_str(&child.source_repr());
-                    }
-                    result.push(')');
-                }
-                result
-            }
             Value::Stream(s) => s.source_repr(),
             // Objects require ObjectDb access - return a placeholder that can be filled in
             Value::Object(id) => format!("<object #{}>", id),

@@ -1325,7 +1325,9 @@ mod phase6_objects {
         // Parse an object definition
         let result = eval(&mut vm, r#"ast::parse("object Foo { x: 1 }")"#);
         // This may or may not be supported depending on parser
-        if let Ok(Value::Tagged(tag, _)) = &result {
+        if let Ok(v) = &result
+            && let Some((tag, _)) = v.as_node()
+        {
             assert!(tag.as_str() == "Object" || tag.as_str() == "ObjectDef");
         }
         // Accept either success or parse error for now

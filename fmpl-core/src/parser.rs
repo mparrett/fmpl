@@ -8,8 +8,11 @@ use crate::error::Error;
 use crate::grammar::Grammar;
 use crate::grammar::parser::GrammarParser;
 use crate::lexer::{SpannedToken, Token};
+// Re-exported into the generated parser module via `use super::*`.
+#[allow(unused_imports)]
 use crate::value::Value;
 use smol_str::SmolStr;
+#[allow(unused_imports)]
 use std::sync::Arc;
 
 // Local Result type for parser (same as crate::error::Result)

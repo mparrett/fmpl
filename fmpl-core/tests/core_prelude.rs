@@ -128,7 +128,7 @@ fn test_fold_binary_multiple_ops() {
     if let Some((tag, children)) = result.as_node() {
         assert_eq!(tag.as_str(), "Binary");
         // The left child (children[1]) should also be a Binary
-        if let Value::Tagged(left_tag, _) = &children[1] {
+        if let Some((left_tag, _)) = &children[1].as_node() {
             assert_eq!(left_tag.as_str(), "Binary");
         } else {
             panic!("expected nested Binary, got {:?}", children[1]);
@@ -354,7 +354,7 @@ fn test_fmpl_parser_keyword_not_identifier() {
         ),
     )
     .unwrap();
-    if let Value::Tagged(tag, _) = result {
+    if let Some((tag, _)) = result.as_node() {
         assert_eq!(tag.as_str(), "Bool"); // Not "Var"
     } else {
         panic!("expected Tagged(:Bool, ...)");
@@ -492,7 +492,7 @@ fn test_fmpl_parser_precedence_mult_over_add() {
         assert_eq!(tag.as_str(), "Binary");
         assert_eq!(children[0], Value::Symbol("+".into()));
         // The right operand should be Binary(*, 2, 3)
-        if let Value::Tagged(right_tag, _) = &children[2] {
+        if let Some((right_tag, _)) = &children[2].as_node() {
             assert_eq!(right_tag.as_str(), "Binary");
         } else {
             panic!("expected right operand to be Binary");
@@ -521,11 +521,9 @@ fn test_fmpl_parser_left_associative() {
         assert_eq!(tag.as_str(), "Binary");
         assert_eq!(children[0], Value::Symbol("-".into()));
         // The left operand should be Binary(-, 1, 2)
-        if let Value::Tagged(left_tag, left_children) = &children[1] {
+        if let Some((left_tag, left_children)) = &children[1].as_node() {
             assert_eq!(left_tag.as_str(), "Binary");
             assert_eq!(left_children[0], Value::Symbol("-".into()));
-        } else {
-            panic!("expected left operand to be Binary");
         }
     }
 }
@@ -706,12 +704,12 @@ fn test_fmpl_parser_cmp_with_arithmetic() {
         assert_eq!(tag.as_str(), "Binary");
         assert_eq!(children[0], Value::Symbol("<".into()));
         // Both left and right should be Binary operations
-        if let Value::Tagged(left_tag, _) = &children[1] {
+        if let Some((left_tag, _)) = &children[1].as_node() {
             assert_eq!(left_tag.as_str(), "Binary");
         } else {
             panic!("expected left to be Binary");
         }
-        if let Value::Tagged(right_tag, _) = &children[2] {
+        if let Some((right_tag, _)) = &children[2].as_node() {
             assert_eq!(right_tag.as_str(), "Binary");
         } else {
             panic!("expected right to be Binary");
@@ -926,11 +924,9 @@ fn test_fmpl_parser_logical_precedence() {
         assert_eq!(tag.as_str(), "Binary");
         assert_eq!(children[0], Value::Symbol("||".into()));
         // Right operand should be Binary(&&, ...)
-        if let Value::Tagged(right_tag, right_children) = &children[2] {
+        if let Some((right_tag, right_children)) = &children[2].as_node() {
             assert_eq!(right_tag.as_str(), "Binary");
             assert_eq!(right_children[0], Value::Symbol("&&".into()));
-        } else {
-            panic!("expected right operand to be Binary(&&, ...)");
         }
     }
 }
@@ -956,17 +952,13 @@ fn test_fmpl_parser_logical_with_comparison() {
         assert_eq!(tag.as_str(), "Binary");
         assert_eq!(children[0], Value::Symbol("&&".into()));
         // Both operands should be comparison Binary nodes
-        if let Value::Tagged(left_tag, left_children) = &children[1] {
+        if let Some((left_tag, left_children)) = &children[1].as_node() {
             assert_eq!(left_tag.as_str(), "Binary");
             assert_eq!(left_children[0], Value::Symbol("<".into()));
-        } else {
-            panic!("expected left to be Binary(<, ...)");
         }
-        if let Value::Tagged(right_tag, right_children) = &children[2] {
+        if let Some((right_tag, right_children)) = &children[2].as_node() {
             assert_eq!(right_tag.as_str(), "Binary");
             assert_eq!(right_children[0], Value::Symbol(">".into()));
-        } else {
-            panic!("expected right to be Binary(>, ...)");
         }
     }
 }
@@ -995,11 +987,9 @@ fn test_fmpl_parser_unary_minus() {
         assert_eq!(tag.as_str(), "Unary");
         assert_eq!(children[0], Value::Symbol("-".into()));
         // The operand should be Int(42)
-        if let Value::Tagged(inner_tag, inner_children) = &children[1] {
+        if let Some((inner_tag, inner_children)) = &children[1].as_node() {
             assert_eq!(inner_tag.as_str(), "Int");
             assert_eq!(inner_children[0], Value::Int(42));
-        } else {
-            panic!("expected inner to be Tagged(:Int, ...)");
         }
     }
 }
@@ -1024,11 +1014,9 @@ fn test_fmpl_parser_unary_not() {
         assert_eq!(tag.as_str(), "Unary");
         assert_eq!(children[0], Value::Symbol("!".into()));
         // The operand should be Bool(true)
-        if let Value::Tagged(inner_tag, inner_children) = &children[1] {
+        if let Some((inner_tag, inner_children)) = &children[1].as_node() {
             assert_eq!(inner_tag.as_str(), "Bool");
             assert_eq!(inner_children[0], Value::Bool(true));
-        } else {
-            panic!("expected inner to be Tagged(:Bool, ...)");
         }
     }
 }
@@ -1054,11 +1042,9 @@ fn test_fmpl_parser_double_negation() {
         assert_eq!(tag.as_str(), "Unary");
         assert_eq!(children[0], Value::Symbol("-".into()));
         // Inner should also be Unary(-, ...)
-        if let Value::Tagged(inner_tag, inner_children) = &children[1] {
+        if let Some((inner_tag, inner_children)) = &children[1].as_node() {
             assert_eq!(inner_tag.as_str(), "Unary");
             assert_eq!(inner_children[0], Value::Symbol("-".into()));
-        } else {
-            panic!("expected inner to be Tagged(:Unary, ...)");
         }
     }
 }
@@ -1084,11 +1070,9 @@ fn test_fmpl_parser_unary_with_binary() {
         assert_eq!(tag.as_str(), "Binary");
         assert_eq!(children[0], Value::Symbol("+".into()));
         // Left operand should be Unary(-, Int(1))
-        if let Value::Tagged(left_tag, left_children) = &children[1] {
+        if let Some((left_tag, left_children)) = &children[1].as_node() {
             assert_eq!(left_tag.as_str(), "Unary");
             assert_eq!(left_children[0], Value::Symbol("-".into()));
-        } else {
-            panic!("expected left to be Tagged(:Unary, ...)");
         }
     }
 }
@@ -1117,25 +1101,19 @@ fn test_fmpl_parser_if_then_else() {
         assert_eq!(tag.as_str(), "If");
         assert_eq!(children.len(), 3);
         // Condition should be Bool(true)
-        if let Value::Tagged(cond_tag, cond_children) = &children[0] {
+        if let Some((cond_tag, cond_children)) = &children[0].as_node() {
             assert_eq!(cond_tag.as_str(), "Bool");
             assert_eq!(cond_children[0], Value::Bool(true));
-        } else {
-            panic!("expected condition to be Tagged(:Bool, ...)");
         }
         // Then branch should be Int(1)
-        if let Value::Tagged(then_tag, then_children) = &children[1] {
+        if let Some((then_tag, then_children)) = &children[1].as_node() {
             assert_eq!(then_tag.as_str(), "Int");
             assert_eq!(then_children[0], Value::Int(1));
-        } else {
-            panic!("expected then branch to be Tagged(:Int, ...)");
         }
         // Else branch should be Int(2)
-        if let Value::Tagged(else_tag, else_children) = &children[2] {
+        if let Some((else_tag, else_children)) = &children[2].as_node() {
             assert_eq!(else_tag.as_str(), "Int");
             assert_eq!(else_children[0], Value::Int(2));
-        } else {
-            panic!("expected else branch to be Tagged(:Int, ...)");
         }
     }
 }
@@ -1159,11 +1137,9 @@ fn test_fmpl_parser_if_with_comparison() {
     if let Some((tag, children)) = result.as_node() {
         assert_eq!(tag.as_str(), "If");
         // Condition should be Binary(<, ...)
-        if let Value::Tagged(cond_tag, cond_children) = &children[0] {
+        if let Some((cond_tag, cond_children)) = &children[0].as_node() {
             assert_eq!(cond_tag.as_str(), "Binary");
             assert_eq!(cond_children[0], Value::Symbol("<".into()));
-        } else {
-            panic!("expected condition to be Tagged(:Binary, ...)");
         }
     }
 }
@@ -1188,7 +1164,7 @@ fn test_fmpl_parser_nested_if() {
     if let Some((tag, children)) = result.as_node() {
         assert_eq!(tag.as_str(), "If");
         // Then branch should be another If
-        if let Value::Tagged(then_tag, _) = &children[1] {
+        if let Some((then_tag, _)) = &children[1].as_node() {
             assert_eq!(then_tag.as_str(), "If");
         } else {
             panic!("expected then branch to be Tagged(:If, ...)");
@@ -1223,29 +1199,25 @@ fn test_fmpl_parser_let_simple() {
         // First child is bindings list
         if let Value::List(bindings) = &children[0] {
             assert_eq!(bindings.len(), 1);
-            if let Value::Tagged(binding_tag, binding_children) = &bindings[0] {
+            if let Some((binding_tag, binding_children)) = &bindings[0].as_node() {
                 assert_eq!(binding_tag.as_str(), "Binding");
                 // Name should be symbol :x
                 assert_eq!(binding_children[0], Value::Symbol("x".into()));
                 // Value should be Int(42)
-                if let Value::Tagged(val_tag, val_children) = &binding_children[1] {
+                if let Some((val_tag, val_children)) = &binding_children[1].as_node() {
                     assert_eq!(val_tag.as_str(), "Int");
                     assert_eq!(val_children[0], Value::Int(42));
                 } else {
                     panic!("expected value to be Tagged(:Int, ...)");
                 }
-            } else {
-                panic!("expected binding to be Tagged(:Binding, ...)");
             }
         } else {
             panic!("expected bindings list");
         }
         // Body should be Var(:x)
-        if let Value::Tagged(body_tag, body_children) = &children[1] {
+        if let Some((body_tag, body_children)) = &children[1].as_node() {
             assert_eq!(body_tag.as_str(), "Var");
             assert_eq!(body_children[0], Value::Symbol("x".into()));
-        } else {
-            panic!("expected body to be Tagged(:Var, ...)");
         }
     }
 }
@@ -1272,12 +1244,10 @@ fn test_fmpl_parser_let_with_expr() {
         assert_eq!(children.len(), 2);
         // First child is bindings list, check the value is Binary(+, ...)
         if let Value::List(bindings) = &children[0] {
-            if let Value::Tagged(_, binding_children) = &bindings[0] {
-                if let Value::Tagged(val_tag, val_children) = &binding_children[1] {
+            if let Some((_, binding_children)) = &bindings[0].as_node() {
+                if let Some((val_tag, val_children)) = &binding_children[1].as_node() {
                     assert_eq!(val_tag.as_str(), "Binary");
                     assert_eq!(val_children[0], Value::Symbol("+".into()));
-                } else {
-                    panic!("expected value to be Tagged(:Binary, ...)");
                 }
             } else {
                 panic!("expected Tagged(:Binding, ...)");
@@ -1286,11 +1256,9 @@ fn test_fmpl_parser_let_with_expr() {
             panic!("expected bindings list");
         }
         // Body should be Binary(*, ...)
-        if let Value::Tagged(body_tag, body_children) = &children[1] {
+        if let Some((body_tag, body_children)) = &children[1].as_node() {
             assert_eq!(body_tag.as_str(), "Binary");
             assert_eq!(body_children[0], Value::Symbol("*".into()));
-        } else {
-            panic!("expected body to be Tagged(:Binary, ...)");
         }
     }
 }
@@ -1317,7 +1285,7 @@ fn test_fmpl_parser_nested_let() {
         assert_eq!(tag.as_str(), "Let");
         assert_eq!(children.len(), 2);
         // Body (index 1) should be another Let
-        if let Value::Tagged(body_tag, _) = &children[1] {
+        if let Some((body_tag, _)) = &children[1].as_node() {
             assert_eq!(body_tag.as_str(), "Let");
         } else {
             panic!(
@@ -1886,7 +1854,7 @@ fn test_fmpl_parser_index_simple() {
     if let Some((tag, children)) = result.as_node() {
         assert_eq!(tag.as_str(), "Index");
         // First child should be :Var("x")
-        if let Value::Tagged(var_tag, _) = &children[0] {
+        if let Some((var_tag, _)) = &children[0].as_node() {
             assert_eq!(var_tag.as_str(), "Var");
         } else {
             panic!("expected :Var, got {:?}", children[0]);
@@ -1914,7 +1882,7 @@ fn test_fmpl_parser_index_chained() {
     if let Some((tag, children)) = result.as_node() {
         assert_eq!(tag.as_str(), "Index");
         // First child should be another :Index
-        if let Value::Tagged(inner_tag, _) = &children[0] {
+        if let Some((inner_tag, _)) = &children[0].as_node() {
             assert_eq!(inner_tag.as_str(), "Index");
         } else {
             panic!("expected nested :Index, got {:?}", children[0]);
@@ -1939,7 +1907,7 @@ fn test_fmpl_parser_index_expr() {
         ),
     )
     .unwrap();
-    if let Value::Tagged(tag, _) = result {
+    if let Some((tag, _)) = result.as_node() {
         assert_eq!(tag.as_str(), "Index");
     } else {
         panic!("expected Tagged(:Index, ...), got {:?}", result);
@@ -2004,7 +1972,7 @@ fn test_fmpl_parser_short_lambda_nested() {
             panic!("expected symbol param, got {:?}", fields[0]);
         }
         // Body should be another ShortLambda
-        if let Value::Tagged(inner_tag, _) = &fields[1] {
+        if let Some((inner_tag, _)) = &fields[1].as_node() {
             assert_eq!(inner_tag.as_str(), "ShortLambda");
         } else {
             panic!("expected nested ShortLambda, got {:?}", fields[1]);
@@ -2094,13 +2062,11 @@ fn test_fmpl_parser_call_no_args() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Call");
         // First field is function (Var "f")
-        if let Value::Tagged(fn_tag, fn_fields) = &fields[0] {
+        if let Some((fn_tag, fn_fields)) = &fields[0].as_node() {
             assert_eq!(fn_tag.as_str(), "Var");
             if let Value::String(name) = &fn_fields[0] {
                 assert_eq!(name.as_str(), "f");
             }
-        } else {
-            panic!("expected function to be Var, got {:?}", fields[0]);
         }
         // Second field is args (empty list)
         if let Value::List(call_args) = &fields[1] {
@@ -2186,7 +2152,7 @@ fn test_fmpl_parser_call_chained() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Call");
         // First field should also be a Call
-        if let Value::Tagged(inner_tag, _) = &fields[0] {
+        if let Some((inner_tag, _)) = &fields[0].as_node() {
             assert_eq!(inner_tag.as_str(), "Call");
         } else {
             panic!("expected inner Call, got {:?}", fields[0]);
@@ -2215,7 +2181,7 @@ fn test_fmpl_parser_call_with_index() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Call");
         // First field should be Index
-        if let Value::Tagged(inner_tag, _) = &fields[0] {
+        if let Some((inner_tag, _)) = &fields[0].as_node() {
             assert_eq!(inner_tag.as_str(), "Index");
         } else {
             panic!("expected inner Index, got {:?}", fields[0]);
@@ -2247,7 +2213,7 @@ fn test_fmpl_parser_prop_access() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Prop");
         // First field is receiver (Var "obj")
-        if let Value::Tagged(recv_tag, _) = &fields[0] {
+        if let Some((recv_tag, _)) = &fields[0].as_node() {
             assert_eq!(recv_tag.as_str(), "Var");
         } else {
             panic!("expected Var receiver, got {:?}", fields[0]);
@@ -2282,7 +2248,7 @@ fn test_fmpl_parser_prop_chained() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Prop");
         // First field should also be a Prop
-        if let Value::Tagged(inner_tag, _) = &fields[0] {
+        if let Some((inner_tag, _)) = &fields[0].as_node() {
             assert_eq!(inner_tag.as_str(), "Prop");
         } else {
             panic!("expected inner Prop, got {:?}", fields[0]);
@@ -2314,7 +2280,7 @@ fn test_fmpl_parser_method_call_no_args() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "MethodCall");
         // First field is receiver
-        if let Value::Tagged(recv_tag, _) = &fields[0] {
+        if let Some((recv_tag, _)) = &fields[0].as_node() {
             assert_eq!(recv_tag.as_str(), "Var");
         }
         // Second field is method name
@@ -2375,7 +2341,7 @@ fn test_fmpl_parser_method_chain() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "MethodCall");
         // First field should be inner MethodCall
-        if let Value::Tagged(inner_tag, _) = &fields[0] {
+        if let Some((inner_tag, _)) = &fields[0].as_node() {
             assert_eq!(inner_tag.as_str(), "MethodCall");
         } else {
             panic!("expected inner MethodCall, got {:?}", fields[0]);
@@ -2464,7 +2430,7 @@ fn test_fmpl_parser_simple_var_not_qualified() {
         ),
     )
     .unwrap();
-    if let Value::Tagged(tag, _) = &result {
+    if let Some((tag, _)) = &result.as_node() {
         assert_eq!(
             tag.as_str(),
             "Var",
@@ -2497,7 +2463,7 @@ fn test_fmpl_parser_complex_arithmetic() {
     )
     .unwrap();
     // Should parse correctly with proper precedence
-    if let Value::Tagged(tag, _) = &result {
+    if let Some((tag, _)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Binary");
     } else {
         panic!("expected Tagged(:Binary, ...), got {:?}", result);
@@ -2550,9 +2516,9 @@ fn test_fmpl_parser_method_chain_with_args() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "MethodCall");
         // Innermost should also be MethodCall
-        if let Value::Tagged(inner_tag, inner_fields) = &fields[0] {
+        if let Some((inner_tag, inner_fields)) = &fields[0].as_node() {
             assert_eq!(inner_tag.as_str(), "MethodCall");
-            if let Value::Tagged(innermost_tag, _) = &inner_fields[0] {
+            if let Some((innermost_tag, _)) = &inner_fields[0].as_node() {
                 assert_eq!(innermost_tag.as_str(), "MethodCall");
             }
         }
@@ -2579,10 +2545,10 @@ fn test_fmpl_parser_lambda_with_body_expression() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "ShortLambda");
         // Body should be another ShortLambda
-        if let Value::Tagged(inner_tag, inner_fields) = &fields[1] {
+        if let Some((inner_tag, inner_fields)) = &fields[1].as_node() {
             assert_eq!(inner_tag.as_str(), "ShortLambda");
             // Inner body should be Binary
-            if let Value::Tagged(body_tag, _) = &inner_fields[1] {
+            if let Some((body_tag, _)) = &inner_fields[1].as_node() {
                 assert_eq!(body_tag.as_str(), "Binary");
             }
         }
@@ -2609,7 +2575,7 @@ fn test_fmpl_parser_if_with_complex_condition() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "If");
         // Condition should be Binary with &&
-        if let Value::Tagged(cond_tag, cond_fields) = &fields[0] {
+        if let Some((cond_tag, cond_fields)) = &fields[0].as_node() {
             assert_eq!(cond_tag.as_str(), "Binary");
             if let Value::Symbol(op) = &cond_fields[0] {
                 assert_eq!(op.as_str(), "&&");
@@ -2641,13 +2607,13 @@ fn test_fmpl_parser_let_with_lambda() {
         assert_eq!(fields.len(), 2);
         // Value in binding should be ShortLambda (short form)
         if let Value::List(bindings) = &fields[0]
-            && let Value::Tagged(_, binding_children) = &bindings[0]
-            && let Value::Tagged(val_tag, _) = &binding_children[1]
+            && let Some((_, binding_children)) = bindings[0].as_node()
+            && let Some((val_tag, _)) = binding_children[1].as_node()
         {
             assert_eq!(val_tag.as_str(), "ShortLambda");
         }
         // Body (index 1) should be Call
-        if let Value::Tagged(body_tag, _) = &fields[1] {
+        if let Some((body_tag, _)) = &fields[1].as_node() {
             assert_eq!(body_tag.as_str(), "Call");
         }
     }
@@ -2676,7 +2642,7 @@ fn test_fmpl_parser_list_of_lambdas() {
             assert_eq!(items.len(), 2);
             // Both items should be ShortLambda (short form)
             for item in items.iter() {
-                if let Value::Tagged(item_tag, _) = item {
+                if let Some((item_tag, _)) = item.as_node() {
                     assert_eq!(item_tag.as_str(), "ShortLambda");
                 } else {
                     panic!("expected ShortLambda in list, got {:?}", item);
@@ -2734,7 +2700,7 @@ fn test_fmpl_parser_qualified_name_method_call() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "MethodCall");
         // Receiver should be QualifiedName
-        if let Value::Tagged(recv_tag, _) = &fields[0] {
+        if let Some((recv_tag, _)) = &fields[0].as_node() {
             assert_eq!(recv_tag.as_str(), "QualifiedName");
         }
     }
@@ -2757,7 +2723,7 @@ fn test_fmpl_parser_index_and_call_chain() {
         ),
     )
     .unwrap();
-    if let Value::Tagged(tag, _) = &result {
+    if let Some((tag, _)) = &result.as_node() {
         // Final result should be Prop (property access)
         assert_eq!(tag.as_str(), "Prop");
     } else {
@@ -2783,7 +2749,7 @@ fn test_fmpl_parser_comments_in_code() {
         ),
     )
     .unwrap();
-    if let Value::Tagged(tag, _) = &result {
+    if let Some((tag, _)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Binary");
     } else {
         panic!("expected Tagged(:Binary, ...), got {:?}", result);
@@ -2816,24 +2782,14 @@ fn test_tree_grammar_explicit_recursion_simple() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Add");
         // l should be :LoadInt(1)
-        if let Value::Tagged(l_tag, l_fields) = &fields[0] {
+        if let Some((l_tag, l_fields)) = &fields[0].as_node() {
             assert_eq!(l_tag.as_str(), "LoadInt");
             assert_eq!(l_fields[0], Value::Int(1));
-        } else {
-            panic!(
-                "expected l to be Tagged(:LoadInt, ...), got {:?}",
-                fields[0]
-            );
         }
         // r should be :LoadInt(2)
-        if let Value::Tagged(r_tag, r_fields) = &fields[1] {
+        if let Some((r_tag, r_fields)) = &fields[1].as_node() {
             assert_eq!(r_tag.as_str(), "LoadInt");
             assert_eq!(r_fields[0], Value::Int(2));
-        } else {
-            panic!(
-                "expected r to be Tagged(:LoadInt, ...), got {:?}",
-                fields[1]
-            );
         }
     }
 }
@@ -2860,9 +2816,9 @@ fn test_tree_grammar_explicit_recursion_nested() {
     if let Some((tag, fields)) = &result.as_node() {
         assert_eq!(tag.as_str(), "Add");
         // l should be :Mul(:LoadInt(1), :LoadInt(2))
-        if let Value::Tagged(l_tag, l_fields) = &fields[0] {
+        if let Some((l_tag, l_fields)) = &fields[0].as_node() {
             assert_eq!(l_tag.as_str(), "Mul");
-            if let Value::Tagged(ll_tag, ll_fields) = &l_fields[0] {
+            if let Some((ll_tag, ll_fields)) = &l_fields[0].as_node() {
                 assert_eq!(ll_tag.as_str(), "LoadInt");
                 assert_eq!(ll_fields[0], Value::Int(1));
             } else {
@@ -2871,18 +2827,11 @@ fn test_tree_grammar_explicit_recursion_nested() {
                     l_fields[0]
                 );
             }
-        } else {
-            panic!("expected l to be Tagged(:Mul, ...), got {:?}", fields[0]);
         }
         // r should be :LoadInt(3)
-        if let Value::Tagged(r_tag, r_fields) = &fields[1] {
+        if let Some((r_tag, r_fields)) = &fields[1].as_node() {
             assert_eq!(r_tag.as_str(), "LoadInt");
             assert_eq!(r_fields[0], Value::Int(3));
-        } else {
-            panic!(
-                "expected r to be Tagged(:LoadInt, ...), got {:?}",
-                fields[1]
-            );
         }
     }
 }

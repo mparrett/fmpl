@@ -789,11 +789,9 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                     ));
                 }
 
-                // Get the tagged value from input. Accept both
-                // `Value::Tagged(tag, children)` and the equivalent list shape
-                // `[Symbol(tag), child1, ...]` (ITER-0004b).
+                // Get the tagged value from input. Tagged data is now
+                // represented as a list `[Symbol(tag), child1, ...]`.
                 let (value_tag, children) = match self.input.head(&pos) {
-                    Some(InputItem::Value(Value::Tagged(t, c))) => (t, (*c).clone()),
                     Some(InputItem::Value(Value::List(items))) if !items.is_empty() => {
                         if let Value::Symbol(tag_sym) = &items[0] {
                             (tag_sym.clone(), items[1..].to_vec())
@@ -853,7 +851,7 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
 
                 let new_pos = self.input.tail(&pos);
                 Ok(ParseResult::Success(
-                    Value::Tagged(value_tag, Arc::new(matched_values)),
+                    Value::list_node(value_tag, matched_values),
                     self.input.index(&new_pos),
                 ))
             }
@@ -864,17 +862,10 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
                         "value patterns not supported for this input type".to_string(),
                     ));
                 }
-                // Get the list from input
-                // Normalize Value::Tagged to Value::List for pattern matching
-                // Value::Tagged(tag, [arg1, arg2, ...]) becomes [Symbol(tag), arg1, arg2, ...]
+                // Get the list from input. Tagged data is represented as
+                // `[Symbol(tag), arg1, arg2, ...]`.
                 let items = match self.input.head(&pos) {
                     Some(InputItem::Value(Value::List(items))) => (*items).clone(),
-                    Some(InputItem::Value(Value::Tagged(tag, children))) => {
-                        // Normalize Tagged to List: prepend tag symbol to children
-                        let mut normalized = vec![Value::Symbol(tag.clone())];
-                        normalized.extend(children.as_ref().clone());
-                        normalized
-                    }
                     _ => return Ok(ParseResult::Failure),
                 };
 

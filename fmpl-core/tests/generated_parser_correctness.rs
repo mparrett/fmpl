@@ -423,36 +423,30 @@ fn test_indexing_syntax() {
 #[test]
 fn test_empty_tagged() {
     let result = eval_generated(":Foo()").unwrap();
-    match result {
-        Value::Tagged(tag, args) => {
-            assert_eq!(tag.as_str(), "Foo");
-            assert_eq!(args.len(), 0);
-        }
-        _ => panic!("Expected tagged value, got {:?}", result),
-    }
+    let (tag, args) = result
+        .as_node()
+        .unwrap_or_else(|| panic!("Expected list-shaped node, got {:?}", result));
+    assert_eq!(tag.as_str(), "Foo");
+    assert_eq!(args.len(), 0);
 }
 
 #[test]
 fn test_tagged_with_args() {
     let result = eval_generated(":Foo(1, 2)").unwrap();
-    match result {
-        Value::Tagged(tag, args) => {
-            assert_eq!(tag.as_str(), "Foo");
-            assert_eq!(args.len(), 2);
-        }
-        _ => panic!("Expected tagged value, got {:?}", result),
-    }
+    let (tag, args) = result
+        .as_node()
+        .unwrap_or_else(|| panic!("Expected list-shaped node, got {:?}", result));
+    assert_eq!(tag.as_str(), "Foo");
+    assert_eq!(args.len(), 2);
 }
 
 #[test]
 fn test_nested_tagged() {
     let result = eval_generated(":Binary(:+, :Int(1), :Int(2))").unwrap();
-    match result {
-        Value::Tagged(tag, _) => {
-            assert_eq!(tag.as_str(), "Binary");
-        }
-        _ => panic!("Expected tagged value, got {:?}", result),
-    }
+    let (tag, _) = result
+        .as_node()
+        .unwrap_or_else(|| panic!("Expected list-shaped node, got {:?}", result));
+    assert_eq!(tag.as_str(), "Binary");
 }
 
 // =============================================================================

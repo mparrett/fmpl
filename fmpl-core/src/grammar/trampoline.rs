@@ -1004,7 +1004,6 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 }
                 let pos_obj = self.input.position_at(pos);
                 let (value_tag, children) = match self.input.head(&pos_obj) {
-                    Some(InputItem::Value(Value::Tagged(t, c))) => (t, (*c).clone()),
                     Some(InputItem::Value(Value::List(items))) if !items.is_empty() => {
                         if let Value::Symbol(tag_sym) = &items[0] {
                             (tag_sym.clone(), items[1..].to_vec())
@@ -1027,7 +1026,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                 if child_patterns.is_empty() {
                     let new_pos = self.input.tail(&pos_obj);
                     self.result_stack.push(WorkResult::Success(
-                        Value::Tagged(value_tag, Arc::new(Vec::new())),
+                        Value::list_node(value_tag, Vec::new()),
                         self.input.index(&new_pos),
                     ));
                 } else {
@@ -1611,7 +1610,7 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
                     let pos_obj = self.input.position_at(original_pos);
                     let new_pos = self.input.tail(&pos_obj);
                     self.result_stack.push(WorkResult::Success(
-                        Value::Tagged(tag, Arc::new(collected)),
+                        Value::list_node(tag, collected),
                         self.input.index(&new_pos),
                     ));
                 } else {

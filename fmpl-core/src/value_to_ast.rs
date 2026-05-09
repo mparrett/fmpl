@@ -26,7 +26,6 @@ type Result<T> = std::result::Result<T, Error>;
 pub fn value_to_expr(value: &Value) -> Result<Expr> {
     // Helper to extract tag and children from either format
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
         Value::List(items) if !items.is_empty() => {
             if let Value::Symbol(tag) = &items[0] {
                 let children: Vec<Value> = items.iter().skip(1).cloned().collect();
@@ -289,7 +288,6 @@ pub fn value_to_expr(value: &Value) -> Result<Expr> {
                     for binding in bindings.iter() {
                         // Support both Value::Tagged("Binding", ...) and [:Binding, ...]
                         let (tag, parts) = match binding {
-                            Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
                             Value::List(items) if !items.is_empty() => {
                                 if let Value::Symbol(tag) = &items[0] {
                                     let parts: Vec<Value> = items.iter().skip(1).cloned().collect();
@@ -324,7 +322,6 @@ pub fn value_to_expr(value: &Value) -> Result<Expr> {
             if !children.is_empty() {
                 // The binding is :Binding(name, value)
                 let (tag, parts) = match &children[0] {
-                    Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
                     _ => return Err(Error::Runtime("Invalid LetSimple binding".to_string())),
                 };
                 if tag.as_str() == "Binding" && parts.len() >= 2 {
@@ -535,7 +532,6 @@ pub fn value_to_expr(value: &Value) -> Result<Expr> {
                         .iter()
                         .map(|c| {
                             let (tag, cs) = match c {
-                                Value::Tagged(tag, children) => (tag.as_str(), &**children),
                                 _ => return Err(Error::Runtime("Invalid MatchCase".to_string())),
                             };
                             if tag != "MatchCase" || cs.len() < 3 {
@@ -609,7 +605,8 @@ pub fn value_to_expr(value: &Value) -> Result<Expr> {
                 // The facet is a :Symbol(name) tagged value
                 let facet = match &children[1] {
                     Value::Symbol(s) => s.clone(),
-                    Value::Tagged(tag, inner) if tag.as_str() == "Symbol" => {
+                    v if matches!(v.as_node(), Some((t, _)) if t.as_str() == "Symbol") => {
+                        let (_, inner) = v.as_node().unwrap();
                         if let Some(Value::String(s)) = inner.first() {
                             SmolStr::new(s.as_str())
                         } else if let Some(Value::Symbol(s)) = inner.first() {
@@ -643,8 +640,8 @@ pub fn value_to_expr(value: &Value) -> Result<Expr> {
             let mut facets = Vec::new();
 
             for item in content.iter() {
-                match item {
-                    Value::Tagged(tag, cs) => match tag.as_str() {
+                if let Some((tag, cs)) = item.as_node() {
+                    match tag.as_str() {
                         "Section" if cs.len() >= 2 => {
                             let vis = match &cs[0] {
                                 Value::Symbol(s) => match s.as_str() {
@@ -679,8 +676,7 @@ pub fn value_to_expr(value: &Value) -> Result<Expr> {
                             }
                         }
                         _ => {}
-                    },
-                    _ => {}
+                    }
                 }
             }
 
@@ -847,7 +843,6 @@ pub fn value_to_expr(value: &Value) -> Result<Expr> {
 /// Handles the AST nodes produced by peg_* rules in fmpl_parser.fmpl
 fn value_to_grammar_pattern(value: &Value) -> Result<GrammarPattern> {
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.as_str(), &**children),
         // Simple pattern types
         Value::String(s) => {
             // String literal in pattern
@@ -872,8 +867,9 @@ fn value_to_grammar_pattern(value: &Value) -> Result<GrammarPattern> {
             // Extract the string value - could be a plain String or a :String(value) tagged value
             let s = match children.first() {
                 Some(Value::String(s)) => s.clone(),
-                Some(Value::Tagged(tag, inner)) if tag.as_str() == "String" => {
+                Some(v) if matches!(v.as_node(), Some((t, _)) if t.as_str() == "String") => {
                     // :String(value) - extract the inner string
+                    let (_, inner) = v.as_node().unwrap();
                     if let Some(Value::String(s)) = inner.first() {
                         s.clone()
                     } else {
@@ -1078,7 +1074,6 @@ fn value_to_char_ranges(ranges: &[Value]) -> Result<Vec<CharRange>> {
         .iter()
         .map(|r| {
             let (tag, children) = match r {
-                Value::Tagged(tag, children) => (tag.as_str(), &**children),
                 _ => {
                     return Err(Error::Runtime(format!(
                         "Expected Char or Range, got {:?}",
@@ -1131,7 +1126,6 @@ fn value_to_char_ranges(ranges: &[Value]) -> Result<Vec<CharRange>> {
 /// Convert :InlinePatternBlock(cases) to Vec<PatternCase>
 fn value_to_pattern_cases(value: &Value) -> Result<Vec<PatternCase>> {
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.as_str(), &**children),
         _ => {
             return Err(Error::Runtime(format!(
                 "Expected InlinePatternBlock, got {:?}",
@@ -1159,7 +1153,6 @@ fn value_to_pattern_cases(value: &Value) -> Result<Vec<PatternCase>> {
 /// Convert :PatternCase(pattern, action) to PatternCase
 fn value_to_pattern_case(value: &Value) -> Result<PatternCase> {
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.as_str(), &**children),
         _ => {
             return Err(Error::Runtime(format!(
                 "Expected PatternCase, got {:?}",
@@ -1191,7 +1184,6 @@ fn value_to_pattern_case(value: &Value) -> Result<PatternCase> {
 /// Convert :PatternCaseSimple(body) or :PatternCaseGuard(guard, body) to (Option<Expr>, Expr)
 fn value_to_pattern_action(value: &Value) -> Result<(Option<Box<Expr>>, Expr)> {
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.as_str(), &**children),
         _ => {
             return Err(Error::Runtime(format!(
                 "Expected pattern action, got {:?}",
@@ -1217,7 +1209,6 @@ fn value_to_pattern_action(value: &Value) -> Result<(Option<Box<Expr>>, Expr)> {
 /// Convert pattern values to ast::Pattern
 fn value_to_pattern(value: &Value) -> Result<Pattern> {
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.as_str(), &**children),
         _ => return Err(Error::Runtime(format!("Expected pattern, got {:?}", value))),
     };
 
@@ -1288,7 +1279,6 @@ fn value_to_pattern(value: &Value) -> Result<Pattern> {
 /// Convert a literal AST node to a Pattern
 fn value_to_literal_pattern(value: &Value) -> Result<Pattern> {
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.as_str(), &**children),
         _ => return Err(Error::Runtime(format!("Expected literal, got {:?}", value))),
     };
 
@@ -1361,7 +1351,6 @@ fn transform_do_to_nested_lets(stmts: &[Value]) -> Result<Expr> {
 
     for stmt in stmts {
         let (tag, children) = match stmt {
-            Value::Tagged(tag, children) => (tag.as_str(), &**children),
             _ => {
                 // Not a tagged value, try to convert it directly
                 exprs.push(value_to_expr(stmt)?);
@@ -1373,7 +1362,6 @@ fn transform_do_to_nested_lets(stmts: &[Value]) -> Result<Expr> {
             // Extract binding from LetSimple
             if !children.is_empty() {
                 let (btag, parts) = match &children[0] {
-                    Value::Tagged(tag, children) => (tag.as_str(), &**children),
                     _ => {
                         // Not a proper binding, treat as expression
                         exprs.push(value_to_expr(stmt)?);
@@ -1409,7 +1397,6 @@ fn transform_do_to_nested_lets(stmts: &[Value]) -> Result<Expr> {
 /// Convert an :ObjBinding tagged value to a Binding
 fn value_to_obj_binding(value: &Value, visibility: Visibility) -> Result<Option<Binding>> {
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.as_str(), &**children),
         _ => return Ok(None),
     };
 
@@ -1455,7 +1442,6 @@ fn value_to_obj_binding(value: &Value, visibility: Visibility) -> Result<Option<
 /// Convert a :FacetDef tagged value to a FacetDef
 fn value_to_facet_def(value: &Value) -> Result<Option<FacetDef>> {
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.as_str(), &**children),
         _ => return Ok(None),
     };
 

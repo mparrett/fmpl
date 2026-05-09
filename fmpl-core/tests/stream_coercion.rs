@@ -263,7 +263,7 @@ mod once_mode {
         let result = execute(&mut vm, code).unwrap();
         if let Value::List(items) = result {
             assert_eq!(items.len(), 1);
-            assert!(matches!(&items[0], Value::Tagged(..)));
+            assert!(items[0].as_node().is_some());
         } else {
             panic!("expected list, got {:?}", result);
         }
@@ -380,7 +380,7 @@ mod auto_mode {
         let result = execute(&mut vm, code).unwrap();
         if let Value::List(items) = result {
             assert_eq!(items.len(), 1);
-            assert!(matches!(&items[0], Value::Tagged(..)));
+            assert!(items[0].as_node().is_some());
         } else {
             panic!("expected list, got {:?}", result);
         }

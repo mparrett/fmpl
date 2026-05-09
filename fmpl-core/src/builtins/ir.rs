@@ -36,18 +36,13 @@ impl IrCompiler {
     }
 
     fn compile_ir(&mut self, ir: &Value) -> Result<InstrIndex> {
-        // Accept both shapes: list-shape `[Symbol(tag), child1, ...]` (the
-        // canonical post-ITER-0004b form) and `Value::Tagged(tag, [...])` (the
-        // legacy shape, retained until Phase C deletes it).
         if let Some((tag, children)) = ir.as_node() {
-            return self.compile_tagged(tag.as_str(), children);
-        }
-        match ir {
-            Value::Tagged(tag, children) => self.compile_tagged(tag.as_str(), children),
-            _ => Err(Error::Runtime(format!(
-                "IR compile expected tagged or list-shaped value, got {}",
+            self.compile_tagged(tag.as_str(), children)
+        } else {
+            Err(Error::Runtime(format!(
+                "IR compile expected list-shaped node, got {}",
                 ir.type_name()
-            ))),
+            )))
         }
     }
 
@@ -767,7 +762,9 @@ impl IrCompiler {
                                         target: InstrIndex(0), // placeholder
                                     });
 
-                                    // Tag matches — bind children by index
+                                    // Tag matches — bind children by index.
+                                    // Use ExtractTaggedChild which knows to skip
+                                    // the head symbol of a list-shaped node.
                                     let val_ref2 =
                                         self.emit(Instruction::LoadVar(match_val_var.clone()));
                                     for (idx, sub_pat) in sub_patterns.iter().enumerate() {
@@ -776,11 +773,9 @@ impl IrCompiler {
                                             && !sp_children.is_empty()
                                         {
                                             let var_name = self.expect_symbol(&sp_children[0])?;
-                                            let idx_val =
-                                                self.emit(Instruction::LoadInt(idx as i64));
-                                            let elem = self.emit(Instruction::Index {
-                                                collection: val_ref2,
-                                                key: idx_val,
+                                            let elem = self.emit(Instruction::ExtractTaggedChild {
+                                                source: val_ref2,
+                                                index: idx,
                                             });
                                             self.emit(Instruction::StoreVar {
                                                 name: var_name,
@@ -1066,20 +1061,12 @@ impl IrCompiler {
             }
             return;
         }
-        // Fallback: walk children of any non-node compound value.
-        match ir {
-            Value::Tagged(_, children) => {
-                for child in children.iter() {
-                    Self::collect_free_vars(child, bound, free);
-                }
+        // Fallback: walk children of any non-node list value (raw list, not
+        // a tagged node). Atomic values have no free variables.
+        if let Value::List(items) = ir {
+            for item in items.iter() {
+                Self::collect_free_vars(item, bound, free);
             }
-            Value::List(items) => {
-                for item in items.iter() {
-                    Self::collect_free_vars(item, bound, free);
-                }
-            }
-            // Atomic values (Int, Bool, String, etc.) have no free variables.
-            _ => {}
         }
     }
 }
@@ -1100,8 +1087,8 @@ mod tests {
         let ir = Value::list_node(
             "Add",
             vec![
-                Value::Tagged(SmolStr::new("LoadInt"), Arc::new(vec![Value::Int(1)])),
-                Value::Tagged(SmolStr::new("LoadInt"), Arc::new(vec![Value::Int(2)])),
+                Value::list_node("LoadInt", vec![Value::Int(1)]),
+                Value::list_node("LoadInt", vec![Value::Int(2)]),
             ],
         );
         let result = compile(&ir).unwrap();
@@ -1114,11 +1101,8 @@ mod tests {
             "Let",
             vec![
                 Value::Symbol(SmolStr::new("x")),
-                Value::Tagged(SmolStr::new("LoadInt"), Arc::new(vec![Value::Int(42)])),
-                Value::Tagged(
-                    SmolStr::new("Var"),
-                    Arc::new(vec![Value::Symbol(SmolStr::new("x"))]),
-                ),
+                Value::list_node("LoadInt", vec![Value::Int(42)]),
+                Value::list_node("Var", vec![Value::Symbol(SmolStr::new("x"))]),
             ],
         );
         let result = compile(&ir).unwrap();

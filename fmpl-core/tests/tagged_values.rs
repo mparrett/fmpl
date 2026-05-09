@@ -8,7 +8,7 @@ fn test_parse_tagged_no_args() {
     // :Null() is a tagged value with no children
     let result = eval(&mut vm, ":Null()").unwrap();
     assert!(
-        matches!(result, Value::Tagged(ref tag, ref children) if tag == "Null" && children.is_empty()),
+        matches!(result.as_node(), Some((tag, children)) if tag == "Null" && children.is_empty()),
         "expected :Null(), got {:?}",
         result
     );
@@ -59,8 +59,8 @@ fn test_parse_tagged_nested() {
     if let Some((tag, children)) = result.as_node() {
         assert_eq!(tag.as_str(), "Add");
         assert_eq!(children.len(), 2);
-        assert!(matches!(&children[0], Value::Tagged(t, _) if t == "Int"));
-        assert!(matches!(&children[1], Value::Tagged(t, _) if t == "Int"));
+        assert!(matches!(children[0].as_node(), Some((t, _)) if t == "Int"));
+        assert!(matches!(children[1].as_node(), Some((t, _)) if t == "Int"));
     }
 }
 

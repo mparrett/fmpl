@@ -22,14 +22,7 @@ use std::collections::HashSet;
 /// Transpile IR to Rust source code.
 pub fn transpile(ir: &Value) -> Result<String> {
     // Special case: ParseGrammar generates a complete self-contained file
-    // Support both Value::Tagged("ParseGrammar", ...) and [:ParseGrammar, ...]
-    let is_grammar = match ir {
-        Value::Tagged(tag, _) => tag.as_str() == "ParseGrammar",
-        Value::List(items) if !items.is_empty() => {
-            matches!(&items[0], Value::Symbol(tag) if tag.as_str() == "ParseGrammar")
-        }
-        _ => false,
-    };
+    let is_grammar = matches!(ir.as_node(), Some((tag, _)) if tag.as_str() == "ParseGrammar");
 
     if is_grammar {
         let mut transpiler = IrToRust::new_grammar_mode();
@@ -151,10 +144,7 @@ fn fold_binary(first: Value, rest: Value) -> Value {
                         let op = pair_items[0].clone();
                         let rhs = pair_items[1].clone();
                         // FMPL order: :Binary(op, left, right)
-                        result = Value::Tagged(
-                            SmolStr::new("Binary"),
-                            Arc::new(vec![op, result, rhs]),
-                        );
+                        result = Value::list_node("Binary", vec![op, result, rhs]);
                     }
                 }
             }
@@ -186,37 +176,31 @@ fn fold_pipe_at(first: Value, ops: Value) -> Value {
                         match &op_items[0] {
                             Value::Symbol(s) if s.as_str() == "pipe" => {
                                 if op_items.len() >= 2 {
-                                    result = Value::Tagged(
-                                        SmolStr::new("Binary"),
-                                        Arc::new(vec![Value::Symbol(SmolStr::new("|>")), result, op_items[1].clone()]),
-                                    );
+                                    result = Value::list_node("Binary", vec![Value::Symbol(SmolStr::new("|>")), result, op_items[1].clone()]);
                                 }
                             }
                             Value::Symbol(s) if s.as_str() == "at_inline" => {
                                 if op_items.len() >= 2 {
-                                    result = Value::Tagged(
-                                        SmolStr::new("AtInlineBlock"),
-                                        Arc::new(vec![result, Value::Tagged(
-                                            SmolStr::new("InlinePatternBlock"),
-                                            Arc::new(vec![op_items[1].clone()]),
-                                        )]),
+                                    result = Value::list_node(
+                                        "AtInlineBlock",
+                                        vec![
+                                            result,
+                                            Value::list_node(
+                                                "InlinePatternBlock",
+                                                vec![op_items[1].clone()],
+                                            ),
+                                        ],
                                     );
                                 }
                             }
                             Value::Symbol(s) if s.as_str() == "at_grammar" => {
                                 if op_items.len() >= 3 {
-                                    result = Value::Tagged(
-                                        SmolStr::new("AtGrammarApply"),
-                                        Arc::new(vec![result, op_items[1].clone(), op_items[2].clone()]),
-                                    );
+                                    result = Value::list_node("AtGrammarApply", vec![result, op_items[1].clone(), op_items[2].clone()]);
                                 }
                             }
                             Value::Symbol(s) if s.as_str() == "extend" => {
                                 if op_items.len() >= 2 {
-                                    result = Value::Tagged(
-                                        SmolStr::new("GrammarExtend"),
-                                        Arc::new(vec![result, op_items[1].clone()]),
-                                    );
+                                    result = Value::list_node("GrammarExtend", vec![result, op_items[1].clone()]);
                                 }
                             }
                             _ => {}
@@ -242,34 +226,22 @@ fn fold_postfix(base: Value, ops: Value) -> Value {
                         match &op_items[0] {
                             Value::Symbol(s) if s.as_str() == "index" => {
                                 if op_items.len() >= 2 {
-                                    result = Value::Tagged(
-                                        SmolStr::new("Index"),
-                                        Arc::new(vec![result, op_items[1].clone()]),
-                                    );
+                                    result = Value::list_node("Index", vec![result, op_items[1].clone()]);
                                 }
                             }
                             Value::Symbol(s) if s.as_str() == "call" => {
                                 if op_items.len() >= 2 {
-                                    result = Value::Tagged(
-                                        SmolStr::new("Call"),
-                                        Arc::new(vec![result, op_items[1].clone()]),
-                                    );
+                                    result = Value::list_node("Call", vec![result, op_items[1].clone()]);
                                 }
                             }
                             Value::Symbol(s) if s.as_str() == "method" => {
                                 if op_items.len() >= 3 {
-                                    result = Value::Tagged(
-                                        SmolStr::new("MethodCall"),
-                                        Arc::new(vec![result, op_items[1].clone(), op_items[2].clone()]),
-                                    );
+                                    result = Value::list_node("MethodCall", vec![result, op_items[1].clone(), op_items[2].clone()]);
                                 }
                             }
                             Value::Symbol(s) if s.as_str() == "prop" => {
                                 if op_items.len() >= 2 {
-                                    result = Value::Tagged(
-                                        SmolStr::new("PropAccess"),
-                                        Arc::new(vec![result, op_items[1].clone()]),
-                                    );
+                                    result = Value::list_node("PropAccess", vec![result, op_items[1].clone()]);
                                 }
                             }
                             _ => {}
@@ -468,23 +440,10 @@ impl IrToRust {
         format!("__v{}", self.var_counter)
     }
 
-    /// Extract tag and children from IR, supporting both formats:
-    /// - Old: Value::Tagged(tag, children)
-    /// - New: Value::List([Symbol(tag), ...children])
+    /// Extract tag and children from a list-shaped IR node `[Symbol(tag), ...]`.
     fn extract_tag_children(&self, ir: &Value) -> Option<(SmolStr, Vec<Value>)> {
-        match ir {
-            Value::Tagged(tag, children) => Some((tag.clone(), (**children).clone())),
-            Value::List(items) if !items.is_empty() => {
-                // New format: [:Tag, arg1, arg2, ...]
-                if let Value::Symbol(tag) = &items[0] {
-                    let children: Vec<Value> = items.iter().skip(1).cloned().collect();
-                    Some((tag.clone(), children))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
+        ir.as_node()
+            .map(|(tag, children)| (tag.clone(), children.to_vec()))
     }
 
     fn transpile_ir(&mut self, ir: &Value) -> Result<String> {
@@ -525,9 +484,8 @@ impl IrToRust {
         // Keep unwrapping nested Lambdas to flatten them
         // Use pattern matching to get references that live long enough
         loop {
-            match current_body {
-                Value::Tagged(tag, children) if tag.as_str() == "Lambda" && children.len() >= 2 => {
-                    // Collect inner params
+            match current_body.as_node() {
+                Some((tag, children)) if tag.as_str() == "Lambda" && children.len() >= 2 => {
                     let inner_params = self.expect_list(&children[0])?;
                     for p in &inner_params {
                         if let Value::Symbol(name) = p {
@@ -535,23 +493,6 @@ impl IrToRust {
                         }
                     }
                     current_body = &children[1];
-                }
-                Value::List(items) if !items.is_empty() => {
-                    if let Value::Symbol(tag) = &items[0]
-                        && tag.as_str() == "Lambda"
-                        && items.len() >= 3
-                    {
-                        // List format: [:Lambda, params, body]
-                        let inner_params = self.expect_list(&items[1])?;
-                        for p in &inner_params {
-                            if let Value::Symbol(name) = p {
-                                all_params.push(sanitize_ident(name));
-                            }
-                        }
-                        current_body = &items[2];
-                        continue;
-                    }
-                    break;
                 }
                 _ => break,
             }
@@ -608,7 +549,7 @@ impl IrToRust {
                     arg_strs.push(self.transpile_ir(&arg)?);
                 }
                 Ok(format!(
-                    "Value::Tagged(SmolStr::new({:?}), Arc::new(vec![{}]))",
+                    "Value::list_node({:?}, vec![{}])",
                     tag.as_str(),
                     arg_strs.join(", ")
                 ))
@@ -1214,7 +1155,6 @@ pub fn generated_parse(source: &str) -> Result<Expr> {
 fn value_to_expr(value: &Value) -> Result<Expr> {
     // Helper to extract tag and children from either format
     let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
         Value::List(items) if !items.is_empty() => {
             if let Value::Symbol(tag) = &items[0] {
                 let children: Vec<Value> = items.iter().skip(1).cloned().collect();
@@ -1405,7 +1345,6 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
                     for binding in bindings.iter() {
                         // Support both Value::Tagged("Binding", ...) and [:Binding, ...]
                         let (tag, parts) = match binding {
-                            Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
                             Value::List(items) if !items.is_empty() => {
                                 if let Value::Symbol(tag) = &items[0] {
                                     let parts: Vec<Value> = items.iter().skip(1).cloned().collect();
@@ -1434,9 +1373,8 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
         }
         "LetSimple" => {
             if !children.is_empty() {
-                let (tag, parts) = match &children[0] {
-                    Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
-                    _ => return Err(Error::Runtime("Invalid LetSimple binding".to_string())),
+                let Some((tag, parts)) = children[0].as_node() else {
+                    return Err(Error::Runtime("Invalid LetSimple binding".to_string()));
                 };
                 if tag.as_str() == "Binding" && parts.len() >= 2 {
                     if let Value::Symbol(name) = &parts[0] {
@@ -1456,33 +1394,25 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
             if let Some(Value::List(stmts)) = children.first() {
                 let mut exprs = Vec::new();
                 for stmt in stmts.iter() {
-                    let (tag, children) = match stmt {
-                        Value::Tagged(tag, children) => (tag.as_str(), &**children),
-                        _ => {
-                            exprs.push(value_to_expr(&stmt)?);
-                            continue;
-                        }
+                    let Some((tag, children)) = stmt.as_node() else {
+                        exprs.push(value_to_expr(stmt)?);
+                        continue;
                     };
-                    if tag == "LetSimple" {
+                    if tag.as_str() == "LetSimple" {
                         if !children.is_empty() {
-                            let (btag, parts) = match &children[0] {
-                                Value::Tagged(tag, children) => (tag.as_str(), &**children),
-                                _ => {
-                                    exprs.push(value_to_expr(&stmt)?);
-                                    continue;
-                                }
-                            };
-                            if btag == "Binding" && parts.len() >= 2 {
-                                if let Value::Symbol(name) = &parts[0] {
-                                    let value = value_to_expr(&parts[1])?;
-                                    exprs.push(Expr::LetStmt(name.clone(), Box::new(value)));
-                                    continue;
-                                }
+                            if let Some((btag, parts)) = children[0].as_node()
+                                && btag.as_str() == "Binding"
+                                && parts.len() >= 2
+                                && let Value::Symbol(name) = &parts[0]
+                            {
+                                let value = value_to_expr(&parts[1])?;
+                                exprs.push(Expr::LetStmt(name.clone(), Box::new(value)));
+                                continue;
                             }
                         }
-                        exprs.push(value_to_expr(&stmt)?);
+                        exprs.push(value_to_expr(stmt)?);
                     } else {
-                        exprs.push(value_to_expr(&stmt)?);
+                        exprs.push(value_to_expr(stmt)?);
                     }
                 }
                 if exprs.len() == 1 {
@@ -1640,11 +1570,10 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
                 let scrutinee = value_to_expr(&children[0])?;
                 if let Value::List(cases) = &children[1] {
                     let match_cases = cases.iter().map(|c| {
-                        let (tag, cs) = match c {
-                            Value::Tagged(tag, children) => (tag.as_str(), &**children),
-                            _ => return Err(Error::Runtime("Invalid MatchCase".to_string())),
+                        let Some((tag, cs)) = c.as_node() else {
+                            return Err(Error::Runtime("Invalid MatchCase".to_string()));
                         };
-                        if tag != "MatchCase" || cs.len() < 3 {
+                        if tag.as_str() != "MatchCase" || cs.len() < 3 {
                             return Err(Error::Runtime("Invalid MatchCase".to_string()));
                         }
                         let pattern = value_to_pattern(&cs[0])?;
@@ -1739,7 +1668,8 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
                 let obj = value_to_expr(&children[0])?;
                 let facet = match &children[1] {
                     Value::Symbol(s) => s.clone(),
-                    Value::Tagged(tag, inner) if tag.as_str() == "Symbol" => {
+                    v if matches!(v.as_node(), Some((t, _)) if t.as_str() == "Symbol") => {
+                        let (_, inner) = v.as_node().unwrap();
                         if let Some(Value::String(s)) = inner.first() {
                             SmolStr::new(s.as_str())
                         } else if let Some(Value::Symbol(s)) = inner.first() {
@@ -1826,8 +1756,8 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
             let mut bindings = Vec::new();
             let mut facets = Vec::new();
             for item in content.iter() {
-                match item {
-                    Value::Tagged(tag, cs) => match tag.as_str() {
+                if let Some((tag, cs)) = item.as_node() {
+                    match tag.as_str() {
                         "Section" if cs.len() >= 2 => {
                             let vis = match &cs[0] {
                                 Value::Symbol(s) => match s.as_str() {
@@ -1839,7 +1769,7 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
                             };
                             if let Value::List(items) = &cs[1] {
                                 for b in items.iter() {
-                                    if let Value::Tagged(btag, bc) = b {
+                                    if let Some((btag, bc)) = b.as_node() {
                                         if btag.as_str() == "ObjBinding" && bc.len() >= 4 {
                                             let bname = match &bc[0] {
                                                 Value::String(s) => SmolStr::new(s.as_str()),
@@ -1862,7 +1792,7 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
                         "FacetSection" if !cs.is_empty() => {
                             if let Value::List(items) = &cs[0] {
                                 for f in items.iter() {
-                                    if let Value::Tagged(ftag, fc) = f {
+                                    if let Some((ftag, fc)) = f.as_node() {
                                         if ftag.as_str() == "FacetDef" && fc.len() >= 3 {
                                             let fname = match &fc[0] {
                                                 Value::String(s) => SmolStr::new(s.as_str()),
@@ -1897,8 +1827,7 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
                             bindings.push(Binding { name: bname, params, has_params, value, visibility: Visibility::Private });
                         }
                         _ => {}
-                    },
-                    _ => {}
+                    }
                 }
             }
             Ok(Expr::ObjectDef(ObjectDef {
@@ -1915,9 +1844,8 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
 }
 
 fn value_to_pattern(value: &Value) -> Result<Pattern> {
-    let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
-        _ => return Err(Error::Runtime(format!("Expected pattern, got {:?}", value))),
+    let Some((tag, children)) = value.as_node() else {
+        return Err(Error::Runtime(format!("Expected pattern, got {:?}", value)));
     };
     match tag.as_str() {
         "PatternWildcard" => Ok(Pattern::Wildcard),
@@ -1978,9 +1906,8 @@ fn value_to_pattern(value: &Value) -> Result<Pattern> {
 }
 
 fn value_to_literal_pattern(value: &Value) -> Result<Pattern> {
-    let (tag, children) = match value {
-        Value::Tagged(tag, children) => (tag.clone(), (**children).clone()),
-        _ => return Err(Error::Runtime(format!("Expected literal, got {:?}", value))),
+    let Some((tag, children)) = value.as_node() else {
+        return Err(Error::Runtime(format!("Expected literal, got {:?}", value)));
     };
     match tag.as_str() {
         "Int" if !children.is_empty() => {
@@ -2152,8 +2079,8 @@ fn escape_string_for_error_message(s: &str) -> String {
 /// Collect free variables from IR
 #[allow(dead_code)]
 fn collect_free_vars(ir: &Value, bound: &HashSet<String>, free: &mut HashSet<String>) {
-    match ir {
-        Value::Tagged(tag, children) => match tag.as_str() {
+    if let Some((tag, children)) = ir.as_node() {
+        match tag.as_str() {
             "Var" => {
                 if let Some(Value::Symbol(name)) = children.first() {
                     let name_str = sanitize_ident(name);
@@ -2190,13 +2117,13 @@ fn collect_free_vars(ir: &Value, bound: &HashSet<String>, free: &mut HashSet<Str
                     collect_free_vars(child, bound, free);
                 }
             }
-        },
-        Value::List(items) => {
-            for item in items.iter() {
-                collect_free_vars(item, bound, free);
-            }
         }
-        _ => {}
+        return;
+    }
+    if let Value::List(items) = ir {
+        for item in items.iter() {
+            collect_free_vars(item, bound, free);
+        }
     }
 }
 
@@ -2259,15 +2186,14 @@ fn collect_bindings_from_ir(ir: &Value, bindings: &mut Vec<SmolStr>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     #[test]
     fn test_transpile_add() {
         let ir = Value::list_node(
             "Add",
             vec![
-                Value::Tagged(SmolStr::new("LoadInt"), Arc::new(vec![Value::Int(1)])),
-                Value::Tagged(SmolStr::new("LoadInt"), Arc::new(vec![Value::Int(2)])),
+                Value::list_node("LoadInt", vec![Value::Int(1)]),
+                Value::list_node("LoadInt", vec![Value::Int(2)]),
             ],
         );
         let result = transpile_expr(&ir).unwrap();
@@ -2280,11 +2206,8 @@ mod tests {
             "Let",
             vec![
                 Value::Symbol(SmolStr::new("x")),
-                Value::Tagged(SmolStr::new("LoadInt"), Arc::new(vec![Value::Int(42)])),
-                Value::Tagged(
-                    SmolStr::new("Var"),
-                    Arc::new(vec![Value::Symbol(SmolStr::new("x"))]),
-                ),
+                Value::list_node("LoadInt", vec![Value::Int(42)]),
+                Value::list_node("Var", vec![Value::Symbol(SmolStr::new("x"))]),
             ],
         );
         let result = transpile_expr(&ir).unwrap();

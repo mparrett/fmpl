@@ -266,17 +266,18 @@ impl Vm {
                 .get(name)
                 .cloned()
                 .ok_or_else(|| Error::UndefinedProperty(name.to_string())),
-            Value::Tagged(tag, children) => {
-                // Allow introspection of tagged values for pattern matching
+            // List-shaped node (e.g. [Symbol(tag), child1, ...]) exposes
+            // `tag`, `children`, and `len` for pattern matching.
+            Value::List(items) if !items.is_empty() && matches!(items[0], Value::Symbol(_)) => {
                 match name.as_str() {
-                    "tag" => Ok(Value::Symbol(tag.clone())),
-                    "children" => Ok(Value::List(children.clone())),
-                    "len" => Ok(Value::Int(children.len() as i64)),
+                    "tag" => Ok(items[0].clone()),
+                    "children" => Ok(Value::List(Arc::new(items[1..].to_vec()))),
+                    "len" => Ok(Value::Int((items.len() - 1) as i64)),
                     _ => Err(Error::UndefinedProperty(name.to_string())),
                 }
             }
             _ => Err(Error::Type {
-                expected: "object, map, or tagged".to_string(),
+                expected: "object, map, or list-shaped node".to_string(),
                 got: obj.type_name().to_string(),
             }),
         }
@@ -876,7 +877,7 @@ impl Vm {
                 Instruction::MakeTagged { tag, args } => {
                     let children: Vec<Value> = args.iter().map(|&idx| frame.get(idx)).collect();
                     let frame = self.frames.last_mut().unwrap();
-                    frame.set_current(Value::Tagged(tag.clone(), Arc::new(children)));
+                    frame.set_current(Value::list_node(tag.clone(), children));
                 }
                 Instruction::Index { collection, key } => {
                     let col = frame.get(collection);
@@ -1081,7 +1082,7 @@ impl Vm {
                         }
                         StreamMode::Auto => {
                             // Detect type at runtime
-                            match val {
+                            match &val {
                                 Value::String(s) => {
                                     // String -> list of single-char strings
                                     let chars: Vec<Value> = s
@@ -1090,12 +1091,17 @@ impl Vm {
                                         .collect();
                                     Value::List(Arc::new(chars))
                                 }
-                                Value::List(_) => {
-                                    // List -> pass through as-is
-                                    val
+                                // List-shaped node (tagged data) wraps as single element.
+                                // Plain lists pass through as-is.
+                                Value::List(items)
+                                    if !items.is_empty()
+                                        && matches!(items[0], Value::Symbol(_)) =>
+                                {
+                                    Value::List(Arc::new(vec![val]))
                                 }
+                                Value::List(_) => val,
                                 _ => {
-                                    // Map, Tagged, or other -> wrap in single-element list
+                                    // Map or other -> wrap in single-element list
                                     Value::List(Arc::new(vec![val]))
                                 }
                             }
@@ -1174,17 +1180,10 @@ impl Vm {
                     frame.set_current(value);
                 }
                 Instruction::ExtractTaggedChild { source, index } => {
-                    // Accept both `Value::Tagged(_, children)` and the
-                    // equivalent list shape `[Symbol(tag), child1, ...]`
-                    // (ITER-0004b). For the list shape, child indexing skips
-                    // the head symbol.
+                    // Tagged data is represented as `[Symbol(tag), child1, ...]`.
+                    // Child indexing skips the head symbol.
                     let tagged_ref = frame.get_ref(source);
                     let value = match tagged_ref {
-                        Value::Tagged(_, children) => {
-                            children.get(index).cloned().ok_or_else(|| {
-                                Error::Runtime(format!("child index {} out of bounds", index))
-                            })?
-                        }
                         Value::List(items)
                             if !items.is_empty() && matches!(items[0], Value::Symbol(_)) =>
                         {
@@ -1194,7 +1193,7 @@ impl Vm {
                         }
                         _ => {
                             return Err(Error::Type {
-                                expected: "tagged".to_string(),
+                                expected: "list-shaped node".to_string(),
                                 got: tagged_ref.type_name().to_string(),
                             });
                         }
@@ -1208,15 +1207,11 @@ impl Vm {
                     fail_target,
                     expected_arity,
                 } => {
-                    // Accept both `Value::Tagged` and the equivalent list shape
-                    // `[Symbol(tag), child1, ...]` (ITER-0004b). Bare
+                    // Tagged data is `[Symbol(tag), child1, ...]`. Bare
                     // `Value::Symbol` still matches when the pattern is a bare
                     // symbol with no arity check.
                     let val_ref = frame.get_ref(value);
                     let matches = match val_ref {
-                        Value::Tagged(t, children) => {
-                            *t == tag && expected_arity.is_none_or(|n| children.len() == n)
-                        }
                         Value::List(items) if !items.is_empty() => {
                             if let Value::Symbol(t) = &items[0] {
                                 *t == tag && expected_arity.is_none_or(|n| items.len() - 1 == n)
@@ -2528,8 +2523,8 @@ impl Vm {
                     // E.g., :Int(n) matches Value::Tagged("Int", [v]) and binds n = v
                     let input_val = frame.parse_state.input().cloned().unwrap_or(Value::Null);
 
-                    // Check if input is a Tagged value with matching tag
-                    let Value::Tagged(ref input_tag, ref children) = input_val else {
+                    // Check if input is a list-shaped node with matching tag.
+                    let Some((input_tag, children)) = input_val.as_node() else {
                         frame.set_current(Value::Null);
                         continue;
                     };
@@ -2539,9 +2534,8 @@ impl Vm {
                         .get_constant(tag_idx)
                         .try_into()
                         .unwrap_or_else(|_| SmolStr::new(""));
-                    let input_tag_str: SmolStr = input_tag.clone();
 
-                    if input_tag_str != expected_tag {
+                    if input_tag != expected_tag.as_str() {
                         frame.set_current(Value::Null);
                         continue;
                     }
@@ -2553,13 +2547,16 @@ impl Vm {
                     }
 
                     // Bind each child to its corresponding variable (None = wildcard)
+                    let children_owned: Vec<Value> = children.to_vec();
                     for (i, var_name_opt) in bindings.iter().enumerate() {
                         if let Some(var_name_idx) = var_name_opt {
                             let var_name = frame
                                 .code
                                 .get_constant_as::<SmolStr>(*var_name_idx)
                                 .expect("Constant must be a string");
-                            frame.locals.insert(var_name.clone(), children[i].clone());
+                            frame
+                                .locals
+                                .insert(var_name.clone(), children_owned[i].clone());
                         }
                     }
 
@@ -2568,12 +2565,12 @@ impl Vm {
                 }
 
                 Instruction::MatchTagged { tag_idx, patterns } => {
-                    // Match a tagged value with nested pattern execution.
-                    // E.g., :Binary(:plus, :Int(a), :Int(b)) needs to match nested Tagged values
+                    // Match a list-shaped node with nested pattern execution.
+                    // E.g., [:Binary, :plus, [:Int, a], [:Int, b]] needs nested matching.
                     let input_val = frame.parse_state.input().cloned().unwrap_or(Value::Null);
 
-                    // Check if input is a Tagged value with matching tag
-                    let Value::Tagged(ref input_tag, ref children) = input_val else {
+                    // Check if input is a list-shaped node with matching tag.
+                    let Some((input_tag, children)) = input_val.as_node() else {
                         frame.set_current(Value::Null);
                         continue;
                     };
@@ -2583,9 +2580,8 @@ impl Vm {
                         .get_constant(tag_idx)
                         .try_into()
                         .unwrap_or_else(|_| SmolStr::new(""));
-                    let input_tag_str: SmolStr = input_tag.clone();
 
-                    if input_tag_str != expected_tag {
+                    if input_tag != expected_tag.as_str() {
                         frame.set_current(Value::Null);
                         continue;
                     }
@@ -2597,12 +2593,13 @@ impl Vm {
                     }
 
                     // Execute each pattern instruction against the corresponding child
+                    let children_owned: Vec<Value> = children.to_vec();
                     let saved_input = frame.parse_state.input().cloned();
 
                     let mut all_matched = true;
                     for (i, pattern_idx) in patterns.iter().enumerate() {
                         // Set the child as input for the pattern
-                        frame.parse_state.set_input(children[i].clone());
+                        frame.parse_state.set_input(children_owned[i].clone());
                         frame.parse_state.set_input_pos(Some(0));
 
                         // Get and execute the pattern instruction
@@ -2613,9 +2610,9 @@ impl Vm {
                                 tag_idx: inner_tag_idx,
                                 bindings: inner_bindings,
                             } => {
-                                // Nested TagMatch with simple bindings
-                                let child = &children[i];
-                                let Value::Tagged(child_tag, child_children) = child else {
+                                // Nested list-node match with simple bindings.
+                                let child = &children_owned[i];
+                                let Some((child_tag, child_children)) = child.as_node() else {
                                     all_matched = false;
                                     break;
                                 };
@@ -2624,9 +2621,8 @@ impl Vm {
                                     .get_constant(*inner_tag_idx)
                                     .try_into()
                                     .unwrap_or_else(|_| SmolStr::new(""));
-                                let child_tag_str: SmolStr = child_tag.clone();
 
-                                if child_tag_str != expected_inner_tag {
+                                if child_tag != expected_inner_tag.as_str() {
                                     all_matched = false;
                                     break;
                                 }

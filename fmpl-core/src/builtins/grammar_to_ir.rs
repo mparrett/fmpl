@@ -391,7 +391,7 @@ fn expr_to_ir(expr: &crate::ast::Expr) -> Result<Value> {
                             "Let",
                             vec![
                                 Value::Symbol(name.clone()),
-                                Value::Tagged(SmolStr::new("LoadNull"), Arc::new(vec![])),
+                                Value::list_node("LoadNull", vec![]),
                                 result,
                             ],
                         );
