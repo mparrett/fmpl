@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/ralph-gate.py"
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-/Users/ndn/development/fmpl}/.claude/hooks/ralph-gate.py\""
           }
         ]
       },
@@ -35,7 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/ralph-transition.py"
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-/Users/ndn/development/fmpl}/.claude/hooks/ralph-transition.py\""
           }
         ]
       }
