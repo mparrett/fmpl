@@ -1,0 +1,40 @@
+{
+  "id": "413e797d76ec",
+  "key": "pattern_high-stakes_completed_nimport_413e79",
+  "name": "pattern_high-stakes_completed_nimport_413e79",
+  "claim": "High-stakes op completed (schema): cat > /tmp/run_bench.py << 'PYEOF'",
+  "conditions": [
+    "bash",
+    "cat",
+    "cmd",
+    "completed",
+    "high-stakes",
+    "json",
+    "nimport",
+    "pyeof",
+    "schema",
+    "tmp"
+  ],
+  "evidence_ids": [
+    "2026-05-09T22:22:16.695687+00:00",
+    "2026-05-09T22:36:12.232052+00:00",
+    "2026-05-09T22:36:32.744641+00:00"
+  ],
+  "cluster_size": 3,
+  "canonical_salience": 13.5,
+  "staged_at": "2026-05-09T22:40:33.852980+00:00",
+  "status": "staged",
+  "decisions": [
+    {
+      "ts": "2026-05-09T22:40:33.852980+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T22:50:12.884977+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    }
+  ],
+  "rejection_count": 0
+}

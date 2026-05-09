@@ -1,0 +1,58 @@
+{
+  "id": "50986dd6bff7",
+  "key": "pattern_nimport_pyeof_bash_50986d",
+  "name": "pattern_nimport_pyeof_bash_50986d",
+  "claim": "High-stakes op completed (schema): cat > /tmp/run_bench.py << 'PYEOF'",
+  "conditions": [
+    "bash",
+    "cat",
+    "cmd",
+    "json",
+    "nimport",
+    "pyeof",
+    "tmp"
+  ],
+  "evidence_ids": [
+    "2026-05-09T22:22:16.695687+00:00",
+    "2026-05-09T22:36:12.232052+00:00",
+    "2026-05-09T22:36:32.744641+00:00",
+    "2026-05-09T22:51:12.878438+00:00"
+  ],
+  "cluster_size": 4,
+  "canonical_salience": 13.5,
+  "staged_at": "2026-05-09T22:53:41.485903+00:00",
+  "status": "staged",
+  "decisions": [
+    {
+      "ts": "2026-05-09T22:53:41.485903+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T22:56:32.118442+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T23:34:43.893511+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T23:38:26.261427+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T23:45:31.670443+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-10T16:53:33.684304+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    }
+  ],
+  "rejection_count": 0
+}

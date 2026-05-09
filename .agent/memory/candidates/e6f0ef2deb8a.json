@@ -1,0 +1,64 @@
+{
+  "id": "e6f0ef2deb8a",
+  "key": "pattern_claude-code_development_command_e6f0ef",
+  "name": "pattern_claude-code_development_command_e6f0ef",
+  "claim": "FAILURE in claude-code: Command failed: cd ~/development/sprout && jj bookmark set main -r main@origin 2>&1 | head -5; echo '---rename featu. Error: Shell cwd was reset to /Users/ndn/development/fmpl | THIS SKILL HAS FAILED 4 TIMES IN 14d. Flag for rewrite.",
+  "conditions": [
+    "bash",
+    "claude-code",
+    "command",
+    "cwd",
+    "development",
+    "error",
+    "failed",
+    "failure",
+    "flag",
+    "fmpl",
+    "main",
+    "ndn",
+    "origin",
+    "reset",
+    "rewrite",
+    "shell",
+    "skill",
+    "sprout",
+    "times",
+    "users"
+  ],
+  "evidence_ids": [
+    "2026-05-09T17:53:47.552780+00:00",
+    "2026-05-09T18:46:53.659061+00:00"
+  ],
+  "cluster_size": 2,
+  "canonical_salience": 12.0,
+  "staged_at": "2026-05-09T18:48:42.583944+00:00",
+  "status": "staged",
+  "decisions": [
+    {
+      "ts": "2026-05-09T18:48:42.583944+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T18:49:57.627532+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T18:55:40.988627+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T18:57:23.041607+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    },
+    {
+      "ts": "2026-05-09T20:19:26.619005+00:00",
+      "action": "staged",
+      "reviewer": "auto_dream"
+    }
+  ],
+  "rejection_count": 0
+}

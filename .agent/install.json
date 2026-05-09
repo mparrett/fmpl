@@ -2,7 +2,7 @@
   "schema_version": 1,
   "agentic_stack_version": "0.15.0",
   "abs_target": "/Users/ndn/development/fmpl",
-  "installed_at": "2026-05-09T16:04:48Z",
+  "installed_at": "2026-05-09T16:55:54Z",
   "adapters": {
     "claude-code": {
       "installed_at": "2026-05-09T16:04:48Z",
@@ -24,6 +24,25 @@
       ],
       "post_install_results": [],
       "brain_root_primitive": "$CLAUDE_PROJECT_DIR"
+    },
+    "codex": {
+      "installed_at": "2026-05-09T16:55:54Z",
+      "files_written": [],
+      "files_overwritten": [],
+      "files_alerted": [],
+      "file_results": [
+        {
+          "dst": "AGENTS.md",
+          "result": "left_alone"
+        }
+      ],
+      "post_install_results": [],
+      "skills_link": {
+        "target": ".agent/skills",
+        "dst": ".agents/skills",
+        "fallback": "rsync_with_delete"
+      },
+      "skills_link_pre_existed": false
     }
   }
 }
