@@ -1,0 +1,5 @@
+id: tagged-consumer-iflet
+language: rust
+rule:
+  pattern: if let Value::Tagged($TAG, $CHILDREN) = $V { $$$BODY }
+fix: if let Some(($TAG, $CHILDREN)) = $V.as_node() { $$$BODY }

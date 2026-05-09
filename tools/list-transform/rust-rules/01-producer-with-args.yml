@@ -1,0 +1,5 @@
+id: tagged-producer-with-args
+language: rust
+rule:
+  pattern: Value::Tagged(SmolStr::new($TAG), Arc::new(vec![$$$ARGS]))
+fix: Value::list_node($TAG, vec![$$$ARGS])

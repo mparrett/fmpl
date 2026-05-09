@@ -1,0 +1,14 @@
+id: tagged-consumer-iflet-else-panic
+language: rust
+rule:
+  pattern: |
+    if let Value::Tagged($TAG, $C) = $V {
+        $$$THEN
+    } else {
+        panic!($$$PANIC)
+    }
+fix: |
+  match $V.as_node() {
+      Some(($TAG, $C)) => { $$$THEN }
+      None => panic!($$$PANIC)
+  }
