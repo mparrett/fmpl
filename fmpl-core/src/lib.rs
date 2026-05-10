@@ -120,11 +120,23 @@ pub fn eval_via_fmpl_pipeline(vm: &mut Vm, source: &str) -> Result<Value> {
     if !already_bootstrapped {
         eval_via_legacy_parser(vm, r#"io::load("lib/core/prelude.fmpl")"#)?;
         eval_via_legacy_parser(vm, r#"io::load("lib/core/ast_to_ir.fmpl")"#)?;
+        // ITER-0004c item 4: load ast_optimizer.fmpl. The file ends with a
+        // bare module-map literal (no internal `let ast_optimizer = ...`),
+        // so we must wrap with `let ast_optimizer = ...` to capture the map
+        // under a name. Bracket-index `ast_optimizer["optimize"]` is the
+        // verified-working access form (string-keyed lookup).
+        eval_via_legacy_parser(
+            vm,
+            r#"let ast_optimizer = io::load("lib/core/ast_optimizer.fmpl")"#,
+        )?;
         eval_via_legacy_parser(vm, &format!("let {} = true", bootstrap_marker))?;
     }
 
+    // ITER-0004c item 4: thread ast_optimizer["optimize"] between ast::parse
+    // and ast_to_ir.expr. Pipeline order:
+    //   ast::parse → ast_optimizer["optimize"] → ast_to_ir.expr → ir::compile → code::eval
     let pipeline_source = format!(
-        r#"let (ast = ast::parse({:?})) let (ir = ast @ ast_to_ir.expr) let (code = ir::compile(ir)) code::eval(code)"#,
+        r#"let (ast = ast::parse({:?})) let (opt = ast_optimizer["optimize"](ast)) let (ir = opt @ ast_to_ir.expr) let (code = ir::compile(ir)) code::eval(code)"#,
         source
     );
     eval_via_legacy_parser(vm, &pipeline_source)
