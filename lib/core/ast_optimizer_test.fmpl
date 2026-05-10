@@ -40,7 +40,7 @@ let test_const_fold_bool = test.case("Constant fold: true && false => false",
 
 let test_const_fold_unary = test.case("Constant fold: -5 => -5",
     lambda()
-        let (expr = [:Unary, :, [:Int, 5]])
+        let (expr = [:Unary, :-, [:Int, 5]])
         let (result = expr @ optimizer.constant_fold.trans)
         result == [:Int, -5]
 );
@@ -86,7 +86,7 @@ let test_alg_mul_zero = test.case("Algebraic: x * 0 => 0",
 
 let test_alg_sub_zero = test.case("Algebraic: x - 0 => x",
     lambda()
-        let (expr = [:Binary, :, [:Ident, "x"], [:Int, 0]])
+        let (expr = [:Binary, :-, [:Ident, "x"], [:Int, 0]])
         let (result = expr @ optimizer.algebraic_simp.trans)
         result == [:Ident, "x"]
 );
@@ -128,7 +128,7 @@ let test_alg_or_false = test.case("Algebraic: false || x => x",
 
 let test_alg_double_neg = test.case("Algebraic: -(-x) => x",
     lambda()
-        let (expr = [:Unary, :, [:Unary, :, [:Ident, "x"]]])
+        let (expr = [:Unary, :-, [:Unary, :-, [:Ident, "x"]]])
         let (result = expr @ optimizer.algebraic_simp.trans)
         result == [:Ident, "x"]
 );
