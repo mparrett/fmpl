@@ -472,6 +472,8 @@ These gates are NOT new work — they are the existing iteration gates, framed u
 - `cargo test --workspace` passes overall.
 - No new ignored or failing tests.
 
+**Optional companion fix (also surfaced 2026-05-10):** `lib/core/ast_optimizer_test.fmpl` uses `++` for string concatenation in its print-summary section (lines 184-186 + 194), but the FMPL parser does not support `++` as a binary operator (it lexes as two consecutive `Plus` tokens, leading to "unexpected token: Plus"). This blocks the AC-13 companion gate `fmpl-core/tests/ast_optimizer_unit.rs` from un-ignoring. Either add `++` to the FMPL operator vocabulary, or rewrite the test file's print-summary section to use `string.join`. If addressed in this iteration, also un-ignore the `ast_optimizer_unit` test.
+
 ### ITER-0005 — Image Persistence (Consolidated)
 
 **Stories:** STORY-0099, STORY-0100, STORY-0013, STORY-0014, STORY-0015, STORY-0019, STORY-0021, STORY-0069, STORY-0016, STORY-0017, STORY-0018, STORY-0020
