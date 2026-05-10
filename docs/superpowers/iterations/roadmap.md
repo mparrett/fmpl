@@ -388,6 +388,49 @@ These gates are NOT new work — they are the existing iteration gates, framed u
 - AC-13 invariant from ITER-0004c remains satisfied: `grep -cE ':[A-Z][a-zA-Z_]*\(' lib/core/*.fmpl` returns 0.
 - The CI gate added in ITER-0004c (`fmpl-core/tests/stdlib_no_legacy_syntax.rs`) still passes after the new file is added.
 
+### ITER-0004f — Flatten Binary/Unary AST Nodes
+
+**Stories:** No new STORY-0010 ACs — this is an architectural cleanup proposed by user 2026-05-10 during ITER-0004c hand-migration. Created in response to seeing the redundant `[:Binary, :+, l, r]` shape in the freshly-migrated ast_optimizer.fmpl.
+
+**Rationale:** Currently the AST encodes binary/unary operators as `[:Binary, :+, l, r]` and `[:Unary, :-, e]` — a `:Binary`/`:Unary` "kind tag" plus the operator-symbol child. Flattening to `[:+, l, r]` and `[:-, e]` (operator symbol AS the tag) produces:
+- ~14% smaller AST per binary node (3 elements vs 4)
+- Cleaner pattern code in optimizers (no `:Binary` prefix to repeat)
+- A natural lowercase-AST / Capitalized-IR distinction (e.g., AST `[:+, l, r]` vs IR `[:Add, l, r]`)
+- Closer alignment with how grammar-action helpers like `fold_binary` would express "binary op trees"
+
+**Status:** pending
+**Depends on:** ITER-0004c (so the stdlib is already in canonical list-pattern syntax before the AST shape changes).
+**Look-ahead check:** Unblocks no critical path; could ship before or after ITER-0004d. Most ergonomic placement: between ITER-0004d (parser/AST burn) and ITER-0005 (persistence) so that the flattened shape is what gets persisted. Alternative: between ITER-0004c and ITER-0004d so that ITER-0004d's deletions land against the flattened shape.
+
+**Files in scope:**
+- `fmpl-core/src/ast.rs` (or wherever `Expr::Binary(lhs, op, rhs)` and `Expr::Unary(op, e)` are defined) — change variant or change `expr_to_value` encoding
+- `fmpl-core/src/builtins/ast.rs` — `expr_to_value` arms for Binary/Unary become `Value::list_node(op_str, vec![l, r])` instead of `Value::list_node("Binary", vec![Symbol(op), l, r])`
+- `fmpl-core/src/value_to_ast.rs` — decoder arms for Binary/Unary
+- `lib/core/ast_to_ir.fmpl` — 13 binary-rule entries collapse from `[:Binary, :+, expr:l, expr:r] => [:Add, l, r]` to `[:+, expr:l, expr:r] => [:Add, l, r]`; 2 unary rules similarly
+- `lib/core/ast_optimizer.fmpl` — substantial pattern rewrite; ~150 sites
+- `lib/core/parser_helpers.fmpl` (post-ITER-0004e) or `lib/core/prelude.fmpl` (pre-ITER-0004e) — `fold_binary` produces `[:Binary, ...]` AST nodes; reshape to produce `[op, ...]`
+- `fmpl-core/src/builtins/ir_to_rust.rs` — Rust mirror of `fold_binary`
+- `fmpl-core/tests/ast_to_ir_parity.rs` — any inputs that introspect `Expr::Binary` shape need updating
+- AC-13 grep regex update — currently `:[A-Z][a-zA-Z_]*\(` requires capitalized tags; `[:+, ...]` does NOT match this. The grep stays correct (it would still detect legacy `:Tag(args)` re-introduction), but a separate gate may be needed for the new lowercase-symbol AST convention.
+
+**Scope:**
+
+1. Define the encoding contract: which operator symbols become AST tags? Arithmetic (`:+`, `:-`, `:*`, `:/`, `:%`), comparison (`:==`, `:!=`, `:<`, `:>`, `:<=`, `:>=`), boolean (`:&&`, `:||`), pipe (`:|>`). Unary: `:-`, `:!`. Document in `fmpl-core/src/ast.rs` or a dedicated `docs/conventions/ast-shape.md`.
+2. Update `expr_to_value` (Binary and Unary arms) to emit the flat shape.
+3. Update `value_to_ast.rs` decoder arms.
+4. Update `lib/core/ast_to_ir.fmpl` Binary and Unary rules.
+5. Update `lib/core/ast_optimizer.fmpl` Binary and Unary rules (the largest chunk of work).
+6. Update `lib/core/parser_helpers.fmpl` (or `prelude.fmpl` pre-ITER-0004e) `fold_binary` and `unary_op_to_ir`.
+7. Update Rust mirrors in `builtins/ir_to_rust.rs`.
+8. Update parity tests if they assert AST shape.
+9. Add a verification gate that asserts the new shape: e.g., `expr_to_value(parse("1 + 2"))` returns `[:+, [:Int, 1], [:Int, 2]]`, NOT `[:Binary, :+, [:Int, 1], [:Int, 2]]`.
+
+**Verification gates:**
+- `cargo test --workspace` passes (no regressions).
+- `grep -nE '\[:Binary,\s*:[+\-*/%<>=&|!]+,' lib/core/*.fmpl` returns no matches (no legacy Binary-prefixed shape in stdlib).
+- SCENARIO-0103 still passes against the new shape.
+- AC-13 invariant from ITER-0004c remains satisfied (grep for `:[A-Z][a-zA-Z_]*\(` returns 0).
+
 ### ITER-0005 — Image Persistence (Consolidated)
 
 **Stories:** STORY-0099, STORY-0100, STORY-0013, STORY-0014, STORY-0015, STORY-0019, STORY-0021, STORY-0069, STORY-0016, STORY-0017, STORY-0018, STORY-0020
