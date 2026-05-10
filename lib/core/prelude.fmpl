@@ -1,5 +1,10 @@
 -- lib/core/prelude.fmpl
 -- Core helper functions for FMPL grammar actions
+-- ITER-0004c: migrated from legacy tag-paren syntax to canonical list-pattern
+-- syntax. AST/IR-construction helpers (fold_binary, fold_index, fold_postfix,
+-- fold_pipe_at, binary_op_to_ir, unary_op_to_ir) remain here for now; ITER-0004e
+-- will relocate them to lib/core/parser_helpers.fmpl, restoring this file to
+-- minimal high-level FMPL vocabulary (Haskell-Prelude-style).
 
 -- Convert a string to a symbol
 -- symbol("foo") => :foo
@@ -24,9 +29,9 @@ let join = \list string.join(list)
 let reduce = lambda(f, init, list) fold f, init, list
 
 -- Fold operator/operand pairs into left-associative binary tree
--- fold_binary(first, [[op1, e1], [op2, e2]]) => :Binary(op2, :Binary(op1, first, e1), e2)
+-- fold_binary(first, [[op1, e1], [op2, e2]]) => [:Binary, op2, [:Binary, op1, first, e1], e2]
 let fold_binary = lambda(first, rest)
-    reduce(\acc \pair :Binary(pair[0], acc, pair[1]), first, rest)
+    reduce(\acc \pair [:Binary, pair[0], acc, pair[1]], first, rest)
 
 -- Prepend an item to a list (since ++ is not implemented)
 -- prepend("a", ["b", "c"]) => ["a", "b", "c"]
@@ -34,62 +39,62 @@ let prepend = lambda(item, list)
     reduce(\acc \x acc.push(x), [item], list)
 
 -- Fold index operations into nested :Index nodes
--- fold_index(base, [i1, i2]) => :Index(:Index(base, i1), i2)
+-- fold_index(base, [i1, i2]) => [:Index, [:Index, base, i1], i2]
 let fold_index = lambda(base, indices)
-    reduce(\acc \idx :Index(acc, idx), base, indices)
+    reduce(\acc \idx [:Index, acc, idx], base, indices)
 
 -- Fold postfix operations into nested AST nodes
 -- Supported operations:
---   [:index, idx]         => :Index(acc, idx)
---   [:call, args]         => :Call(acc, args)
---   [:prop, name]         => :Prop(acc, name)
---   [:method, name, args] => :MethodCall(acc, name, args)
---   [:slice, start, end]  => :Slice(acc, start, end)
---   [:facet, facet_sym]   => :FacetAccess(acc, facet_sym)
+--   [:index, idx]         => [:Index, acc, idx]
+--   [:call, args]         => [:Call, acc, args]
+--   [:prop, name]         => [:Prop, acc, name]
+--   [:method, name, args] => [:MethodCall, acc, name, args]
+--   [:slice, start, end]  => [:Slice, acc, start, end]
+--   [:facet, facet_sym]   => [:FacetAccess, acc, facet_sym]
 let fold_postfix = lambda(base, ops)
     reduce(\acc \op
-        if op[0] == :index then :Index(acc, op[1])
-        else if op[0] == :call then :Call(acc, op[1])
-        else if op[0] == :prop then :Prop(acc, op[1])
-        else if op[0] == :slice then :Slice(acc, op[1], op[2])
-        else if op[0] == :facet then :FacetAccess(acc, op[1])
-        else :MethodCall(acc, op[1], op[2]), base, ops)
+        if op[0] == :index then [:Index, acc, op[1]]
+        else if op[0] == :call then [:Call, acc, op[1]]
+        else if op[0] == :prop then [:Prop, acc, op[1]]
+        else if op[0] == :slice then [:Slice, acc, op[1], op[2]]
+        else if op[0] == :facet then [:FacetAccess, acc, op[1]]
+        else [:MethodCall, acc, op[1], op[2]], base, ops)
 
 -- Fold pipe and @ operations into AST nodes
 -- Supported operations:
---   [:pipe, right]                  => :Binary("|>", acc, right)
---   [:at_inline, cases]             => :AtInlineBlock(acc, :InlinePatternBlock(cases))
---   [:at_grammar, grammar, rule]    => :AtGrammarApply(acc, grammar, rule)
---   [:extend, rules]                => :GrammarExtend(acc, rules)
+--   [:pipe, right]                  => [:Binary, "|>", acc, right]
+--   [:at_inline, cases]             => [:AtInlineBlock, acc, [:InlinePatternBlock, cases]]
+--   [:at_grammar, grammar, rule]    => [:AtGrammarApply, acc, grammar, rule]
+--   [:extend, rules]                => [:GrammarExtend, acc, rules]
 let fold_pipe_at = lambda(first, ops)
     reduce(\acc \op
-        if op[0] == :pipe then :Binary(string.to_symbol("|>"), acc, op[1])
-        else if op[0] == :at_inline then :AtInlineBlock(acc, :InlinePatternBlock(op[1]))
-        else if op[0] == :extend then :GrammarExtend(acc, op[1])
-        else :AtGrammarApply(acc, op[1], op[2]), first, ops)
+        if op[0] == :pipe then [:Binary, string.to_symbol("|>"), acc, op[1]]
+        else if op[0] == :at_inline then [:AtInlineBlock, acc, [:InlinePatternBlock, op[1]]]
+        else if op[0] == :extend then [:GrammarExtend, acc, op[1]]
+        else [:AtGrammarApply, acc, op[1], op[2]], first, ops)
 
 -- Transform a binary operator symbol to its IR node constructor
--- binary_op_to_ir(:+, l_ir, r_ir) => :Add(l_ir, r_ir)
+-- binary_op_to_ir(:+, l_ir, r_ir) => [:Add, l_ir, r_ir]
 let binary_op_to_ir = lambda(op, l, r)
-    if op == :+ then :Add(l, r)
-    else if op == :- then :Sub(l, r)
-    else if op == :* then :Mul(l, r)
-    else if op == :/ then :Div(l, r)
-    else if op == :% then :Mod(l, r)
-    else if op == :== then :Eq(l, r)
-    else if op == :!= then :NotEq(l, r)
-    else if op == :< then :Lt(l, r)
-    else if op == :> then :Gt(l, r)
-    else if op == :<= then :LtEq(l, r)
-    else if op == :>= then :GtEq(l, r)
-    else if op == :&& then :And(l, r)
-    else :Or(l, r)
+    if op == :+ then [:Add, l, r]
+    else if op == :- then [:Sub, l, r]
+    else if op == :* then [:Mul, l, r]
+    else if op == :/ then [:Div, l, r]
+    else if op == :% then [:Mod, l, r]
+    else if op == :== then [:Eq, l, r]
+    else if op == :!= then [:NotEq, l, r]
+    else if op == :< then [:Lt, l, r]
+    else if op == :> then [:Gt, l, r]
+    else if op == :<= then [:LtEq, l, r]
+    else if op == :>= then [:GtEq, l, r]
+    else if op == :&& then [:And, l, r]
+    else [:Or, l, r]
 
 -- Transform a unary operator symbol to its IR node constructor
--- unary_op_to_ir(:-, e_ir) => :Neg(e_ir)
+-- unary_op_to_ir(:-, e_ir) => [:Neg, e_ir]
 let unary_op_to_ir = lambda(op, e)
-    if op == :- then :Neg(e)
-    else :Not(e)
+    if op == :- then [:Neg, e]
+    else [:Not, e]
 
 -- Transform list elements with a function
 -- map_list(\x x * 2, [1, 2, 3]) => [2, 4, 6]
