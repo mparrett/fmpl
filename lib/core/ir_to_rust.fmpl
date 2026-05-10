@@ -1,6 +1,10 @@
 -- IR to Rust transpiler using pattern matching
--- Transforms IR tagged values to Rust code strings
+-- Transforms IR list-shaped values to Rust code strings
 -- Requires: lib/core/prelude.fmpl loaded first
+-- ITER-0004c: migrated from legacy tag-paren syntax to canonical list-pattern
+-- syntax. Note: the rust_prelude string literal below contains Rust code with
+-- syntax like Value::Bool(true) — those are Rust enum-variant constructors,
+-- not FMPL legacy syntax. The AC-13 grep gate must distinguish these cases.
 
 -- Helper to sanitize identifiers for Rust
 let sanitize_ident = \name
@@ -28,48 +32,48 @@ let join_with = lambda(sep, items)
 -- Convert IR to Rust expression (recursive)
 let ir_expr = \ir ir @ {
     -- Literals
-    :LoadNull() => "Value::Null"
-    :LoadBool(true) => "Value::Bool(true)"
-    :LoadBool(false) => "Value::Bool(false)"
-    :LoadInt(n) => "Value::Int(" ++ int.to_string(n) ++ ")"
-    :LoadString(s) => "Value::String(\"" ++ s ++ "\".to_string())"
+    [:LoadNull] => "Value::Null"
+    [:LoadBool, true] => "Value::Bool(true)"
+    [:LoadBool, false] => "Value::Bool(false)"
+    [:LoadInt, n] => "Value::Int(" ++ int.to_string(n) ++ ")"
+    [:LoadString, s] => "Value::String(\"" ++ s ++ "\".to_string())"
 
     -- Variables
-    :Var(name) => sanitize_ident(symbol.to_string(name)) ++ ".clone()"
+    [:Var, name] => sanitize_ident(symbol.to_string(name)) ++ ".clone()"
 
     -- Binary operations
-    :Add(l, r) => "(" ++ ir_expr(l) ++ ").add(&(" ++ ir_expr(r) ++ "))"
-    :Sub(l, r) => "(" ++ ir_expr(l) ++ ").sub(&(" ++ ir_expr(r) ++ "))"
-    :Mul(l, r) => "(" ++ ir_expr(l) ++ ").mul(&(" ++ ir_expr(r) ++ "))"
-    :Div(l, r) => "(" ++ ir_expr(l) ++ ").div(&(" ++ ir_expr(r) ++ "))"
-    :Mod(l, r) => "(" ++ ir_expr(l) ++ ").modulo(&(" ++ ir_expr(r) ++ "))"
-    :Eq(l, r) => "(" ++ ir_expr(l) ++ ").eq(&(" ++ ir_expr(r) ++ "))"
-    :NotEq(l, r) => "(" ++ ir_expr(l) ++ ").eq(&(" ++ ir_expr(r) ++ ")).not()"
-    :Lt(l, r) => "(" ++ ir_expr(l) ++ ").lt(&(" ++ ir_expr(r) ++ "))"
-    :Gt(l, r) => "(" ++ ir_expr(l) ++ ").gt(&(" ++ ir_expr(r) ++ "))"
-    :LtEq(l, r) => "(" ++ ir_expr(l) ++ ").lteq(&(" ++ ir_expr(r) ++ "))"
-    :GtEq(l, r) => "(" ++ ir_expr(l) ++ ").gteq(&(" ++ ir_expr(r) ++ "))"
+    [:Add, l, r] => "(" ++ ir_expr(l) ++ ").add(&(" ++ ir_expr(r) ++ "))"
+    [:Sub, l, r] => "(" ++ ir_expr(l) ++ ").sub(&(" ++ ir_expr(r) ++ "))"
+    [:Mul, l, r] => "(" ++ ir_expr(l) ++ ").mul(&(" ++ ir_expr(r) ++ "))"
+    [:Div, l, r] => "(" ++ ir_expr(l) ++ ").div(&(" ++ ir_expr(r) ++ "))"
+    [:Mod, l, r] => "(" ++ ir_expr(l) ++ ").modulo(&(" ++ ir_expr(r) ++ "))"
+    [:Eq, l, r] => "(" ++ ir_expr(l) ++ ").eq(&(" ++ ir_expr(r) ++ "))"
+    [:NotEq, l, r] => "(" ++ ir_expr(l) ++ ").eq(&(" ++ ir_expr(r) ++ ")).not()"
+    [:Lt, l, r] => "(" ++ ir_expr(l) ++ ").lt(&(" ++ ir_expr(r) ++ "))"
+    [:Gt, l, r] => "(" ++ ir_expr(l) ++ ").gt(&(" ++ ir_expr(r) ++ "))"
+    [:LtEq, l, r] => "(" ++ ir_expr(l) ++ ").lteq(&(" ++ ir_expr(r) ++ "))"
+    [:GtEq, l, r] => "(" ++ ir_expr(l) ++ ").gteq(&(" ++ ir_expr(r) ++ "))"
 
     -- Unary operations
-    :Neg(e) => "(" ++ ir_expr(e) ++ ").neg()"
-    :Not(e) => "(" ++ ir_expr(e) ++ ").not()"
+    [:Neg, e] => "(" ++ ir_expr(e) ++ ").neg()"
+    [:Not, e] => "(" ++ ir_expr(e) ++ ").not()"
 
     -- Control flow
-    :If(c, t, e) => "if (" ++ ir_expr(c) ++ ").is_truthy() { " ++ ir_expr(t) ++ " } else { " ++ ir_expr(e) ++ " }"
+    [:If, c, t, e] => "if (" ++ ir_expr(c) ++ ").is_truthy() { " ++ ir_expr(t) ++ " } else { " ++ ir_expr(e) ++ " }"
 
     -- Let binding
-    :Let(name, val, body) => "{ let " ++ sanitize_ident(symbol.to_string(name)) ++ " = " ++ ir_expr(val) ++ "; " ++ ir_expr(body) ++ " }"
+    [:Let, name, val, body] => "{ let " ++ sanitize_ident(symbol.to_string(name)) ++ " = " ++ ir_expr(val) ++ "; " ++ ir_expr(body) ++ " }"
 
     -- Short-circuit operators
-    :And(l, r) => "if (" ++ ir_expr(l) ++ ").is_truthy() { " ++ ir_expr(r) ++ " } else { Value::Bool(false) }"
-    :Or(l, r) => "{ let __tmp = " ++ ir_expr(l) ++ "; if (__tmp).is_truthy() { __tmp } else { " ++ ir_expr(r) ++ " } }"
+    [:And, l, r] => "if (" ++ ir_expr(l) ++ ").is_truthy() { " ++ ir_expr(r) ++ " } else { Value::Bool(false) }"
+    [:Or, l, r] => "{ let __tmp = " ++ ir_expr(l) ++ "; if (__tmp).is_truthy() { __tmp } else { " ++ ir_expr(r) ++ " } }"
 
     -- Collections
-    :MakeList(items) => "Value::List(vec![" ++ join_with(", ", map_list(ir_expr, items)) ++ "])"
-    :Index(base, idx) => "(" ++ ir_expr(base) ++ ").index(&(" ++ ir_expr(idx) ++ "))"
+    [:MakeList, items] => "Value::List(vec![" ++ join_with(", ", map_list(ir_expr, items)) ++ "])"
+    [:Index, base, idx] => "(" ++ ir_expr(base) ++ ").index(&(" ++ ir_expr(idx) ++ "))"
 
     -- Function calls
-    :Call(func, args) => "(" ++ ir_expr(func) ++ ").call(vec![" ++ join_with(", ", map_list(ir_expr, args)) ++ "])"
+    [:Call, func, args] => "(" ++ ir_expr(func) ++ ").call(vec![" ++ join_with(", ", map_list(ir_expr, args)) ++ "])"
 }
 
 -- Rust runtime prelude (compact version)
