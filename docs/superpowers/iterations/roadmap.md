@@ -397,6 +397,7 @@ These gates are NOT new work — they are the existing iteration gates, framed u
 - Cleaner pattern code in optimizers (no `:Binary` prefix to repeat)
 - A natural lowercase-AST / Capitalized-IR distinction (e.g., AST `[:+, l, r]` vs IR `[:Add, l, r]`)
 - Closer alignment with how grammar-action helpers like `fold_binary` would express "binary op trees"
+- **Closer alignment with OMeta/Ohm conventions** — see `~/development/ometa/ometa-js/bs-ometa-compiler.txt`. OMeta uses operator-as-head list shape (`[#App, ruleName, ...args]` — head is the constructor, not a kind tag) for tree pattern matching. FMPL's parser/grammar idioms intentionally follow OMeta; flattening Binary brings AST shape into closer alignment with this lineage.
 
 **Status:** pending
 **Depends on:** ITER-0004c (so the stdlib is already in canonical list-pattern syntax before the AST shape changes).
