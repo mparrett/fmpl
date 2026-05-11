@@ -25,9 +25,15 @@ pub enum SourceKind {
     /// A standalone `.fmpl` file.
     FmplFile { path: PathBuf },
     /// A string literal embedded in a Rust source file.
+    ///
+    /// `rust_byte_offset` is `Some(n)` only when the caller can compute it
+    /// (stable Rust does not expose `proc_macro2::Span` byte offsets without
+    /// the `span-locations` feature, so the current test helper passes
+    /// `None`). Future consumers must treat `None` as "exact location
+    /// unavailable" rather than zero.
     RustString {
         rust_path: PathBuf,
-        rust_byte_offset: usize,
+        rust_byte_offset: Option<usize>,
     },
 }
 
@@ -53,8 +59,10 @@ pub enum DiagnosticsError {
 
 /// Scan a chunk of FMPL source text for legacy `:Tag(args)` syntax.
 ///
-/// Returns the list of hits in source order. A "hit" is a `Token::Symbol`
-/// immediately followed by `Token::LParen` in the lexer's token stream.
+/// Returns the list of hits in source order. A "hit" is an identifier-style
+/// `Token::Symbol` (one starting with `[a-zA-Z_]`) immediately followed by
+/// `Token::LParen`. Operator-style symbols (`:+`, `:==`, etc.) are excluded
+/// — they were never legacy tagged-constructor syntax.
 ///
 /// Errors: propagates lexer failures as `DiagnosticsError::LexerError`. The
 /// production lexer already skips comments and string literals, so they do
@@ -72,6 +80,9 @@ pub fn scan_fmpl_source(
     let mut hits = Vec::new();
     for window in tokens.windows(2) {
         if let (Token::Symbol(s), Token::LParen) = (&window[0].token, &window[1].token) {
+            if !is_identifier_tag(s) {
+                continue;
+            }
             hits.push(TaggedSyntaxHit {
                 source: source.clone(),
                 byte_offset: window[0].span.start,
@@ -80,4 +91,10 @@ pub fn scan_fmpl_source(
         }
     }
     Ok(hits)
+}
+
+fn is_identifier_tag(s: &str) -> bool {
+    s.chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
 }

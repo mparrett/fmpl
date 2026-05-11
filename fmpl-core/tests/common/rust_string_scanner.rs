@@ -62,16 +62,11 @@ impl<'ast> Visit<'ast> for LitStrCollector {
         // Real byte offsets within the enclosing Rust file are unavailable
         // on stable Rust without `proc-macro2/span-locations` (which leaks
         // into the dependency graph and is overkill for a diagnostics gate).
-        // The CI gate filters and reports hits by `(path, tag)`, not by byte
-        // offset — so we record 0 as a placeholder. If a future consumer
-        // needs real offsets, it can compute them by `lit.token()`'s string
-        // form.
-        let _ = lit.span();
-        let rust_byte_offset = 0;
-
+        // We emit `None` rather than a placeholder so future consumers can
+        // distinguish "exact location unavailable" from "offset = 0".
         let source = SourceKind::RustString {
             rust_path: self.rust_path.clone(),
-            rust_byte_offset,
+            rust_byte_offset: None,
         };
 
         match scan_fmpl_source(&value, source) {

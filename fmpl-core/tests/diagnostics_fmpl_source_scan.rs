@@ -82,6 +82,34 @@ fn scan_fmpl_source_multiple_hits_preserves_order_and_offsets() {
     );
 }
 
+#[test]
+fn scan_fmpl_source_inside_fmpl_string_literal_has_zero_hits() {
+    // The production FMPL lexer skips string-literal contents, so a
+    // `:Tag(args)` embedded *inside* a quoted FMPL string never tokenizes
+    // as Symbol+LParen — it's a single StringLit token. This invariant is
+    // load-bearing for `scan_rust_strings`, which feeds FMPL-source-shaped
+    // Rust string literals here and must not double-count their contents.
+    let src = r#"let x = "fake :Foo(1, 2) inside a string""#;
+    let hits = scan_fmpl_source(src, fmpl_source("test.fmpl")).expect("lex ok");
+    assert!(hits.is_empty(), "expected 0 hits, got {:?}", hits);
+}
+
+#[test]
+fn scan_fmpl_source_operator_symbol_call_has_zero_hits() {
+    // Operator-style symbols (`:+`, `:==`, etc.) are not legacy
+    // tagged-constructor syntax — they are operator references. A site like
+    // `:+(args)` is exotic but legal under the lexer and must not be flagged.
+    let src = r#"let f = :+; f(1, 2)"#;
+    let hits = scan_fmpl_source(src, fmpl_source("test.fmpl")).expect("lex ok");
+    assert!(hits.is_empty(), "expected 0 hits, got {:?}", hits);
+
+    // Direct call form: `:+(args)` tokenizes as Symbol("+") + LParen but the
+    // scanner filters non-identifier tags.
+    let src2 = r#":+(1, 2)"#;
+    let hits2 = scan_fmpl_source(src2, fmpl_source("test.fmpl")).expect("lex ok");
+    assert!(hits2.is_empty(), "expected 0 hits, got {:?}", hits2);
+}
+
 // --- scan_rust_strings (test-only helper) ---
 
 #[test]
