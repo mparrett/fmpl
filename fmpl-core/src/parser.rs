@@ -619,25 +619,14 @@ impl<'a> Parser<'a> {
             Token::Symbol(s) => {
                 let s = s.clone();
                 self.advance();
-                // Check for tagged value: :Symbol(args...)
+                // Reject legacy :Symbol(args) syntax
                 if self.check(&Token::LParen) {
-                    self.advance(); // consume '('
-                    let mut args = Vec::new();
-                    if !self.check(&Token::RParen) {
-                        args.push(self.parse_expr()?);
-                        while self.check(&Token::Comma) {
-                            self.advance();
-                            if self.check(&Token::RParen) {
-                                break; // trailing comma
-                            }
-                            args.push(self.parse_expr()?);
-                        }
-                    }
-                    self.expect(&Token::RParen)?;
-                    Ok(Expr::Tagged(s, args))
-                } else {
-                    Ok(Expr::Symbol(s))
+                    return Err(self.error(&format!(
+                        "legacy :{}(...) constructor syntax is not supported; use [:{}...] instead",
+                        s, s
+                    )));
                 }
+                Ok(Expr::Symbol(s))
             }
             Token::True => {
                 self.advance();

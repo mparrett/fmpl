@@ -35,8 +35,8 @@ object barkeep {
 let cmd_grammar = grammar CmdGrammar {
   command = look | talk | order
   look    = "look" => :Look
-  talk    = "talk to " name:n => :Talk(n)
-  order   = "order " item:i => :Order(i)
+  talk    = "talk to " name:n => [:Talk, n]
+  order   = "order " item:i => [:Order, i]
   name    = [a-zA-Z ]+:cs => cs
   item    = [a-z]+:cs => cs
 }
@@ -44,9 +44,9 @@ let cmd_grammar = grammar CmdGrammar {
 // --- 4. Pattern dispatch: route parsed commands ---------------------------
 
 let dispatch = \cmd cmd @ {
-  :Look          => world.rd(:room).data.desc
-  :Talk(npc)     => barkeep.as(:customer).greet(npc)
-  :Order(item)   => barkeep.as(:customer).order(item)
+  :Look          => world.rd(:room).data.desc;
+  [:Talk, npc]   => barkeep.as(:customer).greet(npc);
+  [:Order, item] => barkeep.as(:customer).order(item);
   _              => "You can't do that."
 }
 

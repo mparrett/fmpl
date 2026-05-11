@@ -2069,9 +2069,9 @@ mod tests {
         // expr*:args inside a TagMatch should parse as Bind("args", Repeat(ApplyRule("expr"), ZeroOrMore))
         let src = r#"
             grammar test::star {
-                expr = :Tagged(tag, expr*:args) => :MakeTagged(tag, args)
-                     | :Call(expr:func, expr*:a) => :Call(func, a)
-                     | :List(expr*:items) => :MakeList(items)
+                expr = :Tagged(tag, expr*:args) => [:MakeTagged, tag, args]
+                     | :Call(expr:func, expr*:a) => [:Call, func, a]
+                     | :List(expr*:items) => [:MakeList, items]
             }
         "#;
 
@@ -2088,7 +2088,7 @@ mod tests {
         // expr:l inside a TagMatch should parse as Bind("l", ApplyRule("expr"))
         let src = r#"
             grammar test::bind {
-                expr = :Binary(:+, expr:l, expr:r) => :Add(l, r)
+                expr = :Binary(:+, expr:l, expr:r) => [:Add, l, r]
             }
         "#;
 
@@ -2105,7 +2105,7 @@ mod tests {
         // [:Binding(name, expr:value)] should parse a TagMatch inside a list pattern
         let src = r#"
             grammar test::tag_in_list {
-                expr = :Let([:Binding(name, expr:value)], expr:body) => :Let(name, value, body)
+                expr = :Let([:Binding(name, expr:value)], expr:body) => [:Let, name, value, body]
             }
         "#;
 
