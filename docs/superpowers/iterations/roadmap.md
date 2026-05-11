@@ -323,36 +323,240 @@ These gates are NOT new work — they are the existing iteration gates, framed u
 - Updating `fmpl-core/src/grammar/parser.rs:2072` internal grammar string `:Tagged(tag, expr*:args) => :MakeTagged(tag, args)` (relevant when MakeTagged is deleted in ITER-0004d).
 - Removing `FMPL_USE_FMPL_COMPILER` opt-in.
 
-### ITER-0004d — Parser/AST/Bytecode Burn (Phase B of STORY-0010)
+### ITER-0004d.0 — FMPL-Source-Grep Tooling Precursor
 
-**Stories:** STORY-0010 Phase B (AC-9, AC-10, AC-11, AC-12, AC-14 — the AST/parser/bytecode deletions plus the Rust-test source-string sweep). AC-1, AC-2, AC-8, and AC-15 already satisfied by ITER-0004b. AC-3 through AC-7 and AC-13 (stdlib greppable invariant) are Phase A (ITER-0004c). ITER-0004d's primary observables are the new parse-rejection scenarios SCENARIO-0104/0105 plus a `fmpl-core/src/`-greppable-invariant scenario SCENARIO-0106 (Rust-side `Expr::Tagged`/`Pattern::Constructor`/`Pattern::TagMatch` absence).
-**Rationale:** With the stdlib in canonical list-pattern syntax (ITER-0004c), the parser can stop accepting `:Tag(args)` value-constructor and pattern syntax. This iteration deletes the surviving AST/parser/bytecode surfaces and sweeps the Rust test corpus that still feeds `:Tag(args)` strings into `eval()`. After this iteration there is genuinely one shape and one syntax — no silent fallback path.
-**Status:** pending
-**Impacted scenarios:** SCENARIO-0104 NEW (parse-rejection of `:Tag(args)` value-construction), SCENARIO-0105 NEW (parse-rejection of `:Tag(p)` pattern syntax), SCENARIO-0106 NEW (greppable-invariant: stdlib + `fmpl-core/src/` clean). SCENARIO-0039 must be rewritten to list-pattern syntax (or owning stories deferred). SCENARIO-0066 hygiene update — references `Value::Tagged` which no longer exists. SCENARIO-0003 reconfirms with the post-burn parser.
-**Depends on:** ITER-0004c.
-**Look-ahead check:** Unblocks ITER-0006 (self-compile seed) — the seed compiles `fmpl_parser.fmpl + ast_to_ir.fmpl + ast_optimizer.fmpl` through a pipeline that has exactly one AST shape with no parser ambiguity, so the seed is reproducible.
+**Stories:** No new STORY-0010 ACs — bottom-up tooling carve-out scheduled 2026-05-10 from ITER-0004d PAR rounds 1 and 2. Round 1 surfaced that the AC-13/AC-14 grep gates produce massive false positives (Rust qualified paths `Pattern::Constructor(`, `Instruction::MakeTagged(` match the naive regex `:[A-Z][a-zA-Z_]*\(`) and that AC-14 has no permanent CI sentinel. Round 2 surfaced that the initial draft of this tool had a foundational tokenization error (it specified `Colon, Ident, LParen` as the FMPL-side token triple, but `fmpl-core/src/lexer.rs:113-115` consumes `:Foo` as a single `Token::Symbol("Foo")` token — colon-absorbed). This iteration ships the corrected tool.
+
+**Rationale:** A precise gate must distinguish FMPL syntax from Rust syntax. The strip-then-scan technique in `stdlib_no_legacy_syntax.rs` works for the `lib/core/*.fmpl` case where every byte is FMPL, but breaks down when scanning `fmpl-core/tests/*.rs` (where `Pattern::Constructor(` is Rust, not FMPL, but the regex matches both). The correct discriminator is "does the token stream — as produced by the existing FMPL lexer — contain a `Token::Symbol(s)` followed immediately by `Token::LParen`?" The lexer at `fmpl-core/src/lexer.rs:113-115` uses regex `:([a-zA-Z_][a-zA-Z0-9_]*|[+\-*/%<>=!|&]+)` and emits `Token::Symbol(SmolStr)` with the leading colon stripped from the slice. Both `:Foo(args)` (uppercase, the legacy tagged-constructor) AND `:foo(args)` (lowercase, also produced by the same legacy syntax) tokenize to `Symbol(name), LParen` — the tool must detect both, since after AC-9 (ITER-0004d.1) deletes the `LParen` arm at `parser.rs:619-640`, both forms become silent reinterpretations as `Call(Symbol, args)` rather than parse errors. Tool's correctness piggybacks on the Rust lexer the codebase already trusts; no parallel implementation.
+
+**Status:** done:ITER-0004d.0 (2026-05-10). Baseline: `lib/core=0, src/rs=43, tests/fmpl=72, tests/rs=625` (post-allowlist). See iteration-log.md for delivered scope, PAR findings, and known limitations carried forward to ITER-0004d.1.
+**Depends on:** ITER-0004c (so the stdlib is already in canonical list-pattern syntax — the tool's regression suite needs a clean `lib/core/` baseline to validate against).
+**Look-ahead check:** Unblocks ITER-0004d.1 (precise AC-14 sweep targets + permanent CI sentinel). Reusable by ITER-0004d.2 (opcode-name sweep across qualified-path Rust references — though that uses a separate scanner since opcode names are Rust identifiers, not FMPL strings), ITER-0004e (parser-helper relocation gate), ITER-0004f (binary-flatten gate), ITER-0006 (self-compile invariant scans). Replaces `fmpl-core/tests/stdlib_no_legacy_syntax.rs`'s hand-rolled scanner.
+
+**Files in scope:**
+- `fmpl-core/src/diagnostics/mod.rs` (NEW module — `fmpl-core/src/diagnostics/` directory does not currently exist; create it) — library module exposing the two scan functions and the `TaggedSyntaxHit` / `SourceKind` types.
+- `fmpl-core/Cargo.toml` — add `syn = { version = "2", features = ["full", "extra-traits"] }` as a `[dev-dependencies]` entry (verified absent: `grep syn fmpl-core/Cargo.toml` returns nothing). `syn` is only used by the test scanner and (optionally) the bin; runtime crate stays `syn`-free.
+- `fmpl-core/tests/no_legacy_fmpl_syntax.rs` (NEW) — CI gate that calls the library across all configured surfaces and **records** the current hit count (with `== 0` flip deferred to ITER-0004d.1).
+- `fmpl-core/tests/stdlib_no_legacy_syntax.rs` — DELETE (superseded by `no_legacy_fmpl_syntax.rs`). The deletion is part of ITER-0004d.0 because the new gate's `lib/core/` surface fully subsumes the old gate's coverage.
+- `fmpl-core/tests/diagnostics_fmpl_source_scan.rs` (NEW) — unit tests for the library.
+- (Optional, deferred) `xtask/` or `tools/fmpl-grep/` CLI bin — explicitly OUT OF SCOPE for ITER-0004d.0. The CI gate calls the library directly; no CLI consumer exists yet inside this iteration. If a later iteration wants a CLI, it's a small wrapper.
 
 **Scope:**
 
-1. **Sweep FMPL source strings inside Rust test files** to list-pattern syntax. Targets identified by PAR review (~50 files); enumerate exhaustively with `grep -rn ':[A-Z][a-zA-Z_]*(' fmpl-core/tests/`. Hot files: `tests/parser_equivalence.rs:82-85`, `tests/tagged_values.rs:8,32,45,58,70,82,96`, `tests/tagged_pattern_match.rs:20-100`, `tests/fmpl_interpreter.rs:36-69`, `tests/ast_to_ir_parity.rs:88-122`. Use sed/ast-grep where mechanical; hand-edit otherwise.
-2. **Update internal grammar production at `fmpl-core/src/grammar/parser.rs:2072`** — current `expr = :Tagged(tag, expr*:args) => :MakeTagged(tag, args)`. Either rewrite to list-pattern syntax with `:MakeListNode` opcode, or delete entirely if the production is dead post-migration. Decide and document.
-3. **Make the rename-vs-delete decision for tagged bytecode.** Two paths for AC-11: (a) DELETE — remove `Instruction::MakeTagged`, `MatchTag`, `ExtractTaggedChild`, `MatchTagged`, `MatchTaggedWithBindings` entirely; or (b) RENAME — rename surviving instructions to `MakeListNode`, `MatchListNode`, etc. to reflect list-shape semantics. Recommendation: DELETE if no remaining IR pattern emits these (which after ITER-0004c should be the case); RENAME only if the IR pattern landscape requires preserving an opcode. Make the decision at iteration start and document it as a binding precondition.
-4. **Delete `Expr::Tagged`** AST variant. Update `fmpl-core/src/value_to_ast.rs:358` (constructor arm), `fmpl-core/src/builtins/ir_to_rust.rs:1440,1873`, `fmpl-core/src/repr.rs:101`, and any other producer/consumer site enumerated by `grep -rn 'Expr::Tagged' fmpl-core/src/` at iteration start. PAR review estimate: ~25 deletion sites total across `parser.rs`, `grammar/parser.rs`, `compiler.rs`, `value_to_ast.rs`, `builtins/ir_to_rust.rs`, `repr.rs`, `pattern/mod.rs`, `grammar/runtime.rs`, `grammar/trampoline.rs`, `grammar/optimizer.rs`, `builtins/grammar_to_ir.rs`, `builtins/ast.rs`. Re-grep at iteration start to enumerate authoritatively.
-5. **Delete `Pattern::Constructor`** and `Pattern::TagMatch` runtime/trampoline handlers. Update `fmpl-core/src/value_to_ast.rs:1241`, `fmpl-core/src/repr.rs:225`, `fmpl-core/src/pattern/mod.rs`, `fmpl-core/src/grammar/runtime.rs:794`, `fmpl-core/src/grammar/trampoline.rs`, etc. Re-grep at iteration start.
-6. **Delete the parser productions** for `:Tag(args)` value-construction expressions and `:Tag(p1, p2)` patterns at `fmpl-core/src/grammar/parser.rs::parse_value_pattern` and the corresponding expression production. Bare `:foo` symbol literals (`Expr::Symbol`) remain — only the parenthesized-arguments form is deleted.
-7. **Update `lib/core/ast_to_ir.fmpl:21`** rule `[:Tagged, any:tag, exprs:xs] => [:MakeTagged, tag, xs]` becomes dead after AC-9 (no `Expr::Tagged` produced) and AC-11 (no `MakeTagged` instruction). Either delete the rule or rewrite to whatever the rename decision in scope item 3 demands.
-8. **Update `lib/core/fmpl_parser.fmpl`** lines 82-83 and 287-292 (`=> :Tagged(tag, items)`, `=> :PatternTagged(tag, pats)`) — these RHS expressions emit AST node shapes that downstream `value_to_ast.rs` decodes. After ITER-0004c the syntax is `[:Tagged, tag, items]` / `[:PatternTagged, tag, pats]`, but the underlying AST shape is the same `Tagged`/`PatternTagged` node. After the AC-9 deletion of `Expr::Tagged`, either the FMPL parser stops emitting `Tagged`/`PatternTagged` AST nodes, OR the decoder keeps handling them. Decide which and update both ends together to avoid an asymmetric coherence gap.
-9. **Reconcile scenarios:** rewrite SCENARIO-0039 to list-pattern syntax (or defer the owning stories STORY-0057/0054/0053 if SCENARIO-0039 is no longer authoritative). Update SCENARIO-0066 to reflect post-burn `Value` shape. Add SCENARIO-0104, SCENARIO-0105, SCENARIO-0106.
-10. **Verification:**
-    - `grep -rnE 'Expr::Tagged|Pattern::Constructor|Pattern::TagMatch' fmpl-core/src/` returns no matches (AC-9, AC-10, AC-12).
-    - `grep -rnE ':[A-Z][a-zA-Z_]*\(' fmpl-core/tests/` returns no matches in FMPL source string positions (AC-14 — Rust-test source-string sweep).
-    - AC-13 invariant established by ITER-0004c remains satisfied: `grep -cE ':[A-Z][a-zA-Z_]*\(' lib/core/*.fmpl` returns 0 (sanity check; not new work for ITER-0004d).
-    - SCENARIO-0104, SCENARIO-0105 fail-fast on `:Tag(args)` input.
-    - SCENARIO-0106 (new): `grep -rnE 'Expr::Tagged|Pattern::Constructor|Pattern::TagMatch' fmpl-core/src/` returns no matches.
-    - Full workspace test suite passes.
-    - SCENARIO-0103 still passes.
+1. **Library module `diagnostics`.** Public API:
+   - `pub struct TaggedSyntaxHit { pub source: SourceKind, pub byte_offset: usize, pub tag: SmolStr }` where `SourceKind` is `FmplFile { path: PathBuf }` or `RustString { rust_path: PathBuf, rust_byte_offset: usize }`.
+   - `pub fn scan_fmpl_source(text: &str, source: SourceKind) -> Result<Vec<TaggedSyntaxHit>>` — tokenize via `crate::lexer::Lexer::new(text).tokenize()`. **Note: `Lexer::tokenize` returns `Result` (verified `fmpl-core/src/lexer.rs:264-282`)**; this function propagates the error. Walk the resulting `Vec<SpannedToken>` and for each `Token::Symbol(s)` immediately followed by `Token::LParen`, emit a `TaggedSyntaxHit` with `tag = s.clone()`. Detect BOTH uppercase AND lowercase first-letter — after AC-9 lands, both `:Foo(args)` and `:foo(args)` silently reinterpret as Call expressions, so both must be swept and gated.
+   - `pub fn scan_rust_strings(rust_src: &str, rust_path: &Path) -> Result<Vec<TaggedSyntaxHit>>` — parse via `syn::parse_file`, walk the syntax tree with a `syn::visit::Visit` impl, extract every `syn::Lit::Str` (string literals; raw strings handled by `LitStr::value()`). For each literal, attempt `scan_fmpl_source(literal.value(), SourceKind::RustString { rust_path: rust_path.into(), rust_byte_offset: literal.span().byte_range().start })`. **Critical: many string literals are not valid FMPL fragments (shell strings, format strings, doc snippets)**; lexer errors on non-FMPL content are swallowed silently with the rationale that "if it can't even lex as FMPL, it cannot contain valid `:Tag(args)` syntax" (a string containing an unparseable char halfway through still permits the prefix to be scanned — but for the AC-13/14 invariant, the worst case is a missed hit, not a false positive, and a missed hit will resurface the first time someone refactors the file). Document the swallow policy in the function docstring. Rust comments and Rust qualified paths (`Pattern::Constructor(...)`) are not part of the syntax-tree string-literal set, so false positives disappear by construction.
+   - `pub enum DiagnosticsError { LexerError { path: PathBuf, message: String }, SynParseError { path: PathBuf, error: syn::Error } }` — error type for cases where the caller wants strict failure (e.g., the CI gate optionally fails on Rust files that don't parse).
 
-**Out of scope:** Removing `FMPL_USE_FMPL_COMPILER` opt-in. Cleanup of any dead-tagged residue inside the bootstrap parser that is gated only by tooling around it.
+2. **CI gate `no_legacy_fmpl_syntax.rs`.** Walks four surfaces:
+   - **`lib/core/*.fmpl`** — every `.fmpl` file under `lib/core/`. Calls `scan_fmpl_source` directly on file contents.
+   - **`fmpl-core/tests/fmpl/*.fmpl`** — every `.fmpl` file under `fmpl-core/tests/fmpl/`. Same surface as above. Includes the orphan files `ast_to_ir.fmpl` and `fmpl_parser.fmpl` (live test fixtures `apply_operator.fmpl` and `fmpl_grammar.fmpl` will pass; orphans will not).
+   - **`fmpl-core/tests/*.rs` string literals** — every `.rs` file under `fmpl-core/tests/`. Calls `scan_rust_strings`.
+   - **`fmpl-core/src/*.rs` string literals** — every `.rs` file under `fmpl-core/src/`. Calls `scan_rust_strings`.
+   
+   At ITER-0004d.0 time, the gate **records the actual hit count per surface** and asserts no growth — implemented as a baseline-stored JSON file at `fmpl-core/tests/no_legacy_fmpl_syntax.baseline.json` that the gate writes once (when `FMPL_REGEN_BASELINE=1` env var is set) and asserts against on every run. This avoids the "fabricated 692 number" problem from PAR round 2 — the baseline is *whatever the tool actually finds*, frozen at the iteration's land time. ITER-0004d.1 deletes the baseline file and changes the gate to assert `== 0` instead.
+
+3. **Allowlist mechanism.** The gate's own source file may contain example FMPL strings inside its test cases (`r#":Foo(1, 2)"#` etc.). An allowlist `&[(file_glob, byte_range_or_substring)]` excludes specific known-OK hits. Allowlist is a small constant in the gate source itself.
+
+4. **Delete `fmpl-core/tests/stdlib_no_legacy_syntax.rs`.** Self-contained test (no callers); the new gate subsumes it.
+
+5. **Bootstrap-mode behavior:** `crate::lexer` is unchanged by ITER-0004d.1; the library compiles and runs against the pre-burn codebase. After ITER-0004d.1, the FMPL files no longer contain `:Tag(args)` syntax — so `scan_fmpl_source` is a no-op on them. After ITER-0004d.1, the `tests/*.rs` strings are swept and the gate flips to `== 0`. The library's API surface stays stable across both iterations.
+
+6. **Unit tests (`diagnostics_fmpl_source_scan.rs`):**
+   - `scan_fmpl_source` finds one hit for `r#"let x = :Foo(1, 2)"#`.
+   - `scan_fmpl_source` finds one hit for `r#"let x = :foo(1, 2)"#` (lowercase — same legacy form).
+   - `scan_fmpl_source` finds zero hits for `r#"let x = [:Foo, 1, 2]"#` (list-pattern syntax, no LParen after Symbol).
+   - `scan_fmpl_source` finds zero hits for `r#"let x = :foo"#` (bare symbol).
+   - `scan_fmpl_source` finds zero hits for `r#"-- :Foo(1, 2) in a comment"#` (lexer skips comments per `lexer.rs` regex).
+   - `scan_rust_strings` finds exactly one hit when fed Rust source containing both `let s = "let x = :Foo(1, 2)";` AND `let p: Pattern = Pattern::Constructor("Foo", vec![]);` — the second is a Rust qualified path, not in any string literal.
+   - `scan_rust_strings` finds zero hits when fed `r##"r#"[:Foo, 1, 2]"#"##` (raw-string with list-pattern content).
+   - `scan_rust_strings` errors-or-swallows when fed a string with mid-content lexer-illegal chars (`"some \u{0007} bell"`); document the chosen behavior.
+
+7. **CI gate first-run validation:** With `FMPL_REGEN_BASELINE=1`, generate the baseline JSON. Inspect it: expect roughly 14 files in `tests/*.rs` (per round-2 ground truth — *not* a hard assertion in the gate code, just a sanity check that the tool found something close to the expected order of magnitude). Commit the baseline. Subsequent runs without `FMPL_REGEN_BASELINE` assert against the file.
+
+**Verification gates:**
+- `cargo test -p fmpl-core --test diagnostics_fmpl_source_scan` passes (unit tests for the library, ~8 cases).
+- `cargo test -p fmpl-core --test no_legacy_fmpl_syntax` passes against the committed baseline JSON.
+- `cargo build -p fmpl-core --tests` succeeds (verifies `syn` `[dev-dependencies]` entry works).
+- AC-13 invariant from ITER-0004c remains satisfied — the new gate's `lib/core/` baseline records 0 hits (the migration is already complete; if non-zero, that's a regression in ITER-0004c that needs investigation first).
+
+**Out of scope (for ITER-0004d.0):** Scanning markdown / docs / behavior-scenarios.md. Scanning `xtask/`, `examples/`, or third-party crates. Adding a CLI `xtask fmpl-grep` bin — deferred to whichever subsequent iteration first needs a CLI consumer. The `--format json` and `--exclude` CLI flags from round-1 spec are dropped (no consumer named them). Flipping the gate's assertion from "matches baseline" to `== 0` — that's ITER-0004d.1's responsibility.
+
+### ITER-0004d.1 — Parser/AST/Pattern Burn (AC-9, AC-10, AC-12)
+
+**Stories:** STORY-0010 Phase B AC-9, AC-10, AC-12 (the AST/parser surfaces; bytecode opcode rename moves to ITER-0004d.2). Also: SCENARIO-0039 rewrite, SCENARIO-0066 rewrite, STORY-0095/EPIC-032 AC-4 repair, and the CI-gate flip from ITER-0004d.0.
+
+**Rationale:** With the precise tool from ITER-0004d.0 in place, this iteration deletes the AST/parser surfaces that produce tagged-constructor values. Three distinct deletion surfaces, NOT two (round-2 PAR caught this — there are two `Pattern` enums in the codebase plus a tagged variant in each):
+
+| Surface | File | Type produced | Deletion AC |
+|---|---|---|---|
+| FMPL source-level expression `:Tag(args)` | `fmpl-core/src/parser.rs:619-640` | `ast::Expr::Tagged(SmolStr, Vec<Expr>)` (defined at `ast.rs`) | AC-9 |
+| FMPL source-level pattern `:Tag(p1, p2)` | `fmpl-core/src/parser.rs:1849-1871` | `ast::Pattern::Constructor(SmolStr, Vec<Pattern>)` (defined at `fmpl-core/src/ast.rs:116`) | AC-10 |
+| Grammar-pattern unified `Pattern::Tagged { tag, patterns }` | (decoder-produced from list-shape AST; consumers walk it) | `pattern::Pattern::Tagged { tag: SmolStr, patterns: Vec<Pattern> }` (defined at `fmpl-core/src/pattern/mod.rs:58-61`) | AC-10/12 |
+| Grammar-pattern tree-grammar value match `:Tag(p)` | `fmpl-core/src/grammar/parser.rs:899,1136,1333` | `pattern::Pattern::TagMatch(SmolStr, Vec<Pattern>)` (defined at `fmpl-core/src/pattern/mod.rs:143`) | AC-12 |
+
+(There is a third `Pattern` enum at `fmpl-core/src/tuplespace/mod.rs:77` but it has no `Tagged`/`Constructor`/`TagMatch` variant and is out of scope.)
+
+**Status:** pending
+**Impacted scenarios:** SCENARIO-0104 NEW, SCENARIO-0105 NEW, SCENARIO-0106 NEW, SCENARIO-0039 rewrite, SCENARIO-0066 rewrite. `no_legacy_fmpl_syntax.rs` CI gate flips to `== 0`. SCENARIO-0103 + SCENARIO-0016 continue to pass (sentinels). SCENARIO-0003 reconfirms.
+**Depends on:** ITER-0004d.0 (precise FMPL-source scanner).
+**Look-ahead check:** Unblocks ITER-0004d.2 (opcode rename — the dead match arms in `compiler.rs` consuming `Expr::Tagged` / `Pattern::Constructor` are deleted here, leaving only emit sites that are themselves dead code, simplifying the rename surface). Unblocks ITER-0006 (the parser has exactly one AST shape).
+
+**Binding preconditions:**
+
+- **Explicit parse-rejection logic for AC-9.** Round-2 PAR caught that the original plan was wrong about what happens when the `Token::LParen` arm at `parser.rs:619-640` is deleted. The fallthrough is to `parse_postfix` at `parser.rs:512-515`, which sees `LParen` immediately after `Expr::Symbol` and produces `Expr::Call(Symbol, args)` — a silent reinterpretation, NOT a parse error. To preserve the AC-9 "parse rejection" intent, the deletion must be **replaced with an explicit error**: when `parse_primary` sees `Token::Symbol(s)` immediately followed by `Token::LParen`, emit a clear `Error::Parser { token, message: format!("Legacy tagged-constructor syntax `:{}(...)` was removed in ITER-0004d.1. Use list-pattern syntax `[:{}, ...]` instead.", s, s) }`. Same treatment for the pattern surface at `parser.rs:1849-1871`. SCENARIO-0104 / SCENARIO-0105 observables are stated in terms of "parse error returned and Expr::Tagged value not produced" — observable from a wrapper test, not from the error API's structured fields.
+- **Scenario observables reworded to be testable.** SCENARIO-0104/0105 do not require "token range in the error" (the `Error::Parser` type at `fmpl-core/src/error.rs:14-15` only carries `token: usize` + `message: String` — no range field). Observables instead state: "parse() of `:Tag(args)` returns `Err(Error::Parser { .. })`; the error message contains the offending source-side identifier; the parsed AST is not produced." This is testable today without API work.
+- **Three tagged-pattern surfaces, not two.** The deletion graph must cover all three (per the table above).
+
+**Scope:**
+
+1. **Baseline confirmation.** Run `cargo test -p fmpl-core --test no_legacy_fmpl_syntax` (from ITER-0004d.0). Confirm the baseline JSON matches the working tree.
+
+2. **Add explicit parse-rejection logic** (binding precondition above). Edit `fmpl-core/src/parser.rs:619-640` to replace the existing `if self.check(&Token::LParen) { ... Ok(Expr::Tagged(s, args)) }` block with an early-error path that emits `Error::Parser` when `LParen` follows `Token::Symbol(s)`. Same for `parser.rs:1849-1871`. Add unit tests for both rejections (these become SCENARIO-0104 / SCENARIO-0105 observables). **Note:** at this step `Expr::Tagged` and `Pattern::Constructor` variants still exist; they're not yet unreachable because other (non-parser) producers may still construct them. The early-error parser change merely closes the *parser* production for these shapes.
+
+3. **Sweep `fmpl-core/tests/*.rs` FMPL source strings.** Use the ITER-0004d.0 scanner output as the precise target list. For each hit, hand-edit the string literal to use list-pattern syntax. After each file, regenerate the baseline (`FMPL_REGEN_BASELINE=1 cargo test ... no_legacy_fmpl_syntax`) and inspect the diff. After all files, regenerate the baseline; expect zero hits across `tests/*.rs`. Also includes the `parser_equivalence.rs:82-85` "Tagged values (constructors)" corpus block which is semantically invalidated by AC-9 (not mechanically rewritten — either delete the block or rewrite to test list-shape parity).
+
+4. **Sweep `fmpl-core/src/*.rs` FMPL source strings.** Same approach. Most src files don't contain FMPL strings, but some doctest examples might.
+
+5. **Delete orphan `fmpl-core/tests/fmpl/{ast_to_ir,fmpl_parser}.fmpl`.** Verified spike solutions from commit `66c42665` (2026-01-29); zero references (`grep tests/fmpl/` finds only `fmpl_runner.rs:50` for `apply_operator.fmpl` and `grammar/parser.rs:2046` for `fmpl_grammar.fmpl` — neither references the orphans). Closes the coherence gap.
+
+6. **Update `lib/core/fmpl_parser.fmpl`** — delete `tagged_arg_rest` (line 80), `tagged_args` (line 81), `tagged_with_args` (line 82), `tagged_empty` (line 83), `tagged` (line 84), `pat_constructor` (line 292), `pat_arg_rest` (line 294), `pat_args` (line 295). Update the `primary` rule (line 178) to drop the `tagged` alternative. Update the pattern alternation to drop `pat_constructor`. Bare `:foo` symbol literals (a different rule) remain. **Line numbers verified 2026-05-10 post-ITER-0004c migration.**
+
+7. **Update `lib/core/ast_to_ir.fmpl:21`** — delete the rule `[:Tagged, any:tag, exprs:xs] => [:MakeTagged, tag, xs]` entirely (its producer `Expr::Tagged` no longer exists after step 8).
+
+8. **Delete `Expr::Tagged` AST variant** (AC-9). Producer + consumer sites (verified 2026-05-10):
+   - Producer: `fmpl-core/src/parser.rs:619-640` — step 2 already removed the `LParen` arm. The variant itself remains constructable from other paths until those are deleted.
+   - Decoder: `fmpl-core/src/value_to_ast.rs:358` (decoder constructs `Expr::Tagged`); `fmpl-core/src/builtins/ir_to_rust.rs:1440`; `fmpl-core/src/builtins/ast.rs:27` (`expr_to_value` arm — delete the arm; the encoder no longer needs to encode `Tagged`); `fmpl-core/src/builtins/grammar_to_ir.rs:311`.
+   - Display impl arm: `fmpl-core/src/repr.rs:225`.
+   - Compiler consumer at `fmpl-core/src/compiler.rs:869-874` (the `Expr::Tagged(tag, args) =>` arm emitting `Instruction::MakeTagged`) — delete the arm. **Note:** the surrounding `Instruction::MakeTagged` opcode is NOT renamed in this iteration; ITER-0004d.2 handles the rename. For now, deleting the arm leaves the opcode emission-less but still defined.
+   - Variant definition: `fmpl-core/src/ast.rs` (search for `Tagged(SmolStr, Vec<Expr>)` in the `Expr` enum, after all consumers are deleted).
+   - Order: delete consumers → delete the variant. Verify with `grep -rn 'Expr::Tagged' fmpl-core/src/` returning zero matches.
+
+9. **Delete `ast::Pattern::Constructor` variant** (AC-10). Producer + consumer sites:
+   - Producer: `fmpl-core/src/parser.rs:1849-1871` — step 2 already removed the `LParen` arm.
+   - Decoder/encoder: `fmpl-core/src/value_to_ast.rs:1241`, `fmpl-core/src/builtins/ir_to_rust.rs:1873`, `fmpl-core/src/builtins/ast.rs:398`.
+   - Display impl: `fmpl-core/src/repr.rs:101`.
+   - Compiler consumer arms at `fmpl-core/src/compiler.rs:2540-2548` (emits `MatchTag` for outer constructor — PRESERVED opcode), `:2646-2670` (emits nested `MatchTag` + `ExtractTaggedChild` for nested constructors), `:2958-2967` (emits `ExtractTaggedChild` for unification). Delete the arms entirely; their consumer `Pattern::Constructor` is gone. The opcodes those arms emitted (`MatchTag`, `ExtractTaggedChild`) lose these specific emit sites but `MatchTag` is still emitted by `Pattern::Symbol` (preserved), and `ExtractTaggedChild` emit sites in `compiler.rs:3117, 3342` may also become unreachable depending on whether their containing arms reference `Pattern::Constructor` — verify at iteration start. `ExtractTaggedChild` is also emitted from `builtins/ir.rs:776` which IS reachable from a different code path (verify at iteration start).
+   - `is_symbol_with_paren()` helper at `parser.rs:1963` and its caller at `parser.rs:1599` (`parse_let` destructuring) — become dead code; delete.
+   - Variant definition: `fmpl-core/src/ast.rs:116`.
+
+10. **Delete `pattern::Pattern::Tagged` variant** (AC-10/12, the unified-pattern surface). The variant is decoded from list-shape AST values by `value_to_ast.rs` (somewhere — search) and consumed by:
+    - `fmpl-core/src/grammar/runtime.rs:1149`
+    - `fmpl-core/src/grammar/trampoline.rs:1183`
+    - `fmpl-core/src/grammar/optimizer.rs:215`
+    - `fmpl-core/src/builtins/grammar_to_ir.rs:250`
+    - `fmpl-core/src/repr.rs:687`
+    - Compiler arms in `compiler.rs:3111` (UP::Tagged → MatchListNode emit), `:3333` (UP::Tagged → MatchListNode emit), `:4380` (MatchTaggedWithBindings emit) — these emit the legacy opcode names. After this iteration, the arms are deleted, but the opcode definitions remain until ITER-0004d.2.
+    - Variant definition: `fmpl-core/src/pattern/mod.rs:58-61`.
+
+11. **Delete `pattern::Pattern::TagMatch` variant** (AC-12). Producer + consumer sites:
+    - Grammar-DSL parser productions: `fmpl-core/src/grammar/parser.rs:899, 1136, 1333` — delete.
+    - Consumers: `fmpl-core/src/grammar/runtime.rs:784`, `fmpl-core/src/grammar/trampoline.rs:999`, `fmpl-core/src/grammar/optimizer.rs:221`, `fmpl-core/src/pattern/mod.rs:281`, `fmpl-core/src/builtins/grammar_to_ir.rs:234`, `fmpl-core/src/repr.rs:616`.
+    - Variant definition: `fmpl-core/src/pattern/mod.rs:143`.
+
+12. **Update grammar-DSL test fixtures**. Round-2 PAR identified THREE test functions in `fmpl-core/src/grammar/parser.rs` using grammar-DSL `:Tag(args)` patterns:
+    - `:2067-2084` `test_parse_star_quantifier_in_tag_child`
+    - `:2086-2101` `test_parse_rule_binding_in_tag_child`
+    - `:2103-2118` `test_parse_tag_in_list_pattern`
+    
+    All three feed grammar source strings containing `:Tagged(...)`, `:Binary(...)`, `:Let(...)`, etc. into the grammar parser. After step 11 deletes the grammar-DSL productions, these tests will fail. **Resolution: this step lands BEFORE step 11** — rewrite each test to use the list-pattern equivalent (`[:Tagged, ...]`), or delete tests whose underlying feature (e.g., star-in-tag-child) no longer applies.
+
+13. **Repair STORY-0095/AC-4 in `docs/superpowers/iterations/requirements/EPIC-032.md:21`.** Current text references the deleted `Value::Tagged` type. Rewrite to: `AC-4: List values with a Symbol head carry an SmolStr tag and Arc<Vec<Value>> children for constructor-shape values, accessed via Value::as_node() · impact:local · seam:unit · scenario:SCENARIO-0066`.
+
+14. **Update EPIC-002.md STORY-0010 AC tags.** AC-9, AC-10, AC-12 currently lack `· scenario:` tags; this iteration's scenarios pin them:
+    - AC-9: `· scenario:SCENARIO-0104, SCENARIO-0106`
+    - AC-10: `· scenario:SCENARIO-0105, SCENARIO-0106`
+    - AC-12: `· scenario:SCENARIO-0105, SCENARIO-0106`
+    (AC-11 gets its scenario tag in ITER-0004d.2; AC-14 is covered by the CI gate.)
+
+15. **Reconcile scenarios in `behavior-scenarios.md`:**
+    - **Rewrite SCENARIO-0039** (currently uses `:int(n)` value-pattern syntax in grammar definitions): translate to list-pattern syntax `[:int, any:n]`. The test stays a tree-grammar-constant-folding test; the syntax updates. Preserves STORY-0057/0054/0053 owning stories.
+    - **Rewrite SCENARIO-0066** per scope item 13 (drop `Value::Tagged` references; assert list-node shape via `Value::as_node()`).
+    - **Add SCENARIO-0104** — parser rejects `:Tag(args)` value-constructor syntax at the FMPL source surface. Observable: `parse(":Foo(1, 2)")` returns `Err(Error::Parser { .. })` with a message naming the offending tag. Observable: bare `:foo` symbol literals continue to parse as `Expr::Symbol`. Note: this iteration does NOT add explicit rejection at the grammar-DSL surface (`grammar/parser.rs`) — that surface's `:Tag(args)` productions are simply deleted (step 11), so parsing a grammar containing `:Tag(args)` becomes a different parser-level error (likely "unexpected token"). Document the divergent error shapes.
+    - **Add SCENARIO-0105** — parser rejects `:Tag(p1, p2)` pattern syntax at the FMPL source surface; observable as above for the pattern surface.
+    - **Add SCENARIO-0106** — Rust-side greppable invariant: `grep -rnE 'Expr::Tagged|ast::Pattern::Constructor|pattern::Pattern::Tagged|pattern::Pattern::TagMatch' fmpl-core/src/` returns no matches. Automated via a small Rust test that walks the source tree. (Naming is qualified to disambiguate the two `Pattern` enums.)
+
+16. **Flip the `no_legacy_fmpl_syntax.rs` CI gate** from "asserts against baseline" to "asserts `== 0`". Delete the `no_legacy_fmpl_syntax.baseline.json` file.
+
+**Verification:**
+- `cargo test -p fmpl-core --test no_legacy_fmpl_syntax` returns 0 hits across all four surfaces (permanent CI sentinel for AC-13 + AC-14).
+- `grep -rnE 'Expr::Tagged|ast::Pattern::Constructor|pattern::Pattern::Tagged\b|pattern::Pattern::TagMatch' fmpl-core/src/` returns no matches.
+- SCENARIO-0104, SCENARIO-0105 pass.
+- SCENARIO-0103 + SCENARIO-0016 still pass (parity sentinels).
+- Full workspace test suite passes (a few `Instruction::MakeTagged` / `MatchTagged` references in compiler.rs and vm.rs survive — they are renamed in ITER-0004d.2).
+- `fmpl-core/tests/fmpl/{ast_to_ir,fmpl_parser}.fmpl` no longer present on disk.
+- EPIC-032.md:21 STORY-0095/AC-4 rewritten.
+- EPIC-002.md AC-9, AC-10, AC-12 have `· scenario:` tags.
+
+**Out of scope (deferred to ITER-0004d.2):** AC-11 bytecode opcode rename. AC-14 Rust-test sweep — wait, AC-14 IS in this iteration (it's the sweep of FMPL source strings in Rust tests, scope items 3 + 4). Distinction: AC-14 is FMPL-string sweep; ITER-0004d.2's "qualified-path sweep" handles `Instruction::MatchTagged` → `Instruction::MatchListNode` in Rust assertion code, which is NOT a `:Tag(args)` syntax issue.
+
+**Out of scope (other iterations):** `Type::Tagged` cleanup → ITER-0004h. Removing `FMPL_USE_FMPL_COMPILER` opt-in.
+
+### ITER-0004d.2 — Bytecode Opcode Rename (AC-11)
+
+**Stories:** STORY-0010 Phase B AC-11. Adds SCENARIO-0107.
+
+**Rationale:** With the AST/Pattern surfaces deleted (ITER-0004d.1), the tagged-bytecode opcodes have only emit sites in dead/about-to-be-deleted code. This iteration renames the surviving list-node-shaped opcodes for clarity (`MakeTagged` → `MakeListNode`, etc.) and sweeps qualified-path references in Rust test files. **`MatchTag` is preserved unchanged** — it backs `Pattern::Symbol` matching which AC-9 explicitly preserves.
+
+**Status:** pending
+**Depends on:** ITER-0004d.1 (AST/Pattern variants deleted; consumer arms in compiler.rs deleted with them; the remaining emit sites for the renamed opcodes are limited and traceable).
+**Look-ahead check:** Unblocks ITER-0005 (persistence: the renamed opcodes are what gets serialized to Fjall via `CompiledCode::save_to_fjall`). Forward-compatibility: Serde wire-format preservation handled via `#[serde(rename = ...)]` attributes (binding precondition below).
+
+**Binding preconditions:**
+
+- **Rename map** (verified 2026-05-10 against `fmpl-core/src/compiler.rs` and `fmpl-core/src/vm.rs`):
+  - `Instruction::MakeTagged { tag, args }` → `Instruction::MakeListNode { tag, args }`. Definition: `compiler.rs:260`. VM handler: `vm.rs:877`. Emit sites: `compiler.rs:874` (post-ITER-0004d.1 this arm may be deleted; verify), `ir_builder.rs:238-240`, plus `builtins/ir.rs:336` string-to-instruction lookup (`"MakeTagged"` → `"MakeListNode"`).
+  - `Instruction::ExtractTaggedChild { source, index }` → `Instruction::ExtractListChild { source, index }`. Definition: `compiler.rs:363`. VM handler: `vm.rs:1182`. Emit sites (post-ITER-0004d.1): `compiler.rs:2965, 3117, 3342` (verify reachability after AC-10 deletes Pattern::Constructor arms) and `builtins/ir.rs:776` (separate code path, reachable independently).
+  - `Instruction::MatchTagged { tag_idx, patterns }` → `Instruction::MatchListNode { tag_idx, patterns }`. Definition: `compiler.rs:505`. VM handler: `vm.rs:2567` (Reviewer A round 2 caught that the original plan omitted this line). Emit sites: `compiler.rs:3346, 3809` and possibly `:4389` — verify which survive ITER-0004d.1.
+  - `Instruction::MatchTaggedWithBindings { tag_idx, bindings }` → `Instruction::MatchListNodeWithBindings { tag_idx, bindings }`. Definition: `compiler.rs:510`. VM handler: `vm.rs:2521`. Emit sites: `compiler.rs:4380` (verify survives ITER-0004d.1). Cross-reference: `vm.rs:2609` is inside `MatchTagged`'s nested dispatch, not an emit site — it's renamed if the surrounding match arm is renamed.
+  - `Instruction::MatchTag { tag_idx, fail_target, expected_arity }` — **PRESERVED unchanged**. Definition: `compiler.rs:369`. VM handler: `vm.rs:1204` (single handler dispatches both `expected_arity: None` for Pattern::Symbol and `expected_arity: Some(n)` for Pattern::Constructor — but post-ITER-0004d.1, only the `None` case has live emit sites because Pattern::Constructor is deleted). Emit sites post-ITER-0004d.1: `compiler.rs:2533, 2665` (the `Pattern::Symbol`-emitting sites; `:2542, 2654` are deleted with Pattern::Constructor arms).
+
+- **Serde wire-format compatibility.** `Instruction` derives `Serialize, Deserialize` (verify via `fmpl-core/src/compiler.rs` enum-attribute lines). `serde_json::to_vec(self)` serializes variants by **variant name**, so renaming changes the wire format. Two options:
+  - **Option A: bump format version, drop legacy names.** Cleanest. Requires ITER-0005's STORY-0099 versioned envelope to handle the migration. Doesn't apply here because ITER-0005 hasn't shipped.
+  - **Option B (binding): preserve wire-format compat via `#[serde(rename = "MakeTagged")]`** on each renamed variant. Wire format stays identical; Rust code uses the new names. The rename map above is implemented purely as a Rust-level cosmetic rename plus a `serde(rename)` attribute per variant. No persisted-bytecode migration needed.
+  - **Decision: Option B.** Defer wire-format breakage to ITER-0005's envelope. Document the `#[serde(rename)]` attributes as the explicit forward-compat surface; ITER-0005 may choose to drop them when bumping the envelope version.
+
+- **MatchTag inclusion check.** `compiler.rs:369` and `vm.rs:1204` MUST NOT appear in the rename map's edit targets. Round-2 PAR caught these as accidentally-included in an earlier draft.
+
+**Scope:**
+
+1. **Rename variants in `compiler.rs:260, 363, 505, 510`** (NOT line 369, which is `MatchTag`). Add `#[serde(rename = "MakeTagged")]` etc. to each renamed variant.
+
+2. **Rename VM handler arms in `vm.rs:877, 1182, 2567, 2521`** (NOT line 1204, which is `MatchTag`). Verify with `grep -nE 'Instruction::(MakeTagged|MatchTagged|MatchTaggedWithBindings|ExtractTaggedChild)' fmpl-core/src/vm.rs` returns no matches after edit.
+
+3. **Rename emit sites in `compiler.rs`** for whichever sites survived ITER-0004d.1. Run `grep -nE 'Instruction::(MakeTagged|MatchTagged|MatchTaggedWithBindings|ExtractTaggedChild)' fmpl-core/src/compiler.rs` at iteration start to enumerate. Expect 3-6 surviving sites.
+
+4. **Rename emit sites in `ir_builder.rs:238-240`** for `MakeTagged` → `MakeListNode`.
+
+5. **Rename `builtins/ir.rs:336`** string lookup (`"MakeTagged"` → `"MakeListNode"`). Verify other tagged-opcode string lookups in the same dispatch table get renamed too.
+
+6. **Rename emit site in `builtins/ir.rs:776`** for `ExtractTaggedChild` → `ExtractListChild`.
+
+7. **Sweep Rust test qualified-path references.** Round-2 PAR enumerated:
+   - `fmpl-core/tests/context_aware_compilation.rs` — 10 matches at lines 4, 105, 108, 112, 115, 118, 121, 347, 350, 353 (using `Instruction::MatchTagged` / `Instruction::ExtractTaggedChild` in `matches!()` macros).
+   - `fmpl-core/tests/stream_coercion.rs` — verify legacy opcode references.
+   - Other files: run `grep -lE 'Instruction::(MakeTagged|MatchTagged|MatchTaggedWithBindings|ExtractTaggedChild)\b' fmpl-core/tests/` at iteration start to enumerate authoritatively. Round-2 ground truth: `grep -rn 'MakeTagged\|MatchTagged\|ExtractTaggedChild' src/ tests/` returns 60+ references; enumerate before sweeping.
+
+8. **Update `lib/core/ast_to_ir.fmpl`** if any rule still references `:MakeTagged` as an emit target. (ITER-0004d.1 already deleted the `[:Tagged, ..., => [:MakeTagged, tag, xs]` rule at line 21.) Verify by re-scanning.
+
+9. **Add SCENARIO-0107** — bytecode-opcode invariant: 
+   - `grep -rnE 'Instruction::(MakeTagged|MatchTagged|MatchTaggedWithBindings|ExtractTaggedChild)\b' fmpl-core/src/` returns no matches (legacy gone).
+   - `grep -rnE 'Instruction::(MakeListNode|MatchListNode|MatchListNodeWithBindings|ExtractListChild)\b' fmpl-core/src/` returns matches (new names present).
+   - `grep -nE 'Instruction::MatchTag\b' fmpl-core/src/compiler.rs` returns matches at lines 369 (definition), 2533, 2665 (Pattern::Symbol emit sites; post-ITER-0004d.1).
+   - **Behavioral observable (not just structural):** SCENARIO-0103 + SCENARIO-0016 (sentinels) still pass — verifies that the rename preserves semantics. Round-2 PAR flagged that a grep-only observable wouldn't catch a VM handler dispatch bug; the sentinel pass is the behavioral check.
+
+10. **Update EPIC-002.md STORY-0010 AC-11** to add `· scenario:SCENARIO-0107`.
+
+**Verification:**
+- `cargo test --workspace` passes.
+- SCENARIO-0103 + SCENARIO-0016 still pass (behavioral assurance for the rename).
+- SCENARIO-0107 passes (structural invariant).
+- `cargo test -p fmpl-core --test no_legacy_fmpl_syntax` still returns 0 (preserved from ITER-0004d.1).
+- `grep -rnE 'Instruction::MakeTagged\b' fmpl-core/` returns 0 matches (sanity).
+- Persisted bytecode round-trip test (whichever currently exists, e.g., `bytecode_persistence.rs`) still passes — Serde wire-format unchanged due to `#[serde(rename)]` attributes.
+
+**Out of scope:** `Type::Tagged` cleanup (ITER-0004h). Wire-format version bump (ITER-0005's STORY-0099).
 
 ### ITER-0004e — Prelude / Parser-Helper Split
 
@@ -475,6 +679,34 @@ These gates are NOT new work — they are the existing iteration gates, framed u
 - No new ignored or failing tests.
 
 **Optional companion fix (also surfaced 2026-05-10):** `lib/core/ast_optimizer_test.fmpl` uses `++` for string concatenation in its print-summary section (lines 184-186 + 194), but the FMPL parser does not support `++` as a binary operator (it lexes as two consecutive `Plus` tokens, leading to "unexpected token: Plus"). This blocks the AC-13 companion gate `fmpl-core/tests/ast_optimizer_unit.rs` from un-ignoring. Either add `++` to the FMPL operator vocabulary, or rewrite the test file's print-summary section to use `string.join`. If addressed in this iteration, also un-ignore the `ast_optimizer_unit` test.
+
+### ITER-0004h — Type::Tagged Cleanup (post-burn)
+
+**Stories:** No new STORY-0010 ACs — orphan cleanup carve-out scheduled 2026-05-10 from ITER-0004d PAR round 1 findings. PAR reviewer B observed that after AC-9 deletes the parser productions producing `Expr::Tagged`, no parser path constructs `Type::Tagged` values; the type-system variant becomes dead code that no scenario or AC explicitly references.
+
+**Rationale:** `fmpl-core/src/types.rs:30` defines `Type::Tagged(SmolStr, Vec<Type>)` as a constructor type. The variant survives ITER-0004d because the iteration's deletion graph is scoped to AST/Pattern/Bytecode, not the type system. Leaving `Type::Tagged` dead-but-defined is an orphan that violates the iteration's "one shape" coherence claim at the type-system layer. Two paths: (a) delete the variant entirely (if no surviving Rust code constructs it after ITER-0004d) or (b) repurpose it for typed-list-shape values (e.g., `Type::ListNode(SmolStr, Vec<Type>)`) so future static analysis can talk about constructor shapes by name. Decision made at iteration start based on the post-ITER-0004d codebase.
+
+**Status:** pending
+**Depends on:** ITER-0004d (the AST/parser deletions must land first so the dead-code claim can be verified).
+**Look-ahead check:** Unblocks no critical path; could ship before or after ITER-0005. Recommended placement: after ITER-0004d but before ITER-0005, so the type-system surface that ITER-0005's persisted bytecode references is in its final shape.
+
+**Files in scope:**
+- `fmpl-core/src/types.rs` (variant definition + Display/PartialEq/Hash impls)
+- Any remaining `Type::Tagged` consumers (enumerate via `grep -rn 'Type::Tagged' fmpl-core/src/` at iteration start)
+- Type-system test corpus under `fmpl-core/tests/type_inference.rs` (if it asserts `Type::Tagged` shape)
+
+**Scope:**
+
+1. Re-grep `Type::Tagged` consumers after ITER-0004d lands. If zero remain, delete the variant and update any tests that assert its absence. If consumers exist (likely zero, but check), evaluate whether each is reachable from any post-burn code path.
+2. Optionally rename to `Type::ListNode` if static-analysis use cases exist for typed-list-shape values. Otherwise delete.
+3. Update `behavior-scenarios.md` if any scenario references `Type::Tagged` (likely none, since the type system is largely unobservable from FMPL programs today).
+
+**Verification gates:**
+- `grep -rn 'Type::Tagged' fmpl-core/src/` returns no matches (if deletion path chosen).
+- `cargo test --workspace` passes.
+- No new ignored or failing tests.
+
+**Out of scope:** Broader type-system refactor; this is a single-variant cleanup.
 
 ### ITER-0005 — Image Persistence (Consolidated)
 

@@ -232,3 +232,57 @@ The Phase C commit message (`qworqxrm refactor(values): delete Value::Tagged var
 
 **Summary:**
 ITER-0004c shipped STORY-0010 Phase A (AC-3 through AC-7 + AC-13) on 2026-05-10 over a single-day session. The key acceptance gate — SCENARIO-0103 — now passes with 32 active observables + 1 deferred (INT_MIN). The FMPL stdlib is in fully-canonical list-pattern syntax across all 5 in-scope files; the `ast_optimizer.fmpl` is wired into `eval_via_fmpl_pipeline` at the AST stage; all 17 previously-ignored optimizer_integration tests pass; and 3 new verification gates (AC-13 CI, AC-7 runnable, ast_optimizer_unit) lock the iteration's contracts against silent regression. Three follow-on iterations (0004e prelude/parser-helper split, 0004f Binary/Unary AST flattening, 0004g lexer INT_MIN + `++` operator) were scheduled to honor the deferring-work-must-reschedule rule; none block ITER-0004d's parser/AST burn. The transformer-build approach was attempted, abandoned via `jj abandon` after a Stage-1 PAR spec failure, and replaced with hand-migration that took ~10 minutes per file (much faster than the abandoned tool-build). Workspace test count rose from 1170 to 1228 (+58 tests, no regressions).
+
+## ITER-0004d.0 — FMPL-Source-Grep Tooling Precursor
+
+**Completed:** 2026-05-10
+
+**Stories delivered:** none (this iteration commits no STORY-0010 ACs; it is a bottom-up tooling carve-out from ITER-0004d after 3 PAR review rounds discovered the original monolithic plan was too speculative). The tool ships baseline ground-truth numbers that replace 3 rounds of inferred-from-roadmap-text counting for the AC-13/AC-14 sweep ITER-0004d.1 will run.
+
+**Tasks executed (in commit order):**
+
+1. **Pre-iteration scope review (PAR ×1 → REVISE, user opted to build as-spec'd)** — both reviewers flagged 3 agreed serious issues: (a) `syn` library-vs-dev-dep contradiction (a function in `fmpl-core/src/diagnostics/mod.rs` cannot `use syn` if `syn` is `[dev-dependencies]`), (b) baseline JSON granularity unspecified, (c) no scenario card for the tool. Reviewer B additionally caught a structural correctness issue: the spec's "Symbol(s) immediately followed by LParen" detector produces false positives on grammar-DSL binding patterns (`unary:first (mult_op unary)*:rest` — 5 sites in `lib/core/fmpl_parser.fmpl`, 1 in `tests/fmpl/fmpl_grammar.fmpl`). User direction: "build as-spec'd; surface real data" — proceed with the implementation, applying minimum-viable resolutions to the contradictions, and let the tool's actual first-run baseline replace speculation.
+2. **Binding resolutions made by orchestrator before implementer dispatch:**
+   - **`syn` placement:** `scan_fmpl_source` stays in `fmpl-core/src/diagnostics/mod.rs` (no `syn`). `scan_rust_strings` moves to test-only `fmpl-core/tests/common/rust_string_scanner.rs` (where `[dev-dependencies]` `syn` is accessible). Runtime crate remains `syn`-free.
+   - **Grammar-DSL false positives:** use the spec's own allowlist mechanism (roadmap line 360) to cover the 6 known sites. Allowlist key: `(path-suffix, tag)`. Pre-populated with two entries: `("lib/core/fmpl_parser.fmpl", "first")` covers all 5 lib/core sites; `("fmpl-core/tests/fmpl/fmpl_grammar.fmpl", "first")` covers the 1 fixture site.
+   - **Self-scanning gate fixtures:** exclude `diagnostics_fmpl_source_scan.rs` and `no_legacy_fmpl_syntax.rs` from the `fmpl-core/tests/*.rs` scan surface.
+3. **Implementer dispatch + TDD discipline (4 atomic commits):**
+   - `vkupoxzt` — `fmpl-core/src/diagnostics/mod.rs` (NEW: `SourceKind`, `TaggedSyntaxHit`, `DiagnosticsError`, `scan_fmpl_source`) + `lib.rs` registers `pub mod diagnostics;`. Runtime crate verified `syn`-free.
+   - `lrpkkwzl` — `fmpl-core/Cargo.toml` (`syn = { version = "2", features = ["full", "extra-traits", "visit"] }` to `[dev-dependencies]`) + `fmpl-core/tests/common/{mod.rs, rust_string_scanner.rs}` (`syn::visit::Visit` walker) + `fmpl-core/tests/diagnostics_fmpl_source_scan.rs` (11 unit tests, all 8 spec cases + 3 extras).
+   - `psqpzpus` — `fmpl-core/tests/no_legacy_fmpl_syntax.rs` CI gate (4-surface walker, allowlist filter, baseline JSON compare with `FMPL_REGEN_BASELINE=1` regen) + `fmpl-core/tests/no_legacy_fmpl_syntax.baseline.json` (committed baseline).
+   - `nyxkknnu` — deleted `fmpl-core/tests/stdlib_no_legacy_syntax.rs` (the new gate's `lib/core/` surface subsumes it).
+4. **Post-implementation PAR (spec + quality) → REVISE, applied 3 targeted fixes in `a4752461`:**
+   - `rust_byte_offset: usize` → `Option<usize>`; helper emits `None` rather than `0` placeholder so future consumers can distinguish "exact location unavailable" from "offset 0". (PAR A serious.)
+   - `scan_fmpl_source` filters to identifier-style tags only; `:+`, `:==`, etc. excluded (they were never legacy tagged-constructor syntax). (PAR B serious.)
+   - Added 2 unit tests: documented-invariant ("FMPL string literals don't produce false hits" — load-bearing for `scan_rust_strings`) and operator-symbol-exclusion. (PAR B finding.) Test count: 11 → 13.
+
+**Scenarios:** none added (the iteration's spec intentionally defers scenario coverage to ITER-0004d.1's SCENARIO-0106). The CI gate `cargo test -p fmpl-core --test no_legacy_fmpl_syntax` is not a behavior scenario but an iteration-internal regression sentinel; ITER-0004d.1 promotes the gate's `== 0` form to a permanent CI sentinel pinning AC-13 + AC-14.
+
+**Baseline ground truth (`fmpl-core/tests/no_legacy_fmpl_syntax.baseline.json` committed):**
+```json
+{ "lib/core": 0, "src/rs": 43, "tests/fmpl": 72, "tests/rs": 625 }
+```
+- `lib/core = 0` post-allowlist: AC-13 invariant from ITER-0004c is preserved at the lexer-token-level (stricter than the old gate's hand-rolled uppercase-only regex).
+- `tests/fmpl = 72`: dominated by the two orphan fixtures `ast_to_ir.fmpl` + `fmpl_parser.fmpl` (ITER-0004d.1 deletes these per its scope item 5).
+- `tests/rs = 625` and `src/rs = 43`: target volume for ITER-0004d.1's sweep. The roadmap's round-2 "14 files" estimate referred to file count not hit count; the 625 hits are concentrated in fewer files.
+
+**Known limitations carried forward to ITER-0004d.1 planning** (PAR findings not addressed in this iteration; documented here so d.1's planning can address them with real baseline data):
+- **Macro-body coverage gap (B-S1):** `syn::visit::Visit` does not descend into macro `TokenStream` bodies. Common Rust idioms like `eval!(":Foo(1, 2)")` or `assert_eq!(eval(":Foo(1)"), ...)` are invisible to the scanner. Today's codebase doesn't use this pattern with legacy syntax (verified via grep), but d.1's `== 0` flip should add a `visit_macro` override that re-parses tokens for embedded `LitStr` OR document the gap as acceptable risk.
+- **Tests-walk vs src-walk asymmetry (A-S2):** `fmpl-core/src/` is walked recursively; `fmpl-core/tests/` is walked flat. A future test helper under a subdirectory of `tests/` would be silently unwatched. Cheap to fix during d.1.
+- **Strict-equality baseline (B-S3):** developer workflow trap — any incidental hit-count reduction during normal work forces a `FMPL_REGEN_BASELINE=1` ritual. d.1 should consider switching to `>= baseline` (asserts only against growth) or document the regen workflow before ITER-0004d.1's `== 0` flip removes the baseline entirely.
+- **Coarse allowlist (B-S6):** the `(path-suffix, tag)` key suppresses every hit matching the tag in the file. A future legitimate `:first(args)` hit (under d.1's explicit-rejection regime) would be silently swallowed. d.1 should narrow to `(path, byte_offset_range)` if the false-suppression window proves real.
+
+**Tests:** post-iteration test counts:
+- Pre-iteration sentinel: 55 (ast_to_ir_parity) + 32 + 1 ignored (scenario_0103) + 8 (ac7_optimizer_pass_through) + 1 (stdlib_no_legacy_syntax) = 96 baseline.
+- Post-iteration sentinel + new tests: 55 + 32 + 1 ignored + 8 + 13 (diagnostics_fmpl_source_scan, NEW) + 1 (no_legacy_fmpl_syntax, NEW) = 109 passed, 1 ignored across 5 suites. Net change: -1 (stdlib_no_legacy_syntax deleted), +13 + 1 = +13 net. No regressions.
+- All 4 sentinels still clean post-iteration. Workspace clippy: zero warnings.
+
+**Lessons:**
+
+1. **Spec contradictions surface only when an implementer reads them end-to-end.** The roadmap simultaneously required (a) `scan_rust_strings` in `fmpl-core/src/diagnostics/mod.rs` and (b) `syn` as `[dev-dependencies]`. Both PAR reviewers caught this independently. Rust's dev-dep visibility rules make these incompatible; no amount of spec re-review fixes it because the contradiction is logical, not citation-level. The orchestrator-side resolution (split the function across `src/` and `tests/`) is the only valid Rust partition.
+2. **Lexer-level "Symbol+LParen" is too coarse for grammar-DSL contexts.** The grammar-DSL binding syntax `name:bindName (group)` tokenizes identically to a tagged-constructor `:bindName(args)`. The naive scanner cannot distinguish them without contextual knowledge of grammar blocks. Allowlist works as an escape valve for the small known set of grammar-binding sites; a future iteration could investigate context-aware tokenization if the false-positive set grows.
+3. **"Build the tool; let it produce ground truth" beats one more revision round when speculation has already failed twice.** Three prior PAR rounds on the monolithic ITER-0004d produced revisions that never escaped speculation about deletion-site counts. ITER-0004d.0's first run produced concrete numbers (43, 72, 625) that ITER-0004d.1 can plan against directly. The active hypothesis in the WORKSPACE checkpoint ("the tool's first run replaces speculation with measurement") was validated.
+4. **PAR fix-loop discipline pays off even on small iterations.** Two of the post-implementation PAR findings (lying `rust_byte_offset = 0`; operator-style symbol false positives) were latent bugs that would have surfaced only when a future consumer relied on them. Applying the fixes inline (rather than deferring to d.1) closed the holes while context was fresh, at the cost of one extra commit. The deeper architectural findings (macro bodies, strict equality, allowlist granularity) were deferred to d.1 with explicit documentation rather than churned in this iteration.
+
+**Summary:**
+ITER-0004d.0 shipped a Rust library `fmpl_core::diagnostics` exposing `scan_fmpl_source` (production-crate-safe, `syn`-free) plus a test-only `scan_rust_strings` helper. The new CI gate `no_legacy_fmpl_syntax` records a 4-surface baseline (`lib/core=0`, `src/rs=43`, `tests/fmpl=72`, `tests/rs=625`) that ITER-0004d.1 will sweep to zero. The old `stdlib_no_legacy_syntax` gate was deleted (subsumed by the new gate's stricter token-level scan). PAR scope review returned REVISE; user opted to build as-spec'd, which proved correct — the implementation surfaced both the spec contradictions and the real baseline numbers. PAR post-implementation review caught 2 inline-fixable bugs (lying offset field, operator-symbol false positives) plus 4 architectural concerns documented as ITER-0004d.1 inputs. Workspace test count: +13 net, 0 regressions.
