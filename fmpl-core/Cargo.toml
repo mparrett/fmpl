@@ -32,6 +32,7 @@ tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time"] }
 [dev-dependencies]
 pretty_assertions = "1.4"
 serde_json = "1.0"
+syn = { version = "2", features = ["full", "extra-traits", "visit"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 wiremock = "0.6"
 tempfile = "3"
