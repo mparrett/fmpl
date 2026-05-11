@@ -475,8 +475,14 @@ mod full_pipeline_advanced {
     fn parity_match_tagged() {
         // ITER-0004d.1 T2b: list-pattern syntax `[:Tag, ...]` is now
         // recognized in match arms (parser heuristic) and let destructuring
-        // (compiler arm). Bytecode is identical to the legacy
-        // tagged-constructor form (same MatchTag + ExtractTaggedChild).
+        // (compiler arm). Note: the two pipelines emit DIFFERENT bytecode
+        // for tagged-pattern arms — the Rust compiler emits MatchTag (with
+        // an arity check), while ir::compile's emit_tagged_pattern_match
+        // (builtins/ir.rs:946) emits GetProp(tag) + LoadSymbol + Eq +
+        // JumpIfFalse + ExtractTaggedChild (no MatchTag, no arity check).
+        // assert_pipeline_parity asserts equal RESULTS, not equal bytecode.
+        // The arity-check + nested-pattern gaps in the ir::compile path
+        // are tracked as FOLLOWUP #30.
         assert_pipeline_parity("[:Point, 1, 2] @ { [:Point, x, y] => [x, y], _ => [] }");
     }
 

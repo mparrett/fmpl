@@ -4,11 +4,12 @@ This project uses the **agentic-stack** portable brain. All memory, skills,
 and protocols live in `.agent/`.
 
 ## Session start — read in this order
-1. `.agent/AGENTS.md` — the map of the whole brain
-2. `.agent/memory/personal/PREFERENCES.md` — how the user works
-3. `.agent/memory/working/REVIEW_QUEUE.md` — pending lessons awaiting review
-4. `.agent/memory/semantic/LESSONS.md` — what we've already learned
-5. `.agent/protocols/permissions.md` — hard constraints, read before any tool call
+1. `docs/design-principles.md` — **durable design invariants** (read first; these override iteration scope when in conflict)
+2. `.agent/AGENTS.md` — the map of the whole brain
+3. `.agent/memory/personal/PREFERENCES.md` — how the user works
+4. `.agent/memory/working/REVIEW_QUEUE.md` — pending lessons awaiting review
+5. `.agent/memory/semantic/LESSONS.md` — what we've already learned
+6. `.agent/protocols/permissions.md` — hard constraints, read before any tool call
 
 ## Before every non-trivial action — recall first
 

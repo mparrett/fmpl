@@ -1,5 +1,15 @@
 # AGENTS.md
 
+## Design Principles (read first)
+
+Durable invariants live in [`docs/design-principles.md`](docs/design-principles.md).
+These override iteration scope when in conflict. If you are about to make a
+change that would violate a principle, stop — the principle wins, the change
+needs to be reframed. Currently captured: metacircular bootstrap (DESIGN-001),
+single canonical list-form for structured data (DESIGN-002), symbols for type
+names (DESIGN-003), tree-based IR with named temporaries (DESIGN-004), grammar
+inheritance deferred (DESIGN-005).
+
 ## Project Overview
 
 FMPL is a streaming-first DSL for building AI agents with grammars, capabilities, and durable state. It features:
