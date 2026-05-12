@@ -626,6 +626,61 @@ The MatchTagged/MatchTaggedWithBindings handlers are dead code post-ITER-0004d.1
 
 **Out of scope:** `Type::Tagged` cleanup (ITER-0004h — distinct type-system surface, no `Instruction` overlap). Wire-format version bump (ITER-0005's STORY-0099 — the `serde(rename)` attributes are the forward-compat surface ITER-0005 may choose to drop).
 
+### ITER-0004d.2a — Opcode-rename audit fix-up (G1+G2+G3+G4)
+
+**Stories:** STORY-0010 AC-11 evidence strengthening. Direct response to ITER-0004d.2's three-tier audit findings.
+
+**Rationale:** ITER-0004d.2 audit returned GAPS FOUND with three SERIOUS findings (one from BOTH auditors, one from each) plus minor stale-comment drift. Pattern matches ITER-0004d.3 → 0004d.3a: surgical fix-up keeps the original iteration cleanly closed.
+
+**Status:** done 2026-05-12. G1 synced ir_to_rust.rs transpiler dispatcher (1 arm key rename in live Rust code, no PARSER_EPOCH bump needed). G2 updated SCENARIO-0106 card bullets #6 and #7 to use the post-rename needle strings. G3 added 8 VM-execution tests covering MatchListNode/MatchListNodeWithBindings handlers + the inlined nested-dispatch path at vm.rs:2610 — handler-body logic now exercised through `ParsePush`-driven bytecode. G4 swept 8 stale comments across compiler.rs/vm.rs/context_aware_compilation.rs/ast_to_ir_parity.rs/progress.md. Focused re-audit verified all four gaps CLOSED. Final sentinel sweep: 155 passed, 3 ignored across 8 suites (+8 net from G3's VM tests; 0 regressions). Clippy clean.
+
+**The four gaps:**
+
+- **G1 (SERIOUS, BOTH auditors).** `fmpl-core/src/builtins/ir_to_rust.rs:543` has a `"MakeTagged"` arm in the Rust transpiler's IR dispatcher but no `"MakeListNode"` arm. ITER-0004d.2 updated the bytecode IR dispatcher at `builtins/ir.rs:336` but missed this parallel dispatcher in the Rust transpiler. The two dispatchers are now divergent for the same semantic operation. Currently latent (no FMPL stdlib emits `:MakeListNode` IR nodes that flow through this path), but represents inconsistency + dead code. The same gap likely exists for `ExtractTaggedChild` / `MatchTagged` / `MatchTaggedWithBindings` arm keys; investigate all four.
+
+- **G2 (SERIOUS, Auditor A).** `behavior-scenarios.md` SCENARIO-0106 card expected observables describe pre-rename grep needles (`Instruction::MakeTagged` must NOT appear, `ExtractTaggedChild` MUST appear). After ITER-0004d.2 T6 flipped the test code's needles, the card text diverged from the test contract. Scenario contract integrity violation — future readers see wrong invariants.
+
+- **G3 (SERIOUS, Auditor B).** `MatchListNode` and `MatchListNodeWithBindings` VM handlers have ZERO execution coverage. The `opcode_rename_evidence::renamed_variants_are_constructible` test constructs the variants but never runs them through the VM. A handler-body logic bug (arity check at vm.rs:2590, nested dispatch at vm.rs:2608) would compile and ship undetected. The PAR pre-iteration finding #2 motivated the construction test but stopped short of execution.
+
+- **G4 (MINOR, BOTH auditors).** Stale comments referencing old opcode names in `compiler.rs:2649/2965/3033/3128`, `vm.rs:2523`, `context_aware_compilation.rs:4`, `ast_to_ir_parity.rs:482`, `progress.md:15`. Update for consistency.
+
+**Impacted scenarios:** SCENARIO-0107 evidence strengthened (G3 adds execution coverage); SCENARIO-0106 card text corrected (G2). No new scenarios.
+
+**Depends on:** ITER-0004d.2 (the rename surface that needs strengthening).
+
+**Look-ahead check:** ITER-0004h (Type::Tagged) is unaffected — distinct surface. ITER-0005 (persistence) gets a cleaner forward-compat surface because the ir_to_rust dispatcher is consistent.
+
+**Scope:**
+
+1. **G1.** Edit `fmpl-core/src/builtins/ir_to_rust.rs`. Find all `transpile_tagged` (or similar) arms with legacy opcode names; rename each to its new-name counterpart. Check whether this file is the postlude raw-string (would require PARSER_EPOCH bump per `parser_epoch.rs:27-29`) or live Rust code (no bump). The IR-to-Rust transpiler in this file is a Rust function the bootstrap binary calls — the file itself is NOT the postlude. But verify carefully: there's also a postlude raw-string inside this file that gets emitted into generated parsers, and the audit found dispatcher arms in the live Rust code (line 543). The dispatcher is live Rust, not postlude — no bump needed.
+
+2. **G2.** Edit `docs/superpowers/iterations/behavior-scenarios.md` SCENARIO-0106 card. Update the "Expected observables" entries #6 and #7 to use the new needle strings (`Instruction::MakeListNode` for grep #6, `ExtractListChild` for grep #7). Update any other card text (Note field, Sources) that references old names. The card's "Note" field has historical content that's OK to leave — only update the active contract description.
+
+3. **G3.** Add `fmpl-core/tests/opcode_rename_evidence.rs` execution tests for MatchListNode + MatchListNodeWithBindings. Construct bytecode containing each opcode, set up parse_state with appropriate input values, run via VM, assert match/no-match behavior. Cover at least: (a) MatchListNode success — input matches expected tag, all child patterns succeed; (b) MatchListNode failure — input has wrong tag, handler returns null; (c) MatchListNodeWithBindings success — bindings correctly assigned; (d) MatchListNodeWithBindings arity-mismatch failure (the audit specifically flagged the arity check at vm.rs:2590 as untested). Model on stream_coercion.rs's make_code/execute helpers.
+
+4. **G4.** Sweep stale comments. List of sites (from the audit):
+    - `compiler.rs` lines 2649, 2965, 3033, 3128 — `ExtractTaggedChild` in inline comments
+    - `vm.rs:2523` — `Value::Tagged("Int", [v])` comment in MatchListNodeWithBindings handler
+    - `context_aware_compilation.rs:4` — module docstring `ExtractTaggedChild`
+    - `ast_to_ir_parity.rs:482` — comment `ExtractTaggedChild`
+    - `progress.md:15` — Ratchet status section `canonical replacement ExtractTaggedChild`
+
+5. **Re-run full sentinel sweep + clippy.** Expected count: 147 + new G3 tests; 0 regressions.
+
+6. **Focused re-audit.** Confirm G1-G4 are genuinely closed (mirror of ITER-0004d.3a re-audit pattern). If re-audit finds residual gaps, fix inline.
+
+**Acceptance:**
+
+- `fmpl-core/src/builtins/ir_to_rust.rs` has no legacy opcode name as a live dispatcher arm key (G1).
+- SCENARIO-0106 card text matches the actual test contract (G2).
+- `opcode_rename_evidence.rs` has execution tests for MatchListNode + MatchListNodeWithBindings handlers that exercise success + failure paths (G3).
+- All stale comments updated (G4).
+- Full sentinel sweep: ≥147 passed + ≥4 new G3 tests, 3 ignored, 0 regressions.
+- Clippy clean.
+- Focused re-audit reports CLEAN.
+
+**Out of scope:** Anything not in G1-G4. ITER-0004h's Type::Tagged work.
+
 ### ITER-0004d.3 — Bootstrap-Parse Investigation + `no_legacy_fmpl_syntax` Gate Flip (T18)
 
 **Stories:** STORY-0010 Phase B AC-9/AC-10/AC-12 final CI-gate ratchet — the deferred T18 from ITER-0004d.1.

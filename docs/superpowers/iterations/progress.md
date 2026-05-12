@@ -1,9 +1,9 @@
 # Progress
 
-**Phase:** ITER-0004d.2 DONE 2026-05-12 (bytecode opcode rename, AC-11; STORY-0010 fully closed). ITER-0004 remaining: ITER-0004h (Type::Tagged cleanup). ITER-0004d.4 (scenario runner) still deferred per prior user decision.
-**Iterations:** 10/14 done. Pending: ITER-0004d.4 (spec written, deferred), 0004e, 0004f, 0004g, 0004h, 0005+.
-**Sentinel corpus (final, 2026-05-12):** ast_to_ir_parity 57/57 (2 #[ignore]); scenario_0103 32/32 (1 ignored); tavern_demo 6/6; no_legacy_fmpl_syntax 1/1 (== 0 mode, baseline JSON deleted); structural_invariants 17/17; diagnostics_fmpl_source_scan 21/21 (was 17; +4 in T4); canonical_pipeline_parity 7/7 (NEW — SCENARIO-0108 evidence). **137 passed, 3 ignored across 7 suites** (+24 tests vs end-of-0004d.1, 0 regressions). Canonical pipeline confirmed active — no FMPL_SKIP_PARSER_GEN or FMPL_BOOTSTRAP_PHASE in test invocation; `target/.../out/generated_parser.rs` has GENERATED_PARSER_EPOCH=3 matching source.
-**Last event:** 2026-05-12 — ITER-0004d.3 wrap-up: T1+T1a investigations identified root causes (is_inline_pattern_block misclassification; doc-attr origin hits); T3+T4 fixed both surfaces; T6 flipped gate to == 0; T7a SCENARIO-0108 caught a real bug (FMPL parser silently weaker than source-tree); T7b added FMPL grammar rejection. PAR scope review's finding #1 (sentinel gap) directly produced T7a, which directly caught T7b's bug — concrete evidence of PAR value.
+**Phase:** ITER-0004d.2a DONE 2026-05-12 (audit fix-up closing four gaps in SCENARIO-0107 evidence). STORY-0010 remains fully closed. ITER-0004 remaining: ITER-0004h (Type::Tagged cleanup). ITER-0004d.4 (scenario runner) still deferred per prior user decision.
+**Iterations:** 11/15 done. Pending: ITER-0004d.4 (spec written, deferred), 0004e, 0004f, 0004g, 0004h, 0005+.
+**Sentinel corpus (final, 2026-05-12):** ast_to_ir_parity 57/57 (2 ignored); scenario_0103 32/32 (1 ignored); tavern_demo 6/6; no_legacy_fmpl_syntax 1/1 (== 0 mode); structural_invariants 19/19 (greps #6/#7 needles flipped); diagnostics_fmpl_source_scan 21/21; canonical_pipeline_parity 8/8; opcode_rename_evidence 15/15 (was 7 — +8 G3 VM-execution tests). **155 passed, 3 ignored across 8 suites** (+42 tests vs end-of-ITER-0004d.1, 0 regressions). Canonical pipeline active. PARSER_EPOCH = 5.
+**Last event:** 2026-05-12 — ITER-0004d.2a wrap-up: G1 synced ir_to_rust.rs dispatcher (was missed in 0004d.2's rename); G2 updated SCENARIO-0106 card text; G3 added 8 VM-execution tests for the dead-code handlers (using ParsePush technique); G4 swept 8 stale comments. Focused re-audit confirmed all four gaps CLOSED. Two iterations in a row now show concrete PAR value (0004d.3a's re-audit caught a missed guard; 0004d.2a's audit caught dispatcher divergence + handler coverage gap).
 
 ## Ratchet status (ITER-0004 critical-path verification — post-ITER-0004d.3)
 
@@ -12,7 +12,7 @@ After ITER-0004d.3:
 1. **`no_legacy_fmpl_syntax` gate (UPGRADED).** Was baseline-mode; now `== 0`-mode. Baseline JSON deleted; FMPL_REGEN_BASELINE env var no longer meaningful. Filters: ALLOWLIST (grammar-DSL bind sites in .fmpl files) + from_doc_attr suppression (Rust doc comments).
 2. **Sentinel test corpus (EXPANDED).** 7 suites, 137 passed, 3 ignored. New: diagnostics_fmpl_source_scan expanded (17→21 tests), canonical_pipeline_parity (NEW, 7 tests). Any regression in any suite fails CI.
 3. **Parser-epoch system (unchanged).** `PARSER_EPOCH = 3` matches generated parser's `GENERATED_PARSER_EPOCH = 3`. Compile-time assertion in parser.rs (cfg-gated to canonical pipeline) catches stale generators.
-4. **Structural invariants (unchanged).** Seven greps in structural_invariants.rs confirm deleted Rust variants stay deleted; canonical replacement ExtractTaggedChild stays present.
+4. **Structural invariants (unchanged).** Seven greps in structural_invariants.rs confirm deleted Rust variants stay deleted; canonical replacement ExtractListChild stays present.
 5. **Canonical-pipeline parity (NEW gate).** SCENARIO-0108 evidence asserts the source-tree Rust parser and the FMPL-stdlib-generated parser produce equivalent results (rejection equivalence + AST equivalence). This is the gate that previously was implicit and unmeasurable.
 
 ITER-0004 closes when the remaining sub-iterations land:

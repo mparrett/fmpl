@@ -540,8 +540,8 @@ impl IrToRust {
                 Ok(format!("Value::Symbol(SmolStr::new({:?}))", s.as_str()))
             }
 
-            "MakeTagged" => {
-                // :MakeTagged(tag, [args...]) - create tagged value
+            "MakeListNode" => {
+                // :MakeListNode(tag, [args...]) - create list-node (tagged list) value
                 let tag = self.expect_symbol(&children[0])?;
                 let args = self.expect_list(&children[1])?;
                 let mut arg_strs = Vec::new();

@@ -2646,7 +2646,7 @@ impl Compiler {
             }
             // List-pattern with leading symbol: [:Tag, a, b] — head symbol
             // already checked by MatchTag at the outer level / by caller.
-            // Walk remaining elements positionally using ExtractTaggedChild.
+            // Walk remaining elements positionally using ExtractListChild.
             Pattern::List(elements, None)
                 if matches!(elements.first(), Some(Pattern::Symbol(_))) =>
             {
@@ -2962,7 +2962,7 @@ impl Compiler {
                 if matches!(patterns.first(), Some(Pattern::Symbol(_))) =>
             {
                 // List-pattern with leading symbol: [:Tag, a, b] = tagged-value.
-                // Extract children positionally using ExtractTaggedChild. The
+                // Extract children positionally using ExtractListChild. The
                 // head symbol is assumed to match — let bindings don't tag-check
                 // (matching the same semantics legacy `:Tag(a, b)` had before
                 // its removal in ITER-0004d.1).
@@ -3030,7 +3030,7 @@ impl Compiler {
     /// Fast mode uses:
     /// - `ExtractMapKey` for map patterns
     /// - `ExtractListIndex` for list patterns
-    /// - `ExtractTaggedChild` for tagged/constructor patterns
+    /// - `ExtractListChild` for tagged/constructor patterns
     /// - Direct `Bind` for variable patterns
     ///
     /// This mode does NOT generate:
@@ -3125,7 +3125,7 @@ impl Compiler {
 
             // List-pattern with leading symbol literal [:Tag, p1, p2] —
             // tagged-shape value. Extract children positionally with
-            // ExtractTaggedChild (skips the head symbol). Replaces the
+            // ExtractListChild (skips the head symbol). Replaces the
             // legacy `UP::Tagged` arm deleted in ITER-0004d.1 T12.
             UP::ListMatch(elements, None)
                 if matches!(elements.first(), Some(UP::SymbolLiteral(_))) =>

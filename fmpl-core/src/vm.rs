@@ -2519,8 +2519,9 @@ impl Vm {
                 }
 
                 Instruction::MatchListNodeWithBindings { tag_idx, bindings } => {
-                    // Match a tagged value with simple bindings.
-                    // E.g., :Int(n) matches Value::Tagged("Int", [v]) and binds n = v
+                    // Match a list-shaped node (leading symbol + positional children)
+                    // and bind named children. E.g., `[:Int, n]` matches a list
+                    // `Value::List([Value::Symbol("Int"), v])` and binds n = v.
                     let input_val = frame.parse_state.input().cloned().unwrap_or(Value::Null);
 
                     // Check if input is a list-shaped node with matching tag.

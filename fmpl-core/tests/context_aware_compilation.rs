@@ -1,7 +1,7 @@
 //! Tests for context-aware pattern compilation with PatternMode
 //!
 //! This file tests Task 4.1: Mode parameter for pattern compilation
-//! - Fast mode: Uses ExtractMapKey, ExtractListIndex, ExtractTaggedChild (no backtracking)
+//! - Fast mode: Uses ExtractMapKey, ExtractListIndex, ExtractListChild (no backtracking)
 //! - Full mode: Uses grammar-style matching with backtracking/guards support
 
 use fmpl_core::ast::Expr;

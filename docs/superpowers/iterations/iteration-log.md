@@ -541,3 +541,65 @@ Both reviewers returned REVISE with five aggregated findings:
 **Summary:**
 
 ITER-0004d.2 closed STORY-0010 by renaming four bytecode opcodes to reflect post-ITER-0004d.1 list-node semantics. Wire-format compatibility preserved via `serde(rename)` (Option B; ITER-0005 may choose to drop them when bumping the persistence envelope). MatchTag correctly preserved per AC-9. SCENARIO-0107 evidence covers the rename via three layers (structural greps, variant reachability, Serde round-trip) — the last two added per PAR findings about dead-code handlers and wire-format coverage gaps. Sentinel corpus: 147 passed, 3 ignored across 8 suites (+7 net). ITER-0004 remaining: only ITER-0004h (Type::Tagged cleanup) before the milestone closes.
+
+---
+
+## ITER-0004d.2a — Opcode-rename audit fix-up (G1+G2+G3+G4) — done 2026-05-12
+
+**Stories committed:** STORY-0010 AC-11 evidence strengthening. Closes four gaps from ITER-0004d.2's three-tier audit.
+
+**Result:** All four audit-flagged gaps closed. SCENARIO-0107 evidence is now strengthened by behavioral execution coverage; ir_to_rust dispatcher is consistent with ir.rs; SCENARIO-0106 card matches its test contract; stale comments swept.
+
+**Audit findings closed:**
+
+| Gap | Severity | Fix |
+|---|---|---|
+| G1: ir_to_rust.rs:543 had stale `"MakeTagged"` arm; no `"MakeListNode"` arm (BOTH auditors) | SERIOUS | Renamed the arm key in live Rust code. Other 3 opcode names (`ExtractTaggedChild`, `MatchTagged`, `MatchTaggedWithBindings`) had no arms in this file. PARSER_EPOCH stayed at 5 (live Rust code, not postlude raw-string). |
+| G2: SCENARIO-0106 card bullets #6 and #7 described pre-rename needle strings (Auditor A) | SERIOUS | Updated card text: `Instruction::MakeTagged` → `Instruction::MakeListNode` and `ExtractTaggedChild` → `ExtractListChild`. Card now matches what `structural_invariants.rs` tests assert. Historical "Note" section preserved. |
+| G3: MatchListNode/MatchListNodeWithBindings VM handlers had ZERO execution coverage (Auditor B) | SERIOUS | Added 8 VM-execution tests to `opcode_rename_evidence.rs` covering: success paths (tag + arity match), arity-mismatch failures, wrong-tag failures, second-child binding (off-by-one guard), inlined nested-dispatch at vm.rs:2610. Pattern: build input via `MakeListNode`, `ParsePush` it into parse_state, then run the match opcode, assert via `LoadVar` for binding side effects. |
+| G4: Stale comments referencing old opcode names (BOTH auditors, minor) | MINOR | Swept 8 sites across compiler.rs (4), vm.rs (1), context_aware_compilation.rs (1), ast_to_ir_parity.rs (1), progress.md (1). Historical narratives preserved; only current-state descriptions updated. |
+
+**G3 deepened beyond original scope:**
+
+The original ITER-0004d.2a scope item G3 asked for 4 execution tests. The subagent delivered 8 because the audit's specific concern (a handler-body bug shipping undetected) extends to the inlined nested dispatch at vm.rs:2610 — `MatchListNode`'s handler RE-IMPLEMENTS the binding logic of `MatchListNodeWithBindings`, not delegates to it. A divergent bug in the inlined version would only surface through a dedicated test (which test #8 — `matchlistnode_with_nested_bindings_pattern` — now provides).
+
+**Setup pattern documented:**
+
+The G3 implementer documented a non-obvious technique for direct VM-level testing of pattern-matching opcodes: the public `Vm` API has no way to inject `parse_state.input()` directly, but `Instruction::ParsePush { value }` at vm.rs:1482-1487 pushes a value onto the parse state. So the pattern is: build the input value with `MakeListNode`, `ParsePush` it, then run the match opcode. Binding extraction is verified by following the match with `LoadVar(name)` and reading the VM's output. This technique can be reused for any future pattern-opcode tests that need direct construction.
+
+**Sentinels (final, 2026-05-12):**
+- ast_to_ir_parity: 57 passed, 2 ignored
+- scenario_0103_optimizer_pipeline: 32 passed, 1 ignored
+- tavern_demo: 6 passed
+- no_legacy_fmpl_syntax: 1 passed
+- structural_invariants: 19 passed (greps #6 + #7 needles flipped to MakeListNode + ExtractListChild)
+- diagnostics_fmpl_source_scan: 21 passed
+- canonical_pipeline_parity: 8 passed
+- opcode_rename_evidence: 15 passed (was 7 in ITER-0004d.2 — +8 G3 execution tests)
+- **Total: 155 passed, 3 ignored across 8 suites** (vs end-of-ITER-0004d.2 baseline 147/3; net +8 tests, 0 regressions)
+
+Clippy: clean (`cargo clippy --all-targets --quiet -- -D warnings`).
+
+**Re-audit:**
+
+Per the iteration's acceptance criteria, a focused re-audit confirmed all four gaps closed. The re-audit verified:
+- G1: arm key correctly renamed; PARSER_EPOCH unchanged (correct scoping).
+- G2: card text matches test code; historical narrative preserved.
+- G3: 8 behavioral execution tests exist and exercise the right code paths.
+- G4: 0 current-state references to old names in the four checked files (the 4 remaining matches in compiler.rs are all `#[serde(rename = "...")]` attributes — correct wire-format preservation).
+
+No new findings beyond the four gaps.
+
+**Lessons:**
+
+1. **The audit→fix-up→re-audit pattern catches what construction-only tests miss.** ITER-0004d.2's `renamed_variants_are_constructible` test was the right idea (don't let the variant disappear silently) but stopped one layer short of the right granularity. The audit's Auditor B caught that the handler bodies were untested; G3 added the execution layer. This is the second iteration in a row (after ITER-0004d.3a) where the re-audit caught a residual gap the fix-up almost-but-not-quite addressed. The fix-up's own re-audit step is load-bearing.
+
+2. **The `ParsePush` technique generalizes.** Setting up `parse_state.input()` from a test crate seemed hard at first (private API). The discovery that `Instruction::ParsePush` is a public opcode that does exactly this means any future pattern-opcode test can use the same pattern: build input → ParsePush → opcode under test → LoadVar for assertions. Worth documenting in the SCENARIO-0107 card as a reference technique.
+
+3. **Inlined vs delegated dispatch is a real distinction.** `MatchListNode`'s handler at vm.rs:2567 doesn't call `MatchListNodeWithBindings`'s handler for the nested case — it re-implements the binding logic inline at vm.rs:2610-2655. This is a code-duplication smell but also a real reason to test both paths separately. A future refactor that consolidates the two paths into a single helper would simplify the code and the tests would catch any regression.
+
+4. **Dispatcher-divergence is a class of bug.** ITER-0004d.2 missed `ir_to_rust.rs:543` because the rename surface enumeration focused on the bytecode IR dispatcher (`builtins/ir.rs`) and didn't enumerate the parallel Rust-transpiler dispatcher in the SAME directory. Lesson for future rename iterations: when renaming an IR node name (a STRING that's looked up across dispatchers), grep ALL dispatchers — there may be more than one consumer of the name namespace.
+
+**Summary:**
+
+ITER-0004d.2a closed four audit-flagged gaps in SCENARIO-0107 evidence: dispatcher consistency (G1), card-to-test alignment (G2), VM-execution coverage for dead-code handlers (G3), and stale-comment hygiene (G4). The re-audit confirmed all gaps closed. Sentinel corpus: 155 passed across 8 suites (+8 net from G3). ITER-0004 remaining: only ITER-0004h (Type::Tagged cleanup) before the milestone closes.

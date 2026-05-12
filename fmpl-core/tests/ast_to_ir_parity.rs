@@ -479,7 +479,7 @@ mod full_pipeline_advanced {
         // for tagged-pattern arms — the Rust compiler emits MatchTag (with
         // an arity check), while ir::compile's emit_tagged_pattern_match
         // (builtins/ir.rs:946) emits GetProp(tag) + LoadSymbol + Eq +
-        // JumpIfFalse + ExtractTaggedChild (no MatchTag, no arity check).
+        // JumpIfFalse + ExtractListChild (no MatchTag, no arity check).
         // assert_pipeline_parity asserts equal RESULTS, not equal bytecode.
         // The arity-check + nested-pattern gaps in the ir::compile path
         // are tracked as FOLLOWUP #30.
