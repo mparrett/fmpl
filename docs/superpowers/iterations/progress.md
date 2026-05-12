@@ -1,9 +1,27 @@
 # Progress
 
-**Phase:** ITER-0004d.1 — DONE 2026-05-12 with T18 deferred to ITER-0004d.3. Two new follow-on iterations scheduled: ITER-0004d.3 (bootstrap-parse + T18) and ITER-0004d.4 (data-driven scenario runner).
-**Iterations:** 7/13 done (ITER-0004d.1 closed; ITER-0004d.2, 0004d.3, 0004d.4, 0004e, 0004f, 0004g, 0004h, 0005+ pending).
+**Phase:** ITER-0004d.1 DONE; ITER-0004d.4 brainstormed-then-DEFERRED 2026-05-12. Next critical-path iteration is ITER-0004d.3 (bootstrap-parse + T18 gate flip) to close ITER-0004's correctness ratchet.
+**Iterations:** 7/13 done (ITER-0004d.1 closed; ITER-0004d.2, 0004d.3, 0004d.4, 0004e, 0004f, 0004g, 0004h, 0005+ pending). ITER-0004d.4 has a written spec at `docs/superpowers/specs/2026-05-12-scenario-runner-design.md` but is deferred until ITER-0004 closes.
 **Sentinel corpus (final, 2026-05-12):** ast_to_ir_parity 57/57 (2 #[ignore]); scenario_0103 32/32 (1 ignored); tavern_demo 6/6; no_legacy_fmpl_syntax 1/1 (baseline mode, gate flip deferred to ITER-0004d.3); structural_invariants 17/17 (NEW — SCENARIO-0104/0105/0106 evidence). 113 passed, 3 ignored across 5 suites. Full fmpl-core suite: 1200 passed, 182 ignored across 71 suites (fallback parser — metacircular path pending ITER-0004d.3).
-**Last event:** 2026-05-12 — ITER-0004d.1 wrap-up: roadmap updated (ITER-0004d.1 marked done; ITER-0004d.3 + ITER-0004d.4 added with binding preconditions); iteration-log.md entry written; progress.md (this file) finalized. User design decisions noted: thin Rust driver + parsed scenario cards (→ ITER-0004d.4); investigate bootstrap-parse first then T18 (→ ITER-0004d.3).
+**Last event:** 2026-05-12 — ITER-0004d.4 brainstorming session produced a design spec including a bootstrap-durability extension (lib/tests/scenarios/scenarios.fmpl artifact, FMPL-surface runner). User then deferred the iteration pending ITER-0004 closure. Ratchet check confirmed: ITER-0004 correctness is already protected by the no_legacy_fmpl_syntax baseline, sentinel corpus, parser-epoch system, and structural_invariants — the scenario runner adds elegance, not new ratchet capability.
+
+## Ratchet status (ITER-0004 critical-path verification)
+
+The user asked: "do we have enough to make sure we continue the ratchet towards correctness?" — checked at 2026-05-12 immediately before deferring ITER-0004d.4.
+
+**Yes.** ITER-0004's correctness ratchet is enforced by four independent gates, all green and all monotonic:
+
+1. **`no_legacy_fmpl_syntax` baseline-mode gate.** Per-surface hit counts cannot grow without explicit baseline regen. Current baseline: `lib/core=0, src/rs=26, tests/fmpl=0, tests/rs=4`. ITER-0004d.3 flips to `== 0` mode after the bootstrap-parse follow-up.
+2. **Sentinel test corpus.** ast_to_ir_parity (57/57), scenario_0103 (32/32), tavern_demo (6/6), structural_invariants (17/17), no_legacy_fmpl_syntax (1/1). Any regression in any of these fails CI.
+3. **Parser-epoch system.** `PARSER_EPOCH = 3` in src/parser_epoch.rs is compared against the generated parser's embedded `GENERATED_PARSER_EPOCH`. Mismatch produces a compile-time error in parser.rs (when the metacircular path is active). Catches stale generators automatically.
+4. **Structural invariants in `structural_invariants.rs`.** Seven greps confirm the five deleted Rust variants (Value::Tagged, Expr::Tagged, Pattern::Constructor, Pattern::Tagged, Pattern::TagMatch) stay deleted and the canonical replacement (ExtractTaggedChild) stays present. Re-introduction of any deleted name fails the gate.
+
+ITER-0004 closes when the three remaining sub-iterations land:
+- **ITER-0004d.2** — opcode rename (AC-11). Mechanical sweep; low risk.
+- **ITER-0004d.3** — bootstrap-parse fix + T18 gate flip. Investigation depth unknown; the bootstrap-parse failure is concrete and reproducible.
+- **ITER-0004h** — Type::Tagged cleanup. Last Tagged surface in the type system.
+
+ITER-0004d.4 (scenario runner) is orthogonal to the ratchet — it's an evidence-architecture refactor, not a correctness step. Resumes after ITER-0004 closes.
 
 ## Session 2 of 2026-05-12
 

@@ -44,3 +44,4 @@ test_*
 # Override global ignore for iterative-development artifacts
 !docs/superpowers/
 docs/superpowers/iterations/scratch/
+docs/superpowers/specs/.clearance-rendered-preview-*/

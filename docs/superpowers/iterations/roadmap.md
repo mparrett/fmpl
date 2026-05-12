@@ -619,27 +619,43 @@ These gates are NOT new work — they are the existing iteration gates, framed u
 
 - **Bisect the three-load failure.** From progress.md session 1: a single `io::load(...)` works; two consecutive loads work; three consecutive loads fail with `expected Comma`. Reproduce against parent-commit source (confirmed pre-existing); confirm it's not a parser-epoch staleness issue (the epoch system is dormant under fallback — should not affect bootstrap). Likely candidates: cross-file scope leak; bootstrap parser bug in the third load; side-effect ordering in `io::load`'s evaluation.
 - **Root-cause fix, not symptomatic.** Per CLAUDE.md `investigate` skill discipline — reproduce in a minimal failing case first, then identify the line/expression that triggers the failure, then fix the underlying mechanism. Workarounds that mask the problem (e.g., merging the three grammar files into one) do NOT close this iteration.
-- **The 4 + 26 false-positive hits in tests/rs + src/rs.** ITER-0004d.1's baseline carries 4 hits in `tests/*.rs` and 26 in `src/*.rs` — all are `module:function(args)` patterns where the FMPL lexer's `Symbol+LParen` heuristic produces a hit but the actual syntax is not the legacy `:Tag(args)` form. Two resolution options: (a) extend the scanner to distinguish `Ident COLON Symbol LParen` (a method-call form) from `COLON Symbol LParen` (the legacy tagged form); (b) hand-allowlist each site. Option (a) is the more durable fix; the scanner already lives in `fmpl-core/src/diagnostics/mod.rs` and the discriminator is a single-token lookback.
+- **Inspect the 4 + 26 residual hits BEFORE designing the scanner discriminator (PAR-revised).** The original roadmap description called these "`module:function(args)`" patterns and proposed a single-token lookback that checks for `Ident COLON Symbol LParen`. PAR-B raised a real concern: if the FMPL lexer tokenizes `module:function(args)` as `Ident COLON Ident LParen` (not `... Symbol LParen`), the existing scanner could not be firing on them, and the description has the wrong direction. Step 1a-NEW below mandates dumping the actual hit contents first; the discriminator design follows from observation, not speculation.
+- **No new allowlist entries (PAR-revised).** The existing two entries (`fmpl_parser.fmpl:first`, `fmpl_grammar.fmpl:first`) cover documented grammar-DSL binding sites. After the scanner refinement, both entries should become unreachable (the scanner stops flagging those sites without an allowlist). The iteration MUST NOT add any new allowlist entries; if a hit cannot be cleared by the discriminator, the iteration scope re-opens before flipping the gate.
+- **Grammar-runtime fix consequence: PARSER_EPOCH bump (PAR-revised).** If step 2's bisect lands the root cause in `fmpl-core/src/grammar/runtime.rs` (e.g., scope leak in `io::load` evaluation), the fix changes value-encoding or grammar-action semantics per the parser-epoch bump policy in `src/parser_epoch.rs:21`. In that case the iteration scope explicitly includes: bump `PARSER_EPOCH`, complete one full bootstrap-rebuild loop, and verify the regenerated parser passes the canonical-pipeline sentinel (step 7a-NEW below) before flipping the gate.
+- **Canonical-pipeline scenario (PAR-revised).** Both reviewers flagged a real coverage gap: no existing sentinel routes through `parser::generated_parse`. The "all sentinels pass without `FMPL_SKIP_PARSER_GEN=1`" claim is weaker than implied because `ast_to_ir_parity` explicitly calls `eval_via_legacy_parser`, `scenario_0103` uses `eval_via_fmpl_pipeline` which internally uses the legacy parser, and `structural_invariants.rs` uses `Parser::with_source`. **SCENARIO-0108 NEW** is added to this iteration: assert that the generated parser produces the same parse result (rejection-equivalent for SCENARIO-0104/0105 inputs; identical AST for a representative successful input from `ast_to_ir_parity`) as the source-tree Rust parser. Evidence: a new test file `fmpl-core/tests/canonical_pipeline_parity.rs` that calls `Parser::with_source` and `generated_parse` against the same inputs and asserts equality.
 
 **Scope:**
 
 1. **Reproduce the three-load failure** in a minimal test harness (`fmpl-bootstrap` invocation with a synthetic 3-load file). Confirm it's not env-dependent.
+1a. **Dump the 4 + 26 residual hits (PAR-revised).** Print the actual file:line + surrounding text + tag value for each hit. Categorize by token-sequence (which lexer token sequence produced the Symbol+LParen). This is observation work; the discriminator design follows from what's actually present, not from speculation about `module:function(args)`.
 2. **Bisect the failure mechanism.** Compare 2-load (works) vs 3-load (fails) parser state. Determine whether the issue is in the bootstrap-binary parser, the grammar runtime, or the `io::load` builtin's evaluation order.
 3. **Land the fix.** Add a unit test for the formerly-failing minimal case.
-4. **Refine the legacy-syntax scanner** to distinguish `module:function(args)` (allowed) from `:Tag(args)` (rejected). Add unit tests in `diagnostics_fmpl_source_scan.rs` for both forms.
-5. **Eliminate the residual hits.** With the refined scanner, the 4 + 26 should drop to 0 (or near-zero with a small allowlist). Re-run the baseline regeneration to verify.
-6. **Flip the gate.** Edit `fmpl-core/tests/no_legacy_fmpl_syntax.rs` to drop the baseline-JSON loading and assert `total_hits == 0`. Delete `fmpl-core/tests/no_legacy_fmpl_syntax.baseline.json`. Update the file's module docs.
-7. **Re-run all sentinels** under the canonical pipeline (no `FMPL_SKIP_PARSER_GEN=1`). All scenarios must pass.
+3a. **If step 2 identified `grammar/runtime.rs` or similar value-encoding change as the root cause (PAR-revised):** bump `PARSER_EPOCH` per `src/parser_epoch.rs` policy. Run the bootstrap rebuild loop. Verify `cargo check -p fmpl-core` succeeds with the regenerated parser (i.e., the parser-epoch assertion at compile time passes).
+4. **Refine the legacy-syntax scanner** based on step 1a's observations. Add unit tests in `diagnostics_fmpl_source_scan.rs` for both the surviving form (kept as hit) and the false-positive form (now cleared).
+5. **Eliminate the residual hits.** With the refined scanner, the 4 + 26 should drop to 0. **The "near-zero with a small allowlist" hedge from the previous scope is removed — no new allowlist entries are permitted (binding precondition above).** If hits remain that the scanner cannot cleanly classify, stop and revise scope before continuing.
+5a. **Remove now-redundant allowlist entries (PAR-revised).** After the scanner correctly classifies grammar-DSL binding sites, the two existing entries (`fmpl_parser.fmpl:first`, `fmpl_grammar.fmpl:first`) become dead code. Remove them. Re-run the gate to confirm hits remain at 0 without the allowlist.
+6. **Flip the gate.** Edit `fmpl-core/tests/no_legacy_fmpl_syntax.rs` to drop the baseline-JSON loading and assert `total_hits == 0`. Delete `fmpl-core/tests/no_legacy_fmpl_syntax.baseline.json`. Remove the `FMPL_REGEN_BASELINE` regen path (it is no longer meaningful in `== 0` mode). Update the file's module docs.
+7. **Re-run all sentinels** under the canonical pipeline (no `FMPL_SKIP_PARSER_GEN=1` env var, fresh bootstrap rebuild). All scenarios must pass. **NOTE (PAR-revised):** this only verifies the canonical generator runs to completion — it does NOT prove the generated parser is behaviorally equivalent to the fallback. That proof comes from step 7a.
+7a. **SCENARIO-0108 evidence: canonical-pipeline parity (PAR-revised, NEW).** Add `fmpl-core/tests/canonical_pipeline_parity.rs`:
+    - For each SCENARIO-0104 / SCENARIO-0105 rejection input: call `Parser::with_source(...).parse()` AND `parser::generated_parse(...)`. Assert both return `Err`. Assert the error messages contain the same canonical-form hint substring (`use [:`).
+    - For a representative successful input (`1 + 2` from `ast_to_ir_parity` baseline): call both parsers; assert the produced `Expr` trees are equal under `PartialEq`.
+    - This is the proof that the metacircular pipeline produces semantically-equivalent output to the source-tree parser, which is what DESIGN-001 requires and what scope step 7's "all sentinels pass" alone does NOT prove.
 
-**Acceptance:**
+**Acceptance (PAR-revised — split into syntactic vs behavioral gates):**
 
-- `fmpl-bootstrap lib/core/parser_generator.fmpl` succeeds end-to-end.
+*Syntactic-cleanliness gate (the `no_legacy_fmpl_syntax == 0` proof):*
+- `cargo test -p fmpl-core --test no_legacy_fmpl_syntax` passes in `== 0` mode (baseline JSON deleted; regen path removed).
+- The allowlist has zero entries (or only documented exceptions explicitly approved during this iteration).
+- The scanner has unit-test coverage for the false-positive forms identified in step 1a.
+
+*Behavioral-correctness gate (the canonical-pipeline proof — distinct from the syntactic gate):*
+- `fmpl-bootstrap lib/core/parser_generator.fmpl` succeeds end-to-end (no env-skip; the canonical generator regenerates `out/generated_parser.rs`).
 - The minimal-reproducer test for the three-load case passes.
-- `cargo test -p fmpl-core --test no_legacy_fmpl_syntax` passes with the gate in `== 0` mode (baseline JSON gone).
-- All sentinels still green: ast_to_ir_parity, scenario_0103_optimizer_pipeline, tavern_demo, structural_invariants.
-- No `FMPL_SKIP_PARSER_GEN=1` in the test invocation produces a green run.
+- `cargo test -p fmpl-core --test canonical_pipeline_parity` passes (SCENARIO-0108 evidence).
+- All sentinels still green WITHOUT `FMPL_SKIP_PARSER_GEN=1`: ast_to_ir_parity, scenario_0103_optimizer_pipeline, tavern_demo, structural_invariants, no_legacy_fmpl_syntax, canonical_pipeline_parity.
+- If a PARSER_EPOCH bump was needed (step 3a), the regenerated parser's embedded `GENERATED_PARSER_EPOCH` matches the new source `PARSER_EPOCH` value.
 
-**Out of scope:** ITER-0004d.2's opcode rename (separately scheduled). The data-driven scenario runner (ITER-0004d.4 below). The bootstrap-parse fix is bounded to the three-load issue; broader bootstrap refactoring is not in scope.
+**Out of scope:** ITER-0004d.2's opcode rename (separately scheduled). The data-driven scenario runner (ITER-0004d.4 below). The bootstrap-parse fix is bounded to the three-load issue; broader bootstrap refactoring is not in scope. Migrating SCENARIO-0108 into the scenario-runner card format (deferred to ITER-0004d.4 along with the others).
 
 ### ITER-0004d.4 — Data-Driven Scenario Runner (cucumber/SLIM-style)
 
