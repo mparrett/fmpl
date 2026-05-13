@@ -174,44 +174,81 @@ impl ObjectDb {
     }
 
     /// Save all objects to a Fjall keyspace (AC-1).
+    ///
+    /// Routes through [`persistence::envelope::write`][crate::persistence::envelope::write]
+    /// per STORY-0099 AC-5. Two PayloadKind variants are emitted per save:
+    /// `PayloadKind::ObjectIndex` (0x02) for the `__object_ids__` index,
+    /// then `PayloadKind::ObjectRecord` (0x01) per object. Source-hash
+    /// population deferred to ITER-0005b; both shapes carry [`NO_SOURCE_HASH`].
+    ///
+    /// [`NO_SOURCE_HASH`]: crate::persistence::envelope::NO_SOURCE_HASH
     #[cfg(feature = "fjall-persistence")]
     pub fn save_to_fjall(&self, keyspace: &fjall::Keyspace) -> Result<()> {
-        // Save list of object IDs for efficient loading
-        let ids: Vec<u64> = self.objects.keys().copied().collect();
-        let ids_bytes =
-            serde_json::to_vec(&ids).map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
-        keyspace
-            .insert(b"__object_ids__", ids_bytes)
-            .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
+        use crate::persistence::envelope::{NO_SOURCE_HASH, write};
+        use crate::persistence::schema::PayloadKind;
 
-        // Save each object
+        // Index record: list of object IDs for efficient loading
+        let ids: Vec<u64> = self.objects.keys().copied().collect();
+        write(
+            keyspace,
+            b"__object_ids__",
+            &ids,
+            PayloadKind::ObjectIndex,
+            NO_SOURCE_HASH,
+        )
+        .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
+
+        // Per-object records
         for (id, object) in &self.objects {
             let key = format!("obj:{}", id);
-            let value = serde_json::to_vec(object)
-                .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
-            keyspace
-                .insert(key.as_bytes(), value)
-                .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
+            write(
+                keyspace,
+                key.as_bytes(),
+                object,
+                PayloadKind::ObjectRecord,
+                NO_SOURCE_HASH,
+            )
+            .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
         }
 
         Ok(())
     }
 
     /// Load all objects from a Fjall keyspace (AC-2, AC-3, AC-4).
+    ///
+    /// **TODO(ITER-0005a.3):** Transitional manual prefix-strip. After
+    /// 0005a.2's writer sweep, on-disk values have a 56-byte envelope header
+    /// followed by the serialized payload. ITER-0005a.3 will replace this
+    /// manual strip with `loader::decode(&bytes)`.
     #[cfg(feature = "fjall-persistence")]
     pub fn load_from_fjall(&mut self, keyspace: &fjall::Keyspace) -> Result<()> {
-        // Load object IDs list
+        use crate::persistence::envelope::ENVELOPE_HEADER_SIZE;
+
+        fn strip_envelope(bytes: &[u8]) -> Result<&[u8]> {
+            if bytes.len() < ENVELOPE_HEADER_SIZE {
+                return Err(Error::ObjectPersistenceError(format!(
+                    "value too short for envelope header: {} bytes",
+                    bytes.len()
+                )));
+            }
+            Ok(&bytes[ENVELOPE_HEADER_SIZE..])
+        }
+
+        // Load object IDs list (index record)
         let ids_bytes = keyspace
             .get(b"__object_ids__")
             .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
 
         let ids: Vec<u64> = match ids_bytes {
-            Some(bytes) => serde_json::from_slice(&bytes)
-                .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?,
+            Some(bytes) => {
+                let payload = strip_envelope(&bytes)?;
+                serde_json::from_slice(payload)
+                    .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?
+            }
             None => Vec::new(), // No objects saved yet
         };
 
-        // Load each object
+        // Load each object record
         for id in ids {
             let key = format!("obj:{}", id);
             let obj_bytes = keyspace
@@ -219,7 +256,8 @@ impl ObjectDb {
                 .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
 
             if let Some(bytes) = obj_bytes {
-                let object: Object = serde_json::from_slice(&bytes)
+                let payload = strip_envelope(&bytes)?;
+                let object: Object = serde_json::from_slice(payload)
                     .map_err(|e| Error::ObjectPersistenceError(e.to_string()))?;
                 self.objects.insert(id, object);
 

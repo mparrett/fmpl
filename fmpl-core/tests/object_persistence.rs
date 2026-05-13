@@ -14,7 +14,7 @@ fn object_survives_save_restore() {
     let dir = tempfile::tempdir().unwrap();
     let _db = fjall::Database::builder(dir.path()).open().unwrap();
     let keyspace = _db
-        .keyspace("objects", || fjall::KeyspaceCreateOptions::default())
+        .keyspace("objects", fjall::KeyspaceCreateOptions::default)
         .unwrap();
 
     // Create object with property
@@ -47,7 +47,7 @@ fn prototype_chain_survives_save_restore() {
     let dir = tempfile::tempdir().unwrap();
     let _db = fjall::Database::builder(dir.path()).open().unwrap();
     let keyspace = _db
-        .keyspace("objects", || fjall::KeyspaceCreateOptions::default())
+        .keyspace("objects", fjall::KeyspaceCreateOptions::default)
         .unwrap();
 
     // Create parent object
@@ -93,7 +93,7 @@ fn multiple_objects_survive_save_restore() {
     let dir = tempfile::tempdir().unwrap();
     let _db = fjall::Database::builder(dir.path()).open().unwrap();
     let keyspace = _db
-        .keyspace("objects", || fjall::KeyspaceCreateOptions::default())
+        .keyspace("objects", fjall::KeyspaceCreateOptions::default)
         .unwrap();
 
     let mut db = ObjectDb::new();
@@ -130,12 +130,12 @@ fn next_id_restored_correctly() {
     let dir = tempfile::tempdir().unwrap();
     let _db = fjall::Database::builder(dir.path()).open().unwrap();
     let keyspace = _db
-        .keyspace("objects", || fjall::KeyspaceCreateOptions::default())
+        .keyspace("objects", fjall::KeyspaceCreateOptions::default)
         .unwrap();
 
     let mut db = ObjectDb::new();
-    let id1 = db.create(None);
-    let id2 = db.create(None);
+    let _id1 = db.create(None);
+    let _id2 = db.create(None);
     let id3 = db.create(None);
 
     db.save_to_fjall(&keyspace).unwrap();

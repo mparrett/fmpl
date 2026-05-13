@@ -694,26 +694,51 @@ impl CompiledCode {
     }
 
     /// Save compiled bytecode to a Fjall keyspace under the given key.
+    ///
+    /// Routes through [`persistence::envelope::write`][crate::persistence::envelope::write]
+    /// per STORY-0099 AC-5 — every persisted record is wrapped in a versioned
+    /// envelope (`PayloadKind::CompiledCode = 0x03`). Source-hash population is
+    /// deferred to ITER-0005b; for now all CompiledCode records carry
+    /// [`NO_SOURCE_HASH`][crate::persistence::envelope::NO_SOURCE_HASH].
     #[cfg(feature = "fjall-persistence")]
     pub fn save_to_fjall(&self, keyspace: &fjall::Keyspace, key: &str) -> Result<()> {
-        let bytes =
-            serde_json::to_vec(self).map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
-        keyspace
-            .insert(key.as_bytes(), bytes)
-            .map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
+        use crate::persistence::envelope::{NO_SOURCE_HASH, write};
+        use crate::persistence::schema::PayloadKind;
+        write(
+            keyspace,
+            key.as_bytes(),
+            self,
+            PayloadKind::CompiledCode,
+            NO_SOURCE_HASH,
+        )
+        .map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
         Ok(())
     }
 
     /// Load compiled bytecode from a Fjall keyspace by key.
     /// Returns None if the key does not exist.
+    ///
+    /// **TODO(ITER-0005a.3):** Transitional manual prefix-strip. After
+    /// 0005a.2's writer sweep, on-disk values have a 56-byte envelope header
+    /// followed by the serialized payload. ITER-0005a.3 will replace this
+    /// manual strip with `loader::decode(&bytes)` returning a `DecodedRecord`
+    /// whose `payload` is the borrowed `serde_json::from_slice` input.
     #[cfg(feature = "fjall-persistence")]
     pub fn load_from_fjall(keyspace: &fjall::Keyspace, key: &str) -> Result<Option<Self>> {
+        use crate::persistence::envelope::ENVELOPE_HEADER_SIZE;
         let bytes = keyspace
             .get(key.as_bytes())
             .map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
         match bytes {
             Some(b) => {
-                let code: CompiledCode = serde_json::from_slice(&b)
+                if b.len() < ENVELOPE_HEADER_SIZE {
+                    return Err(Error::BytecodePersistenceError(format!(
+                        "value too short for envelope header: {} bytes",
+                        b.len()
+                    )));
+                }
+                let payload = &b[ENVELOPE_HEADER_SIZE..];
+                let code: CompiledCode = serde_json::from_slice(payload)
                     .map_err(|e| Error::BytecodePersistenceError(e.to_string()))?;
                 Ok(Some(code))
             }

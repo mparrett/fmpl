@@ -28,6 +28,8 @@ smol_str = { workspace = true }
 stacker = "0.1"
 thiserror = { workspace = true }
 tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread", "time"] }
+zerocopy = { version = "0.8", features = ["derive"] }
+blake3 = "1"
 
 [dev-dependencies]
 fmpl-scenario-runner = { path = "../fmpl-scenario-runner" }

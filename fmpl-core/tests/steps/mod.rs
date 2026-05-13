@@ -24,3 +24,9 @@
 pub mod grep_invariant;
 pub mod parse_rejection;
 pub mod parse_success;
+
+// `dual_vm_parity` lives behind the `cross_compile` feature; the file is
+// `#![cfg(feature = "cross_compile")]`-gated, so non-feature builds see
+// an empty module body. The `mod` declaration stays unconditional to
+// keep this file simple — cfg-on-file is the source of truth.
+pub mod dual_vm_parity;

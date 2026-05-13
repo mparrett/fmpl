@@ -80,7 +80,10 @@
 | SCENARIO-0076 |  | integration | iteration | TBD | STORY-0001 |
 | SCENARIO-0077 |  | app-level | iteration | TBD | STORY-0038 |
 | SCENARIO-0103 | Full parity corpus passes with optimizer enabled | integration | sentinel | `cargo test -p fmpl-core --test scenario_0103_optimizer_pipeline` | STORY-0010 |
-| SCENARIO-0099 | Loader skips records with incompatible VM version | integration | iteration | TBD | STORY-0099 |
+| SCENARIO-0099 | Loader skips records with incompatible VM version | integration | sentinel | `cargo test -p fmpl-core --test scenario_0099_envelope_loader` | STORY-0099 |
+| (AC-6 ratchet) | Persistence schema is single source of truth (no version-derivation literals outside `persistence::schema`) | unit | sentinel | `cargo test -p fmpl-core --test persistence_schema_anti_rot` | STORY-0099 |
+| (AC-5 ratchet) | All persistence writes (in `fmpl-core/src/`) route through envelope helper (no raw `keyspace.insert(`/`partition.insert(` outside `persistence/envelope.rs`) | unit | sentinel | `cargo test -p fmpl-core --test persistence_envelope_invariant` | STORY-0099 |
+| SCENARIO-0111 | Writer→loader round-trip preserves `(PayloadKind, payload bytes)` for every active variant (CompiledCode, ObjectIndex, ObjectRecord, ParseState, MemoTable, StreamPosition) | integration | sentinel | `cargo test -p fmpl-core --test scenario_0111_envelope_writer_roundtrip` | STORY-0099 |
 | SCENARIO-0100 | Bytecode persists with content-addressed source reference | integration | iteration | TBD | STORY-0100 |
 | SCENARIO-0101 | Sourceless artifact gets synthesized constructor expression | integration | iteration | TBD | STORY-0100 |
 | SCENARIO-0102 | Loader recovers from incompatible payload via source recompilation | integration | iteration | TBD | STORY-0100 |
@@ -89,4 +92,5 @@
 | SCENARIO-0106 | Rust-side greppable invariant: deleted variants stay deleted (12 cases incl. NEW grep #9 for Type::Tagged per ITER-0004d.4) | unit | sentinel | `cargo test -p fmpl-core --test scenario_runner scenario_0106` | STORY-0010, STORY-0095 |
 | SCENARIO-0107 | Bytecode opcode rename invariant (post-ITER-0004d.2) | unit | sentinel | `cargo test -p fmpl-core --test opcode_rename_evidence` | STORY-0010 |
 | SCENARIO-0108 | Canonical-pipeline parity with source-tree parser | integration | sentinel | `cargo test -p fmpl-core --test canonical_pipeline_parity` | STORY-0010 |
+| SCENARIO-0109 | Dual-VM parity: in-tree Vm vs execution_tape | integration | iteration | `cargo test -p fmpl-core --features cross_compile --test scenario_runner scenario_0109` | STORY-0037 |
 | (G3) | Postlude arm contract for poison-AST-node legacy syntax rejection | unit | sentinel | `cargo test -p fmpl-core --test postlude_arm_contract` | STORY-0010 |

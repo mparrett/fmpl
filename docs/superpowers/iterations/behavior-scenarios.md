@@ -2018,27 +2018,36 @@
 **Owning stories:** STORY-0099
 
 **Preconditions:**
-- A Fjall keyspace contains three persisted records:
+- A Fjall keyspace contains six persisted records (each Fjall value is one self-contained envelope: `[EnvelopeHeader (56 bytes)][payload]`):
   - record A: written by current VM version, schema known
   - record B: written with a `vm_version` major one ahead of current
-  - record C: written with a known `vm_version` but an unknown `payload_kind`
-- A fourth record D has its CRC32 deliberately corrupted
+  - record C: known `vm_version` but unknown `payload_kind`
+  - record D: CRC32 field deliberately corrupted (payload tampered post-stamping)
+  - record E: known `payload_kind` but unknown `schema_version` (audit fix-up: AC-3 sub-condition)
+  - record F: known `payload_kind` + `schema_version` but nonzero reserved `flags` byte (audit fix-up: AC-3 sub-condition)
 
 **Action:**
-- Iterate the keyspace through the envelope-aware loader
+- Iterate the keyspace through the envelope-aware loader. Each `(key, value)` from the iterator is decoded via `persistence::loader::decode(value)`.
 
 **Expected observables:**
-- Record A loads successfully
-- Records B, C, D are skipped without raising an error
-- Loader stats report `loaded=1`, `skipped_incompatible=1` (B), `skipped_unknown_kind=1` (C), `skipped_corrupt=1` (D)
-- Each skip uses `payload_len + source_len` from the header to advance past the record without parsing the payload
-- Iteration completes; no record after a skipped record is missed
+- Record A loads successfully (`DecodeOutcome::Loaded`)
+- Record B is skipped via `SkippedIncompatible(VmMajorMismatch)`
+- Record C is skipped via `SkippedUnknownKind(UnknownPayloadKind)`
+- Record D is skipped via `SkippedCorrupt(ChecksumMismatch)`
+- Record E is skipped via `SkippedUnknownKind(UnknownSchemaVersion)`
+- Record F is skipped via `SkippedUnknownKind(NonzeroReservedFlags)`
+- No skip raises an error; iteration continues to the next `(key, value)` in the keyspace
+- Harness-local counters (AC-7 `LoaderStats` deferred to ITER-0005a.2) record `loaded=1, skipped_incompatible=1, skipped_unknown_kind=3, skipped_corrupt=1`
 
-**Automation status:** pending
-**Execution command:** TBD
+**Note on K/V vs. stream semantics:** Fjall is a key-value store — each record is its own value at its own key. Skip semantics are "ignore this `(key, value)` and continue to the next iterator entry," NOT byte-arithmetic advancement through a contiguous byte stream. The loader validates `value.len() == 56 + header.payload_len` as a corruption check (`SkippedCorrupt(PayloadLengthMismatch)`).
+
+**Automation status:** implemented (ITER-0005a.1, 2026-05-13)
+**Execution command:** `cargo test -p fmpl-core --test scenario_0099_envelope_loader`
 
 **Sources:**
 - `docs/superpowers/iterations/requirements/EPIC-003.md` (STORY-0099)
+- `fmpl-core/src/persistence/loader.rs` (the `decode` function under test)
+- `fmpl-core/tests/scenario_0099_envelope_loader.rs` (the evidence test)
 
 ## SCENARIO-0100 — Compiled bytecode persists with a content-addressed source reference
 
@@ -2400,3 +2409,84 @@ For the data-driven structural cases (12 total post-migration), the assertions a
 - `docs/superpowers/iterations/requirements/EPIC-002.md` STORY-0010 AC-11
 
 **Note:** Added 2026-05-12 (ITER-0004d.2 T7). The PAR scope review caught two real findings that shaped this scenario card: (1) `MatchListNode` and `MatchListNodeWithBindings` are dead-code post-ITER-0004d.1 (no live emit sites) — sentinel-pass alone doesn't prove their handlers work, so direct variant construction is the proof; (2) `bytecode_persistence.rs` doesn't exercise these opcodes — a missing or misspelled `serde(rename)` would silently ship a wire-format regression, so explicit round-trip tests close that gap.
+
+## SCENARIO-0109 — Dual-VM parity: in-tree Vm vs execution_tape
+
+**Kind:** contract
+**Proof seam:** integration
+**Owning stories:** STORY-0037 (EPIC-007 — execution_tape integration precursor)
+**Action type:** `dual_vm_parity`
+
+**Preconditions:**
+- The `cross_compile` feature is enabled (`cargo test -p fmpl-core --features cross_compile`). Default-feature builds skip these cases entirely (the build.rs codegen feature-gates `dual_vm_parity` test functions).
+- `fmpl-core::cross_compile::cross_compile` produces a verified `execution_tape::verifier::VerifiedProgram` for the supported-opcode subset documented in `fmpl-core/src/cross_compile.rs` (rustdoc: "Supported `Instruction` variants").
+- `execution_tape::vm::Vm::new(NullHost, Limits::default())` is callable. SCENARIO-0109's supported subset never emits host calls — the `NullHost` returning `HostError::UnknownSymbol` will trap loudly if that assumption breaks.
+- Both VMs are pure functions of the source (no I/O, no time, no randomness).
+
+**Supported subset (input constraints):**
+- ✅ Integer literals (`42`, `-1`, `0`)
+- ✅ Float literals (`3.14`, `0.0`)
+- ✅ Boolean literals (`true`, `false`)
+- ✅ Arithmetic on int/float operands (`+`, `-`, `*`, `/`, `%`) including precedence and parentheses
+- ✅ Comparison (`==`, `!=`, `<`, `>`, `<=`, `>=`)
+- ✅ Unary negation (`-x`) and logical not (`!b`)
+- ✅ Simple let-bindings whose body is a single arithmetic/comparison expression over the binding (`let (x = 5) x + 1`)
+- ❌ Strings — execution_tape `Value::Str` semantics may diverge subtly from fmpl-core `Value::String` (the rustdoc mapping table calls this out); excluded from the input subset
+- ❌ `if`/`match`/control flow — cross_compile doesn't support `Jump`/`JumpIfFalse` (single straight-line function only)
+- ❌ `&&`/`||` short-circuit operators — they lower to `JumpIfFalse` (excluded by control-flow constraint)
+- ❌ Lists, maps, lambdas, method calls, property access — none of those opcodes are in cross_compile's supported subset
+- ❌ Multi-statement let-bindings or sequencing — single expression only
+
+**Action:**
+- For each case, take the `source` field as FMPL source. Run two parallel pipelines and compare results:
+  1. **Path A (in-tree):** `Lexer::new(source).tokenize()` → `Parser::with_source(&tokens, source).parse()` → `Compiler::new().compile(&ast)` → `Vm::new().run(&code)` → `fmpl_core::Value`.
+  2. **Path B (cross-compiled):** Same compile to `CompiledCode`, then `cross_compile(&code)` → `VerifiedProgram` → `execution_tape::vm::Vm::run(&program, FuncId(0), &[], TraceMask::NONE, None)` → `Vec<execution_tape::Value>`. Take the first result (or `Unit` if empty) and map to `fmpl_core::Value` via the table in `cross_compile.rs`.
+- Assert the two `fmpl_core::Value` results are equal under `PartialEq`. On mismatch, fail the case with a diff of the two values and the offending source.
+
+**Expected observables:**
+- All cases pass: in-tree `Vm` and `execution_tape::vm::Vm` produce equal `fmpl_core::Value` results for every supported-subset input.
+- Any cross_compile error (`CrossCompileError::UnsupportedInstruction` or `VerificationFailed`) fails the case loudly — the input subset is curated to exclude unsupported opcodes, so any such error means either the input violates the documented subset or cross_compile coverage regressed.
+- Any execution_tape VM trap fails the case loudly — same logic: the supported subset shouldn't trap.
+- The per-case failure-output template embeds the source string and both VMs' result `Value` debug-formats so a mismatch is immediately legible.
+
+**Cases:**
+- source: `42`
+- source: `0`
+- source: `-1`
+- source: `3.14`
+- source: `0.0`
+- source: `true`
+- source: `false`
+- source: `1 + 2`
+- source: `10 - 3`
+- source: `5 * 3`
+- source: `10 / 2`
+- source: `7 % 3`
+- source: `1 + 2 * 3`
+- source: `2 * (3 + 4)`
+- source: `1.5 + 2.5`
+- source: `2.0 * 3.0`
+- source: `1 == 1`
+- source: `1 != 2`
+- source: `1 < 2`
+- source: `3 > 2`
+- source: `3 >= 3`
+- source: `2 <= 3`
+- source: `-5`
+- source: `-(2 + 3)`
+- source: `!true`
+- source: `!false`
+- source: `let (x = 5) x + 1`
+- source: `let (y = 10) y * 2`
+- source: `let (z = 7) z - 3`
+
+**Automation status:** implemented (ITER-0004x T2-T3)
+**Execution command:** `cargo test -p fmpl-core --features cross_compile --test scenario_runner scenario_0109`
+
+**Sources:**
+- `fmpl-core/src/cross_compile.rs` (the cross-compiler under test; supported-opcode subset documented in module-level rustdoc — ITER-0004x T1)
+- `fmpl-core/tests/steps/dual_vm_parity.rs` (the `dual_vm_parity` step-def — ITER-0004x T2)
+- `docs/superpowers/iterations/iteration-log.md` ITER-0004x entry
+- `docs/superpowers/iterations/requirements/EPIC-007.md` STORY-0037 (execution_tape integration — SCENARIO-0109 is a precursor parity gate for the eventual full migration)
+
+**Note:** Added 2026-05-12 (ITER-0004x T3). This scenario is a **precursor parity gate** for STORY-0037 (full execution_tape adoption). The premise per the user: "push the execution_tape migration a bit harder" — Angle 2, "get a feeling on whether I'd be better off farming off the VM implementation to somewhere else". SCENARIO-0109 establishes a beachhead: the supported-opcode subset of FMPL bytecode produces identical observable results on both VMs. Future iterations (likely ITER-0005's persistence work surfaces it, or a dedicated ITER-0004x.1) will expand the supported subset until cross_compile covers enough of FMPL to make the in-tree `Vm` deletable. The `dual_vm_parity` step-def is feature-gated behind `cross_compile`; default-feature builds skip these cases entirely via the build.rs codegen's `#[cfg(feature = "cross_compile")]` emission on `dual_vm_parity` cases (T3a addition to build.rs).

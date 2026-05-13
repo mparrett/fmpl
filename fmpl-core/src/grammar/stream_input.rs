@@ -449,8 +449,26 @@ impl StreamPosition {
     }
 
     /// Spill a position to Fjall storage.
+    ///
+    /// Routes through [`crate::persistence::envelope::write`] per
+    /// STORY-0099 AC-5 with [`PayloadKind::StreamPosition`] (0x09). The
+    /// on-disk payload shape is `Option<Vec<u8>>` (a JSON-encoded optional
+    /// head value, where the inner Vec<u8> is itself a serialized `Value`).
+    /// Distinct from `ParseState` (incremental.rs) because the shapes
+    /// differ — the prior collision under a shared discriminator was
+    /// caught and fixed in the ITER-0005a.2 audit fix-up (G2).
+    ///
+    /// Preserves panic-on-write semantics by `.expect()`-ing the helper's
+    /// `Result`. Source-hash deferred to ITER-0005b; uses NO_SOURCE_HASH.
+    ///
+    /// [`PayloadKind::StreamPosition`]: crate::persistence::schema::PayloadKind::StreamPosition
     fn spill_to_fjall(fjall: &FjallOverflow, pos: &Rc<StreamPosition>) {
-        // Serialize the head value (if any) using serde_json
+        use crate::persistence::envelope::{NO_SOURCE_HASH, write};
+        use crate::persistence::schema::PayloadKind;
+
+        // Serialize the head value (if any) using serde_json (inner-wrapping
+        // preserves the existing on-the-wire shape that restore_from_fjall
+        // reads back).
         let head_bytes = pos
             .head
             .as_ref()
@@ -459,29 +477,40 @@ impl StreamPosition {
         // Key is the position index as bytes
         let key = pos.index.to_be_bytes();
 
-        // Value is Option<Vec<u8>> serialized
-        let value =
-            serde_json::to_vec(&head_bytes).expect("failed to serialize position for fjall");
-
-        fjall
-            .keyspace
-            .insert(key, value)
-            .expect("failed to insert position into fjall");
+        write(
+            &fjall.keyspace,
+            &key,
+            &head_bytes,
+            PayloadKind::StreamPosition,
+            NO_SOURCE_HASH,
+        )
+        .expect("failed to write position envelope to fjall");
     }
 
     /// Restore a position from Fjall storage.
+    /// Restore a position from Fjall storage.
+    ///
+    /// **TODO(ITER-0005a.3):** Transitional manual envelope-prefix-strip.
+    /// 0005a.2's writer sweep wraps every fjall value in a 56-byte envelope
+    /// header followed by the JSON payload. ITER-0005a.3 will replace this
+    /// strip with `loader::decode(&bytes)` returning a `DecodedRecord`.
     fn restore_from_fjall(
         fjall: &FjallOverflow,
         index: usize,
         source: Rc<StreamSource>,
         memo_fjall: Option<Arc<Mutex<MemoFjall>>>,
     ) -> Option<Rc<StreamPosition>> {
+        use crate::persistence::envelope::ENVELOPE_HEADER_SIZE;
         let key = index.to_be_bytes();
 
         if let Ok(Some(value_bytes)) = fjall.keyspace.get(key) {
+            if value_bytes.len() < ENVELOPE_HEADER_SIZE {
+                return None;
+            }
+            let payload = &value_bytes[ENVELOPE_HEADER_SIZE..];
             // Deserialize the Option<Vec<u8>>
             let head_bytes: Option<Vec<u8>> =
-                serde_json::from_slice(&value_bytes).expect("failed to deserialize from fjall");
+                serde_json::from_slice(payload).expect("failed to deserialize from fjall");
 
             // Deserialize the head value (if any)
             let head = head_bytes.map(|bytes| {
@@ -521,12 +550,16 @@ impl StreamPosition {
         }
 
         // Check Fjall storage if configured
+        // TODO(ITER-0005a.3): replace manual prefix-strip with loader::decode.
         if let Some(ref memo_fjall) = self.memo_fjall {
+            use crate::persistence::envelope::ENVELOPE_HEADER_SIZE;
             let memo_fjall_guard = memo_fjall.lock().unwrap();
             // Key is position_index:rule_name
             let key = format!("{}:{}", self.index, rule);
             if let Ok(Some(value_bytes)) = memo_fjall_guard.0.get(key.as_bytes())
-                && let Ok(entry) = serde_json::from_slice::<MemoEntry>(&value_bytes)
+                && value_bytes.len() >= ENVELOPE_HEADER_SIZE
+                && let payload = &value_bytes[ENVELOPE_HEADER_SIZE..]
+                && let Ok(entry) = serde_json::from_slice::<MemoEntry>(payload)
             {
                 // Cache in memory for subsequent lookups
                 self.memo.borrow_mut().insert(rule.clone(), entry.clone());
@@ -542,17 +575,25 @@ impl StreamPosition {
         // Write to in-memory cache
         self.memo.borrow_mut().insert(rule.clone(), entry.clone());
 
-        // Write to Fjall storage if configured
+        // Write to Fjall storage if configured.
+        // Routes through persistence::envelope::write per STORY-0099 AC-5
+        // (PayloadKind::MemoTable). Preserves panic-on-write semantics via
+        // .expect(). Source-hash deferred to ITER-0005b.
         if let Some(ref memo_fjall) = self.memo_fjall {
+            use crate::persistence::envelope::{NO_SOURCE_HASH, write};
+            use crate::persistence::schema::PayloadKind;
+
             let memo_fjall_guard = memo_fjall.lock().unwrap();
             // Key is position_index:rule_name
             let key = format!("{}:{}", self.index, rule);
-            let value =
-                serde_json::to_vec(&entry).expect("failed to serialize MemoEntry for fjall");
-            memo_fjall_guard
-                .0
-                .insert(key.as_bytes(), value)
-                .expect("failed to insert memo into fjall");
+            write(
+                &memo_fjall_guard.0,
+                key.as_bytes(),
+                &entry,
+                PayloadKind::MemoTable,
+                NO_SOURCE_HASH,
+            )
+            .expect("failed to write memo envelope to fjall");
         }
     }
 

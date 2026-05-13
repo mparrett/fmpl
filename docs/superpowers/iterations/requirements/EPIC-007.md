@@ -21,5 +21,6 @@
 
 **Sources:**
 - `docs/plans/2026-03-03-self-hosting-bootstrap-design.md:284-297`
+- `fmpl-core/src/cross_compile.rs` — non-MLIR direct path from `CompiledCode` → `execution_tape::VerifiedProgram`. Precursor; covers a curated subset of opcodes. SCENARIO-0109 (dual-VM parity gate) was added in ITER-0004x to prove parity on that subset, surfacing three latent cross_compile bugs (hardcoded `I64` return type, missing `PushScope`/`PopScope`/`Copy` opcodes, `LoadVar` zero-placeholder) that were fixed before this story can be considered started.
 
-**Status:** pending
+**Status:** pending (ITER-0004x — 2026-05-12 — landed SCENARIO-0109 dual-VM parity gate as a precursor; full STORY-0037 work — MLIR backend + tape integration with control flow/strings/lists — remains for a future iteration. The parity gate proves: 29/29 cases of the supported-opcode subset agree across the in-tree `Vm` and `execution_tape::vm::Vm`, which is the foundation any larger migration depends on.)

@@ -393,12 +393,22 @@ fn generate_scenario_tests() -> std::io::Result<()> {
         if card.action_type.is_none() {
             continue;
         }
-        for (i, _case) in card.cases.iter().enumerate() {
+        for (i, case) in card.cases.iter().enumerate() {
             let suffix = card.id.trim_start_matches("SCENARIO-");
             let fn_name = format!("scenario_{suffix}_case_{i}");
+            // Step-defs registered only under a specific feature get a `#[cfg]`
+            // gate on the emitted test so default-feature builds compile and
+            // pass. Currently only `dual_vm_parity` (ITER-0004x SCENARIO-0109,
+            // registered when `cross_compile` is enabled).
+            let cfg_prefix = if case.action == "dual_vm_parity" {
+                "#[cfg(feature = \"cross_compile\")]\n"
+            } else {
+                ""
+            };
             writeln!(
                 out,
-                "\n#[test]\nfn {fn_name}() {{\n    let cards = corpus();\n    let card = cards.iter().find(|c| c.id == \"{id}\").expect(\"card present\");\n    let case = &card.cases[{i}];\n    if let Err(e) = dispatch(card, case) {{\n        panic!(\n            \"behavior-scenarios.md:{{}}-{{}} ({id} case {i}): {{}}\",\n            card.line_start, card.line_end, e\n        );\n    }}\n}}",
+                "\n{cfg_prefix}#[test]\nfn {fn_name}() {{\n    let cards = corpus();\n    let card = cards.iter().find(|c| c.id == \"{id}\").expect(\"card present\");\n    let case = &card.cases[{i}];\n    if let Err(e) = dispatch(card, case) {{\n        panic!(\n            \"behavior-scenarios.md:{{}}-{{}} ({id} case {i}): {{}}\",\n            card.line_start, card.line_end, e\n        );\n    }}\n}}",
+                cfg_prefix = cfg_prefix,
                 fn_name = fn_name,
                 id = card.id,
                 i = i,

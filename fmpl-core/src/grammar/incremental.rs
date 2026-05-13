@@ -68,26 +68,57 @@ impl ParseState {
     }
 
     /// Save parse state to Fjall keyspace.
+    ///
+    /// Routes through [`crate::persistence::envelope::write`] per STORY-0099
+    /// AC-5. Uses [`crate::persistence::schema::PayloadKind::ParseState`]
+    /// (0x06). Source-hash deferred to ITER-0005b; carries
+    /// [`crate::persistence::envelope::NO_SOURCE_HASH`].
+    ///
+    /// Note: this call site is NOT `#[cfg(feature = "fjall-persistence")]`-gated
+    /// (unlike `compiler.rs::save_to_fjall` and `object.rs::save_to_fjall`).
+    /// The asymmetry is preserved per the ITER-0005a.2 scope-card decision;
+    /// closing it is a separate future hardening iteration. The envelope
+    /// helper itself is unconditional, so this works.
     pub fn save_to_fjall(
         &self,
         keyspace: &fjall::Keyspace,
         key: &[u8],
     ) -> Result<(), ParseStateError> {
-        let bytes = self.to_bytes().map_err(ParseStateError::Serialize)?;
-        keyspace
-            .insert(key, bytes)
-            .map_err(ParseStateError::Fjall)?;
-        Ok(())
+        use crate::persistence::envelope::{NO_SOURCE_HASH, write};
+        use crate::persistence::schema::PayloadKind;
+        // Bridge envelope::EnvelopeWriteError → ParseStateError.
+        match write(keyspace, key, self, PayloadKind::ParseState, NO_SOURCE_HASH) {
+            Ok(()) => Ok(()),
+            Err(crate::persistence::envelope::EnvelopeWriteError::Serialize(e)) => {
+                Err(ParseStateError::Serialize(e))
+            }
+            Err(crate::persistence::envelope::EnvelopeWriteError::Keyspace(e)) => {
+                Err(ParseStateError::Fjall(e))
+            }
+        }
     }
 
     /// Load parse state from Fjall keyspace.
+    ///
+    /// **TODO(ITER-0005a.3):** Transitional manual prefix-strip. After
+    /// 0005a.2's writer sweep, on-disk values have a 56-byte envelope
+    /// header followed by the serialized payload. ITER-0005a.3 will
+    /// replace this manual strip with `loader::decode(&bytes)`.
     pub fn load_from_fjall(
         keyspace: &fjall::Keyspace,
         key: &[u8],
     ) -> Result<Option<Self>, ParseStateError> {
+        use crate::persistence::envelope::ENVELOPE_HEADER_SIZE;
         match keyspace.get(key).map_err(ParseStateError::Fjall)? {
             Some(bytes) => {
-                let state = Self::from_bytes(&bytes).map_err(ParseStateError::Deserialize)?;
+                // Defensive: feed at most a too-short slice into from_bytes
+                // so a corrupted record surfaces as Deserialize rather than
+                // panicking on the slice index below. ENVELOPE_HEADER_SIZE
+                // is the floor; serde_json will reject the empty slice it
+                // gets in that case.
+                let payload_start = bytes.len().min(ENVELOPE_HEADER_SIZE);
+                let payload = &bytes[payload_start..];
+                let state = Self::from_bytes(payload).map_err(ParseStateError::Deserialize)?;
                 Ok(Some(state))
             }
             None => Ok(None),

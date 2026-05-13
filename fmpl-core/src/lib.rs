@@ -29,6 +29,7 @@ pub mod parse_stream;
 pub mod parser;
 pub mod parser_epoch;
 pub mod pattern;
+pub mod persistence;
 pub mod repr;
 pub mod stream;
 pub mod tuplespace;

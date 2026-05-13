@@ -792,7 +792,7 @@ T1 reproduced and identified the root cause: `is_inline_pattern_block` heuristic
 
 **Rationale:** User feedback from 2026-05-12 (ITER-0004d.1 T19 review): the per-scenario Rust test pattern (e.g., `scenario_0104_rejects_single_arg_value_constructor`) is stylish but makes the test file harder to read at a glance — each test mostly restates structure already in the scenario card. A cucumber/FitNesse-SLIM-style data-driven runner where the scenario card IS the test spec, and the Rust side is a thin step-definition driver, would (a) make scenario contracts directly executable, (b) collapse boilerplate, and (c) make "add a new scenario" a primarily card-authoring activity.
 
-**Status:** done 2026-05-12 (PAR-revised scope: Rust runner only; FMPL-side runner deferred to ITER-0004d.5). T1 scaffolded the `fmpl-scenario-runner` workspace crate (deps: inventory 0.3). T2 implemented error.rs with Display impls for StepError/DispatchError/CorpusError (PAR-required for codegen `{}` format). T3 implemented the markdown corpus parser (689 lines, fixture-driven TDD, parses 87 cards from the real corpus). T4 implemented StepDef trait + inventory dispatch (4 integration tests for registration/dispatch/Unknown/Display). T5 extended fmpl-core/build.rs with codegen for `OUT_DIR/scenarios_generated.rs` (uses `env!("CARGO_MANIFEST_DIR")` baked at test-binary compile time per PAR finding; cargo::rerun-if-changed for the corpus markdown). T6 moved comment_strip helper to `tests/common/comment_strip.rs` (preserved verbatim; +15 unit tests added). T7 implemented 3 step-defs in `tests/steps/`: parse_rejection, parse_success, grep_invariant (handles both expect_absent and expect_present). T8 migrated SCENARIO-0104 (6 cases), SCENARIO-0105 (4 cases), SCENARIO-0106 (12 cases incl. NEW grep #9 for `Type::Tagged` from ITER-0004h audit) to the structured `**Action type:**` + `**Cases:**` card format. T9 created `tests/scenario_runner.rs` (3-line glue: mod common; mod steps; include!) and `tests/postlude_arm_contract.rs` (relocated `g3_postlude_arms_fire_on_poison_nodes` as a special-case test that doesn't fit the card format). T10 deleted `tests/structural_invariants.rs` entirely (all 19 evidence tests migrated; 15 comment_strip tests live in tests/common now). T11 updated behavior-corpus.md execution commands. T12 was subsumed by T9/T10 inline edits. Final sentinel sweep: 218 passed, 3 ignored across 10 fmpl-core suites + 27 passed across 5 fmpl-scenario-runner suites = **245 total tests passing**, 0 regressions. Clippy clean. **STORY-0106 grep #9 ratchet for `Type::Tagged` is now authored as a scenario card (not a Rust test), closing the ITER-0004h audit gap via the new data-driven infrastructure.**
+**Status:** done 2026-05-12 (PAR-revised scope: Rust runner only; FMPL-side runner deferred to ITER-0004d.5). T1 scaffolded the `fmpl-scenario-runner` workspace crate (deps: inventory 0.3). T2 implemented error.rs with Display impls for StepError/DispatchError/CorpusError (PAR-required for codegen `{}` format). T3 implemented the markdown corpus parser (689 lines, fixture-driven TDD, parses 87 cards from the real corpus). T4 implemented StepDef trait + inventory dispatch (4 integration tests for registration/dispatch/Unknown/Display). T5 extended fmpl-core/build.rs with codegen for `OUT_DIR/scenarios_generated.rs` (uses `env!("CARGO_MANIFEST_DIR")` baked at test-binary compile time per PAR finding; cargo::rerun-if-changed for the corpus markdown). T6 moved comment_strip helper to `tests/common/comment_strip.rs` (preserved verbatim; +15 unit tests added). T7 implemented 3 step-defs in `tests/steps/`: parse_rejection, parse_success, grep_invariant (handles both expect_absent and expect_present). T8 migrated SCENARIO-0104 (6 cases), SCENARIO-0105 (4 cases), SCENARIO-0106 (12 cases incl. NEW grep #9 for `Type::Tagged` from ITER-0004h audit) to the structured `**Action type:**` + `**Cases:**` card format. T9 created `tests/scenario_runner.rs` (3-line glue: mod common; mod steps; include!) and `tests/postlude_arm_contract.rs` (relocated `g3_postlude_arms_fire_on_poison_nodes` as a special-case test that doesn't fit the card format). T10 deleted `tests/structural_invariants.rs` entirely (all 19 evidence tests migrated; 15 comment_strip tests live in tests/common now). T11 updated behavior-corpus.md execution commands. T12 was subsumed by T9/T10 inline edits. Final sentinel sweep: 218 passed, 3 ignored across 10 fmpl-core suites + 27 passed across 5 fmpl-scenario-runner suites = **245 total tests passing**, 0 regressions. Clippy clean. **SCENARIO-0106 grep #9 ratchet for `Type::Tagged` is now authored as a scenario card (not a Rust test), closing the ITER-0004h audit gap via the new data-driven infrastructure.**
 
 **Impacted scenarios:** No new scenarios; this is infrastructure. SCENARIO-0104/0105/0106 migrated from Rust-per-test to data-driven (execution commands updated in behavior-corpus.md). Future scenarios benefit; existing free-form scenarios stay free-form unless explicitly migrated.
 
@@ -1011,7 +1011,7 @@ T1 reproduced and identified the root cause: `is_inline_pattern_block` heuristic
 
 After this iteration, ITER-0005 (Image Persistence) has direct evidence for what to persist: in-tree `Instruction` bytecode (`#[serde(rename)]` shim approach) OR execution_tape bytecode (already has its own serialization format).
 
-**Status:** pending (sequenced after ITER-0004d.4; before ITER-0005).
+**Status:** done (2026-05-12). SCENARIO-0109 landed with 29/29 cases passing under `--features cross_compile`. The parity-gate exercise surfaced and fixed three latent bugs in `cross_compile.rs`: (T3a) hardcoded `ret_types: vec![ValueType::I64]` broke Bool/F64 returns; (T3a) `PushScope`/`PopScope`/`Copy` were unsupported, blocking let-bindings; (T3a) `LoadVar(name)` emitted `const_i64(0)` as a placeholder regardless of the bound value, so name resolution silently returned zero. Fixes: return-type inferred from the last value-producing instruction's `TapeType`; scope markers handled as no-ops with the return selector skipping them; `LoadVar` now resolves through a `name → bind-idx` map populated during the codegen pass. Default-feature scenario_runner remains 38/38; clippy clean on both feature configurations. Out-of-scope follow-ups (control flow, strings, lists, pattern matching) remain for the eventual STORY-0037 / EPIC-007 work.
 
 **Depends on:** ITER-0004d.4 (the scenario runner provides a clean home for the new SCENARIO-0109 parity card — authoring it as a Rust test would compound migration debt, same lesson as ITER-0004h's grep #9). Also depends on `fmpl-core/src/cross_compile.rs` being current — it is (covers LoadInt/Float/Bool/Null/String/Symbol, LoadVar, Bind, NameRef, arithmetic +-*/%, comparison ==!=<><=>=, Neg, Not, MakeList per inspection 2026-05-12).
 
@@ -1047,21 +1047,626 @@ After this iteration, ITER-0005 (Image Persistence) has direct evidence for what
 - **MLIR / EPIC-007.** STORY-0037 (MLIR backend emits execution_tape) is a downstream initiative; this iteration is the empirical-evidence precursor.
 - **Performance benchmarking.** The current cross_compile.rs docstring claims "performance comparison" as the motivation but this iteration's parity gate is correctness-only. Perf measurement is a follow-up.
 
-### ITER-0005 — Image Persistence (Consolidated)
+### Image Persistence — sub-iteration family (ITER-0005a.1 … ITER-0005f)
 
-**Stories:** STORY-0099, STORY-0100, STORY-0013, STORY-0014, STORY-0015, STORY-0019, STORY-0021, STORY-0069, STORY-0016, STORY-0017, STORY-0018, STORY-0020
-**Rationale:** Consolidated from old ITER-0007/0008/0009. Persist all compiler state to Fjall in one iteration: ObjectDb (objects already derive Serialize/Deserialize), compiled bytecode (rkyv support exists), grammar definitions and memo tables (hardest — semantic actions contain AST expressions), and full VM snapshot/restore. Enable fjall-persistence feature flag. Verify full image survives process restart.
+**Cross-iteration rationale:** Consolidated from old ITER-0007/0008/0009 and originally drafted as a single ITER-0005. Reviewed 2026-05-12 against the size of recently-completed iterations (ITER-0004x had 5 tasks closing 1 story + 1 scenario; ITER-0004d.4 had ~7 tasks closing the data-driven runner) and found the umbrella ITER-0005 was ~3-5x larger by story-count (12 stories + foundational infrastructure across 5+ medium-to-large concerns). Split into layered sub-iterations along natural foundation/payload/composition fracture lines so each iteration is single-concern, 3-7 tasks, and audit-checkpoint-able. Each ships independently; downstream sub-iterations depend only on the artifacts the upstream one closed.
+
+**Family roster (post-2026-05-13 PAR splits):**
+
+- ITER-0005a.0 — MigrationEngine infrastructure (DEFERRED — ships with first real MigrationRule). Pure speculative infrastructure; deferred per 2026-05-12 PAR.
+- ITER-0005a.1 — STORY-0099 envelope format + loader (DONE 2026-05-13).
+- ITER-0005a.2 — STORY-0099 AC-5 write-side sweep (pending; PAR-revised 2026-05-13).
+- ITER-0005a.3 — STORY-0099 AC-7 LoaderStats + iter_keyspace public API + first consumer (pending; twice-PAR-revised — first split from 0005a.2 on writer/reader axis; second split 2026-05-13 into 0005a.3 API/consumer + 0005a.4 per-call-site rewire).
+- ITER-0005a.4 — STORY-0099 read-side decode wiring through LoaderStats API (pending; PAR-split from 0005a.3 — per-call-site rewire of all `load_from_fjall` sites; addresses 4 deferred audit findings from 0005a.2).
+- ITER-0005b — Content-addressed source store (pending; introduces `Hash` newtype).
+- ITER-0005c — Bytecode persistence (proof case).
+- ITER-0005d — Remaining payload classes (objects, grammars, GrammarRegistry, memo tables).
+- ITER-0005e — VM snapshot + tracer substrate foundation.
+- ITER-0005f — Feature flag wiring + final polish.
+
+**Cross-iteration sources:**
+- Pre-split design study: `docs/superpowers/specs/2026-05-12-lessons-from-siblings.md` (cairn / moor-echo / invalidation evaluation).
+- moor-echo's `SystemTracer` provides the `MigrationRule` + `MigrationEngine` pattern adopted in ITER-0005a (port the design in-house; no `moor-echo` dependency).
+- `invalidation` is NOT used by this family — it solves cache-freshness, not schema migration. Deferred per `feedback_dependency_policy.md`.
+- The cairn-borrowed span-on-every-Instruction discipline is orthogonal to persistence; tracked as a separate iteration candidate (Appendix B of the lessons doc).
+
+**Cross-iteration impacted scenarios:** SCENARIO-0007, SCENARIO-0008, SCENARIO-0009, SCENARIO-0010, SCENARIO-0011, SCENARIO-0099, SCENARIO-0100, SCENARIO-0101, SCENARIO-0102. (SCENARIO-0110 was planned for ITER-0005a.0; deferred 2026-05-12 — see ITER-0005a.0's deferral rationale. It will be authored alongside the first real `MigrationRule` in a future schema-change iteration.)
+
+**Cross-iteration depends on:** ITER-0004b (single canonical representation — see ITER-0004b "Why before persistence").
+
+**Cross-iteration look-ahead:** ITER-0005f's close unblocks ITER-0006 (Self-Compile and Seed). Per-iteration look-aheads call out which sub-iteration each downstream artifact actually needs.
+
+---
+
+#### ITER-0005a.0 — MigrationEngine infrastructure (DEFERRED — ships with first real MigrationRule)
+
+**Stories:** none. Was pure infrastructure; deferred pending a consumer.
+
+**Status:** deferred (2026-05-12 — PAR scope review).
+
+**Deferral rationale (2026-05-12, PAR aggregate):** Two parallel scope reviewers independently reached REVISE with the same primary finding: **shipping MigrationEngine before any consumer is YAGNI**. Aggregated points:
+
+1. The engine ships **empty** through 0005a.0 / 0005a.1 / 0005a.2 / 0005b. The first real `MigrationRule` doesn't land until a hypothetical future schema-change iteration (likely ITER-0005c.1+ or successor). No concrete consumer exists in this iteration family.
+2. The previous rationale ("0005a.1 routes envelope loading through `MigrationEngine::migrate` before falling back to skip") was structurally a no-op routing — with zero rules, `migrate()` is a pass-through and 0005a.1's loader produces identical observable behavior whether it routes through the engine or skips directly. The routing claim was structural-elegance, not behavior-driven.
+3. Architectural commitments (payload type for `PersistedRecord`, `validate` failure semantics, `priority` vs `from_version` dispatch model, `conflicts_with` inclusion/exclusion) cannot be made well without a concrete consumer. The lessons-from-siblings doc explicitly flagged the payload type as Open Question 4 (`docs/superpowers/specs/2026-05-12-lessons-from-siblings.md:377`) — designing in the abstract would commit to choices the first real schema change would likely revise.
+
+**The durable artifact is the lessons-from-siblings doc** (`docs/superpowers/specs/2026-05-12-lessons-from-siblings.md` §2). The moor-echo `TransformationRule` pattern is captured there with concrete file:line citations. Porting the pattern into FMPL is a ~30-minute lift when the first real `MigrationRule` arrives — and at that point, the consumer's needs will pin the payload type, the dispatch model, and the failure semantics correctly the first time.
+
+**When to revive:** the first iteration that introduces a breaking schema change to any persisted payload class (CompiledCode, Object, Grammar, ParseState, memo table, full-VM snapshot). At that point: lift the trait + runner from the lessons doc, parameterize over the concrete payload type the new schema demands, ship the engine alongside the first rule and SCENARIO-0110 alongside both. The infrastructure-and-its-first-consumer iteration is one iteration, not two.
+
+**Lessons preserved:** the PAR scope review's structural findings (premature abstraction, routing-as-no-op, payload type undefined) are also a generalizable lesson — "ship infrastructure with its first consumer, not ahead of it." Worth recording as a feedback memory (separate task).
+
+---
+
+#### ITER-0005a.1 — STORY-0099 envelope format + loader (PAR-revised 2026-05-12)
+
+**Stories:** STORY-0099 (versioned envelope) — AC-1, AC-2, AC-3, AC-4, AC-6. AC-5 (call-site sweep) and AC-7 (LoaderStats) are both deferred to ITER-0005a.2.
+
+**Status:** done (2026-05-13). STORY-0099 ACs 1, 2, 3, 4, 6 closed; AC-5 and AC-7 remain pending in ITER-0005a.2. Implementation at `fmpl-core/src/persistence/{schema,envelope,checksum,loader}.rs`; evidence at `fmpl-core/tests/scenario_0099_envelope_loader.rs` (SCENARIO-0099 four-record skip journey) + `fmpl-core/tests/persistence_schema_anti_rot.rs` (AC-6 anti-rot ratchet). +33 tests (30 module-internal + 3 integration), sentinel sweep 1329/1329 passing, clippy clean. zerocopy 0.8 + blake3 1 dependencies added per the pre-iteration adoption notes; both compile-time invariants (`size_of == 56`, `align_of == 1`) hold; checksum is `blake3(header_with_crc_zeroed || payload)` truncated to lower 32 bits.
+
+**Rationale:** Lands the envelope struct, the loader's skip-on-incompatible logic, and the `persistence::schema` module. Does NOT touch existing `save_to_fjall` callers (deferred to 0005a.2's sweep) and does NOT surface loader statistics (deferred to 0005a.2 where swept callers will actually consume them). This split keeps the envelope design self-contained — testable in isolation against synthetic records — before any production caller depends on it.
+
+**PAR scope review (2026-05-12 — REVISE → revisions applied below):** Two parallel reviewers independently identified the issues now folded into this card. Critical finding: T2's original "advance by N bytes" wording described a contiguous-byte-stream substrate, but Fjall is a key-value store where each value IS a self-contained envelope. Multiple Serious findings resulted in the design adjustments below: source seam consolidation, AC-7 deferral, typed-invariant size assertion, anti-rot ratchet, dependency-policy compliance on the checksum crate, flag-field semantics, PayloadKind extensibility, and index-record handling.
+
+**Dependency adoptions (2026-05-12):**
+
+1. **`zerocopy = "0.8"` + `zerocopy-derive = "0.8"`** (public Google-maintained crate, no_std, triple-licensed BSD/Apache-2.0/MIT, no runtime transitive deps) for the `EnvelopeHeader` struct. AC-1's fixed-layout binary header is zerocopy's canonical use case. The `#[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)] #[repr(C)]` derives replace ~80-100 lines of hand-rolled byte parsing with ~25 lines of declarative struct definition + compile-time alignment + size + endianness invariants. Per `feedback_prefer_proof_tests.md`, the compile-time guarantees are typed invariants (the strongest form). Scoped to `fmpl-core/src/persistence/envelope.rs` only.
+
+2. **`blake3 = "1"`** for the envelope checksum AND (in ITER-0005b) for source content-addressing. Single hash algorithm across the persistence family. Per blake3's XOF property, the **lower 32 bits of `blake3(header_with_crc_zeroed || payload || source)`** are a valid 32-bit checksum equivalent to calling blake3 with `output_len=4`. Strictly equal-or-better than CRC32 for corruption detection: same 32-bit width, cryptographic uniformity over the truncation, no algebraic blind spots. Compare-checked against `crc32fast`, `crc32c` (CRC32C via SSE4.2), `xxhash-rust`, and `farmhash` (unmaintained since 2019) — blake3 wins on consistency (one hash crate vs. two) since ITER-0005b's STORY-0100 needs blake3 anyway for source content-addressing. The `crc32: U32<LE>` field name is preserved for AC-1 wording stability; the in-code computation uses blake3. Per `feedback_dependency_policy.md`, both are Tier 1 (public, maintained, no other-language runtime).
+
+**Impacted scenarios:** SCENARIO-0099 (the 4-skip-case journey: A loads, B/C/D skip without aborting). Stats-counter assertions remain in the scenario but are handled by the test harness's own local counters, not a public `LoaderStats` API (AC-7 deferred).
+
+**Depends on:** ITER-0004b. (ITER-0005a.0 was deferred 2026-05-12 — loader skips incompatible-schema records directly without a migration engine pre-call. When the first real schema change arrives, that successor iteration introduces the `MigrationEngine` + its first `MigrationRule` together as `MigrationVisitor` on ITER-0005e's tracer substrate per the lessons-doc §2.5 reframe.)
+
+**Look-ahead:** ITER-0005a.2 sweeps existing writers through this envelope helper (AC-5); ITER-0005a.3 wires the loader read-side rewire + `LoaderStats` public API (AC-7) — the 0005a.2 / 0005a.3 split was sanctioned by 2026-05-13 PAR scope review on the original 0005a.2 card. ITER-0005b adds the content-addressed source store that the envelope's `source_hash` field references. A future schema-change iteration adds `MigrationVisitor` to ITER-0005e's tracer substrate.
+
+**Build order:**
+
+1. **T0 — `persistence::schema` module (AC-6) + `PayloadKind` taxonomy.** Centralize:
+   - The `env!("CARGO_PKG_VERSION")`-derived VM version constants (major, minor, patch).
+   - The per-payload-kind schema version constants.
+   - A `PayloadKind` non-exhaustive `u8` with `try_from(u8) -> Option<PayloadKind>` conversion. Non-exhaustive parsing (the loader's AC-3 "unknown payload_kind → skip" path requires graceful handling of bytes that don't match any known variant). The initial variant set anticipates the iterations that will add per-kind variants:
+     - `0x01 ObjectRecord` — per-object body record (ITER-0005d adds this in object.rs sweep)
+     - `0x02 ObjectIndex` — the `__object_ids__` index record (resolves PAR finding #11 — `object.rs::save_to_fjall` writes TWO record shapes; both need PayloadKind variants for 0005a.2's invariant gate to be satisfiable)
+     - `0x03 CompiledCode` — bytecode (ITER-0005c)
+     - `0x04 Grammar` — grammar definition (ITER-0005d)
+     - `0x05 GrammarRegistry` — top-level registry (ITER-0005d)
+     - `0x06 ParseState` — incremental parse state (ITER-0005d)
+     - `0x07 MemoTable` — grammar memo cache (ITER-0005d)
+     - `0x08 VmSnapshot` — full image snapshot envelope (ITER-0005e)
+   - The variant numbering is reserved-and-documented at 0005a.1 entry; subsequent iterations populate the matching writer paths. Adding variants is allowed; renumbering is not (wire-format stability).
+   - **AC-6 anti-rot ratchet (proof-like, per `feedback_prefer_proof_tests.md` form #4).** A `cargo test`-level invariant asserts: no file under `fmpl-core/src/` outside `persistence::schema` contains the literal string `"CARGO_PKG_VERSION"` or any of `vm_version_major`, `vm_version_minor`, `vm_version_patch` as a string literal or hardcoded numeric. The gate uses the existing scenario_runner's `expect_absent` action-type. Authored as a SCENARIO-0099 case OR a separate scenario card — pick based on cohesion (most likely fits as a new scenario adjacent to SCENARIO-0099, kind: invariant).
+
+2. **T1 — `EnvelopeHeader` struct (AC-1) via zerocopy.** Add `zerocopy = "0.8"` + `zerocopy-derive = "0.8"` and `blake3 = "1"` to `fmpl-core/Cargo.toml`. Define the header as:
+   ```rust
+   #[derive(KnownLayout, Immutable, FromBytes, IntoBytes, Unaligned)]
+   #[repr(C)]
+   pub struct EnvelopeHeader {
+       pub magic: [u8; 4],                  // b"FMPL"
+       pub envelope_format_version: U16<LE>,
+       pub payload_kind: u8,                 // see persistence::schema::PayloadKind
+       pub flags: u8,                        // must-be-zero in 0005a.1; loader REJECTS nonzero (resolves PAR flag-semantics finding)
+       pub vm_version_major: U16<LE>,
+       pub vm_version_minor: U16<LE>,
+       pub vm_version_patch: U16<LE>,
+       pub schema_version: U16<LE>,          // per persistence::schema::SCHEMA_VERSION_<KIND>
+       pub payload_len: U32<LE>,
+       pub source_hash: [u8; 32],            // blake3 hash of source bytes; all-zeros means "no source for this record" (populated by ITER-0005b's source store)
+       pub crc32: U32<LE>,                   // low 32 bits of blake3(magic || header_with_crc_zeroed_and_source_hash_present || payload); see persistence::checksum::compute
+   }
+   ```
+   - **Source seam decision (resolves PAR source-seam-conflict finding):** dropped the original `source_len: U32<LE>` inline-after-payload field; replaced with `source_hash: [u8; 32]` reference. ITER-0005b populates the hash store the hashes point at. All-zeros = no source. This is the same wire format STORY-0100 demands, eliminating the wire-format break Reviewer A and B both flagged.
+   - **Header byte count:** 4 + 2 + 1 + 1 + 2 + 2 + 2 + 2 + 4 + 32 + 4 = **56 bytes.**
+   - **Header is intentionally NOT padded to a power of 2.** Fjall is a K/V store; each record's value is its own allocated buffer, so there is no contiguous-record alignment benefit (this is the same K/V-not-stream insight that resolved the PAR critical finding). The `flags: u8` field is the reserved-must-be-zero slot for micro-bumps. Header growth should be rare and handled via `envelope_format_version` dispatch (v2 readers decode against `EnvelopeHeaderV2` based on the byte; v1 records keep decoding against `EnvelopeHeaderV1`). Growable per-payload metadata belongs in the **payload's own format** (decision deferred to ITER-0005c — likely `prost` or `flatbuffers` for variable-width upgrade semantics). Payload-side padding to power-of-2 boundaries may be revisited in 0005c if Fjall benchmarks show fragmentation cost.
+   - **Compile-time typed-invariant assertion (per `feedback_prefer_proof_tests.md` form #1):**
+     ```rust
+     const _: () = assert!(std::mem::size_of::<EnvelopeHeader>() == 56);
+     const _: () = assert!(std::mem::align_of::<EnvelopeHeader>() == 1);
+     ```
+     A future field reorder or addition is a compile-time error, not a runtime regression.
+   - **`persistence::checksum::compute(magic, header_no_crc, payload) -> u32`** — wraps blake3 with the documented truncation. ~10 lines. Hash input is the header with `crc32` zeroed (the standard CRC-of-itself pattern), and includes the payload. Source bytes are NOT in the checksum input: they're integrity-checked via `source_hash`'s own self-reference (the hash is the source's identity per content-addressing). Closes Reviewer B's source-bytes-integrity-gap finding via a different mechanism than widened-CRC: content-addressing IS the source integrity check.
+   - Round-trip unit tests (encode → decode → equal) via `EnvelopeHeader::ref_from_prefix(&buf)` / `header.as_bytes()`.
+
+3. **T2 — Loader with 4 skip cases (AC-2, AC-3, AC-4).** Loader iterates a Fjall keyspace (`keyspace.iter()`); for each `(key, value)` pair:
+   - `EnvelopeHeader::ref_from_prefix(&value)` decodes the header from the value's prefix; the remainder of the value is the payload.
+   - Magic-mismatch → log + skip (not in AC; but defensive).
+   - `flags != 0` → log + skip (resolves PAR flag-semantics finding: nonzero is rejected per the reserved-must-be-zero spec).
+   - VM-major-mismatch → log + skip (AC-2).
+   - Unknown `payload_kind` (via `PayloadKind::try_from` returning None) OR unknown `schema_version` for a known kind → log + skip (AC-3).
+   - `persistence::checksum::compute(...)` mismatch → log + skip (AC-4).
+   - All-checks-pass → return for downstream callers.
+
+   **Critical PAR resolution (stream-vs-keyspace ambiguity):** the previous wording "advance by `payload_len + source_len + size_of::<EnvelopeHeader>()`" is removed. Skip means "ignore this `(key, value)` and continue to the next iterator entry" — not byte-arithmetic on a stream. The `payload_len` field is used to validate `value.len() == size_of::<EnvelopeHeader>() + payload_len` (a sanity check on record framing); a mismatch is a corruption skip (AC-4 path).
+
+4. **T3 — SCENARIO-0099 evidence (AC-2, AC-3, AC-4) + AC-6 anti-rot ratchet.**
+   - **SCENARIO-0099 evidence:** authored as a focused Rust integration test under `fmpl-core/tests/` (NOT a data-driven step-def). Per `feedback_prefer_proof_tests.md`, the Rust integration test directly asserts on typed values (counters as `u32`, equality via `==`) — closer to form #1 typed invariants than form #5 pointwise data. The choice is principled, not pragmatic. Test harness constructs 4 records (A current, B vm-major-ahead, C unknown-payload-kind, D corrupted-checksum), runs the loader, and asserts: A loaded, B/C/D each skipped via the correct skip-reason, harness-local counters match expected `(1, 1, 1, 1)`.
+   - **AC-6 anti-rot ratchet:** the typed-invariant gate from T0's third bullet runs in CI; any future contributor inlining `CARGO_PKG_VERSION` outside `persistence::schema` fails the gate.
+
+5. **T4 — Wrap artifacts.** roadmap (mark 0005a.1 done), iteration-log entry, progress.md update, EPIC-003 STORY-0099 status note (AC-1, AC-2, AC-3, AC-4, AC-6 done; AC-5 + AC-7 pending in 0005a.2).
+
+**Verification gates:**
+- SCENARIO-0099 passes the 4-skip-case journey.
+- `cargo test` passes the AC-6 anti-rot ratchet.
+- `const _: () = assert!(size_of::<EnvelopeHeader>() == 56)` compiles (typed invariant; failure = compile error, not test failure).
+- `persistence::schema` module exports `VM_VERSION_*`, `PayloadKind`, and `SCHEMA_VERSION_*` constants.
+- Sentinel sweep green.
+- Clippy clean on default features.
+
+**Out of scope (deferred to ITER-0005a.2):**
+- Routing the existing `save_to_fjall` callers in `compiler.rs`, `object.rs` (TWO record shapes: per-object + `__object_ids__` index — both anticipated in T0's PayloadKind taxonomy), `grammar/incremental.rs`, and the raw-serde patterns in `grammar/stream_input.rs` through the envelope helper.
+- `LoaderStats { loaded, skipped_incompatible, skipped_corrupt, skipped_unknown_kind }` as a public observability API (AC-7). Deferred because in 0005a.1 no production caller writes envelopes and no operator reads stats — the SCENARIO-0099 harness counts skips locally. AC-7 lands in 0005a.2 alongside the swept callers that produce operator-visible stats. (Resolves PAR "AC-7 is observability ahead of consumer" finding via the same `feedback_ship_infrastructure_with_first_consumer.md` discipline that deferred ITER-0005a.0.)
+
+**Out of scope (deferred to ITER-0005b):**
+- Populating `source_hash` from a content-addressed source store. In 0005a.1, all records written by test harnesses use `source_hash: [0; 32]` (the "no source" sentinel). ITER-0005b adds the `sources` Fjall partition and the writer-side `compute source hash + put bytes in store` path.
+
+**PAR-aggregate findings → resolution map:**
+
+| PAR finding | Severity | Resolution in this revised card |
+|---|---|---|
+| Stream-vs-keyspace ambiguity | Critical | T2 rewritten: skip = "next iterator entry," not byte arithmetic |
+| Source seam fights STORY-0100 | Serious | Replaced `source_len` with `source_hash: [u8; 32]`; 0005a.1 ships the wire format STORY-0100 demands |
+| AC-7 observability ahead of consumer | Serious | Deferred to 0005a.2; SCENARIO-0099 uses harness-local counters |
+| No `size_of::<EnvelopeHeader>()` typed invariant | Serious | Added as `const _: () = assert!(...)` in T1; both size and alignment asserted |
+| AC-6 has no anti-rot ratchet | Serious | Added as T0 final bullet; uses scenario_runner's `expect_absent` action |
+| CRC32 dependency unspecified | Serious | Specified `blake3 = "1"`; documented per-`feedback_dependency_policy.md`; reused across 0005b |
+| `flags: u8` undocumented | Serious | Specified "must-be-zero; loader REJECTS nonzero" in T2 |
+| `PayloadKind` extensibility unspecified | Serious | Specified as non-exhaustive `u8` with `try_from`; initial variant taxonomy reserved with kind numbers |
+| `object.rs::__object_ids__` index breaks invariant gate | Serious | PayloadKind taxonomy includes `ObjectIndex` variant; 0005a.2's invariant gate becomes satisfiable |
+| `write<T: Serialize>` helper signature mismatch | Serious | Resolved by source-seam decision (header now has `source_hash`; 0005a.2's helper signature is correct as written) |
+| Stale ITER-0005c `MigrationEngine` reference | Minor | Cleaned up in separate edit below |
+| SCENARIO-0099 step-def-vs-integration-test pragmatic | Minor | T3 makes the choice principled (integration test for direct typed assertions) |
+| Source-bytes integrity gap | Minor (Reviewer B) | Resolved structurally: source integrity is the source_hash's job (content-addressing IS the integrity check), not the envelope CRC's |
+
+---
+
+#### ITER-0005a.2 — STORY-0099 AC-5 write-side sweep (PAR-revised 2026-05-13)
+
+**Stories:** STORY-0099 (versioned envelope) — AC-5 (the call-site sweep) only. AC-7 (LoaderStats public API) is split into ITER-0005a.3 because it touches the loader read path, not the writer call sites; per `feedback_ship_infrastructure_with_first_consumer.md` its consumer (the SCENARIO-0099 harness rebinding to read stats via a public API) belongs alongside the loader-read-side wiring, which is structurally distinct from the writer sweep.
+
+**Status:** done (2026-05-13). STORY-0099 AC-5 closed: writer sweep routes all 4 currently-extant `save_to_fjall` call sites (compiler.rs CompiledCode, object.rs ObjectDb's two record shapes ObjectIndex+ObjectRecord, grammar/incremental.rs ParseState, grammar/stream_input.rs spill+memo) through `persistence::envelope::write`. AC-5 invariant gate at `tests/persistence_envelope_invariant.rs` confirms no raw `keyspace.insert(` survives outside `persistence/envelope.rs`. Transitional manual prefix-strip on load sides marked `// TODO(ITER-0005a.3)`; permanent rewire through `loader::decode` is the AC-7 work in ITER-0005a.3 (next pending iteration). Test counts: 1335 default features (+3 vs ITER-0005a.1 baseline of 1332) | 1344 under `--features fjall-persistence`. Clippy clean on both. AC-1 wording fix to EPIC-003 applied at T6 (limit to currently-extant writers; Lambda/Grammar/VmSnapshot deferred to 0005d/e).
+
+**Rationale:** With the envelope format frozen by ITER-0005a.1, this iteration ships the **write-side** sweep: one envelope-aware writer helper that all current persistence call sites route through. The **read-side** rewire (each `load_from_fjall` → `loader::decode → typed payload deserialize`) and the public `LoaderStats` surface are deferred to ITER-0005a.3 to keep this iteration single-concern and avoid silently bundling reader observability into a writer sweep.
+
+**Dependency adoption (none new):** the helper uses `zerocopy 0.8` + `blake3 1` already adopted in ITER-0005a.1. No new Cargo entries.
+
+**Source-hash parameter decision (resolves PAR Critical #2):** the helper accepts `source_hash: [u8; 32]` directly, NOT `Option<Hash>`. The `Hash` type doesn't exist until ITER-0005b ships the content-addressed source store; speculating on its shape here would lock in 5 downstream iterations on guesswork. All four sweep targets in this iteration pass `persistence::envelope::NO_SOURCE_HASH` (the all-zeros sentinel) per ITER-0005a.1's contract. ITER-0005b will (a) introduce a `Hash` newtype around `[u8; 32]` AND (b) add `source_hash`-populating logic at writer sites that have an originating source string. Until then, the helper signature stays grounded in types that actually exist.
+
+**Wire-format break acknowledgment (resolves PAR Serious #5):** sweeping these call sites changes the on-disk format — every record grows by 56 bytes (`size_of::<EnvelopeHeader>()`). Pre-sweep records will route through `DecodeOutcome::SkippedCorrupt(BadMagic)` or `ValueTooShort` after the sweep. **This is acceptable because `fjall-persistence` is feature-gated and has no production consumers today.** No migration plan is needed; pre-existing Fjall databases under `fjall-persistence` are not durable user data. A CHANGELOG entry suffices (handled at T6).
+
+**Feature-flag uniformity decision (resolves PAR Serious #9):** the envelope helper module (`persistence::envelope`) stays unconditional (matches ITER-0005a.1's current state). Two of the four call sites are already `#[cfg(feature = "fjall-persistence")]`-gated (`compiler.rs:697`, `object.rs:177`); two are not (`grammar/incremental.rs:71`, `grammar/stream_input.rs` writers). This iteration preserves the existing gating asymmetry — the sweep at each call site inherits whatever gating that site already has. `fjall` is itself non-optional (`Cargo.toml:21`), so the unconditional path is mechanically free. Closing the asymmetry is a separate concern (could land in a future hardening iteration); avoiding it here keeps the sweep mechanical.
+
+**`.expect()` vs `Result` decision for `stream_input.rs` (resolves PAR Serious #4):** preserve the current panic-on-write semantics by `.expect()`-ing the helper's result at each call site. The current `StreamPosition`/`MemoFjall` write paths return values that are not `Result`-bearing; converting them to fallible would cascade through their callers (a breaking change to `stream::PullStream` and `grammar::MemoStream` consumers). Preserving panic semantics is the smaller-blast-radius choice. The panic surface widens slightly (was `serde_json::to_vec` only; now also `keyspace.insert` and checksum compute) but in practice all three are infallible-in-our-use-pattern. A future hardening iteration could plumb `Result` if needed.
+
+**Object-record two-shape handling (resolves PAR Serious #3):** `object.rs::ObjectDb::save_to_fjall` writes two record shapes per call (`__object_ids__` index + per-object records). The sweep calls the helper **twice**: once with `PayloadKind::ObjectIndex` for the index (using the reserved 0x02 variant from ITER-0005a.1's taxonomy), then in a loop with `PayloadKind::ObjectRecord` (0x01) per object. The helper stays single-record; no batch-write mode needed.
+
+**AC-5 wording delta (resolves PAR Serious #8):** STORY-0099 AC-5's enumeration (`Object, CompiledCode, Grammar, ParseState, Lambda, and full-VM-snapshot`) names payload classes that have no writers today (`Lambda`, `Grammar` as separate class, `VmSnapshot`). This iteration closes AC-5 only for the **currently-extant** writer set: `CompiledCode`, `Object`, `ObjectIndex`, `ParseState`, `MemoTable`, `StreamPosition`. EPIC-003's AC-5 wording will be updated at T6 to read "all currently-extant `save_to_fjall` callers + raw-serde keyspace.insert sites" rather than the original aspirational enumeration. `Lambda`/`Grammar`/`VmSnapshot` writer adoption lands when those payload classes acquire writers in ITER-0005d/e — at which point their writers naturally go through the helper from day one (the helper is the only way to write, per T5's invariant gate).
+
+**Impacted scenarios:** SCENARIO-0099 still passes (envelope contract unchanged). New SCENARIO-0111 (NEW) covers writer→loader round-trip through the helper for each PayloadKind variant present in this iteration's sweep — this is the test that proves AC-5 at the integration seam.
+
+**Depends on:** ITER-0005a.1.
+
+**Look-ahead:** ITER-0005a.3 lands LoaderStats + read-side decode wiring (closes AC-7). ITER-0005b/c/d/e/f all write through this helper.
+
+**Build order:**
+
+1. **T0 — `persistence::envelope::write` helper.** Land in `fmpl-core/src/persistence/envelope.rs` (extends the existing module; no new file). Signature:
+   ```rust
+   pub fn write<T: serde::Serialize>(
+       keyspace: &fjall::Keyspace,
+       key: &[u8],
+       value: &T,
+       kind: PayloadKind,
+       source_hash: [u8; 32],
+   ) -> Result<(), EnvelopeWriteError>;
+   ```
+   Implementation: serialize `value` via `serde_json::to_vec`, construct `EnvelopeHeader::new_for_current_vm(kind, payload.len() as u32, source_hash).finalize_checksum(&payload)`, concatenate `header.as_bytes() ++ payload`, `keyspace.insert(key, bytes)`. New error type `EnvelopeWriteError` wraps `serde_json::Error` and `fjall::Error`. Unit tests cover happy path + serialization failure surfaced as typed error.
+2. **T1 — Sweep `compiler.rs::CompiledCode::save_to_fjall`** through the helper. Pass `PayloadKind::CompiledCode` (0x03), `NO_SOURCE_HASH`. Existing unit test (if any) keeps `save → load_from_fjall` round-trip but is expected to fail at the load side until ITER-0005a.3 wires `loader::decode` in (because the bytes on disk now contain the envelope prefix that `serde_json::from_slice` won't parse). **Temporary measure for T1-T4:** each swept caller's `load_from_fjall` reads the value, strips the first 56 bytes manually, then `serde_json::from_slice`s the remainder. This is **explicitly transitional** — ITER-0005a.3 replaces the manual prefix-strip with `loader::decode`. Document the transitional pattern with a `// TODO(ITER-0005a.3)` comment at each site.
+3. **T2 — Sweep `object.rs::ObjectDb::save_to_fjall`** through the helper. Two calls per save: one `PayloadKind::ObjectIndex` (0x02) for `__object_ids__`, then a loop of `PayloadKind::ObjectRecord` (0x01) per object. Same transitional load-side prefix-strip pattern.
+4. **T3 — Sweep `grammar/incremental.rs::ParseState::save_to_fjall`** through the helper. `PayloadKind::ParseState` (0x06), `NO_SOURCE_HASH`. Same transitional load.
+5. **T4 — Sweep `grammar/stream_input.rs` writers** through the helper. Two sites: position-spill at lines 457-468 (`PayloadKind` TBD — likely needs a new variant or reuses an existing one; check during implementation), memo-write at lines 551-554 (`PayloadKind::MemoTable` 0x07). Each call site `.expect()`s the helper's `Result` to preserve current panic semantics.
+6. **T5 — AC-5 invariant gate (typed-invariant form per `feedback_prefer_proof_tests.md` form #1).** Add a `cargo test`-level scan asserting: zero occurrences of `keyspace.insert(` or `partition.insert(` (the raw fjall write API) appear in `fmpl-core/src/` outside `persistence/envelope.rs`. This is form #4 (universally-quantified structural assertion via grep) — the strongest **feasible** form because `fjall::Keyspace::insert` is a foreign-crate public method that we cannot seal at the type level (visibility constraints don't reach across crate boundaries). The grep gate enforces "every persistence write goes through the envelope helper." Author as a new `fmpl-core/tests/persistence_envelope_invariant.rs` test file modeled on `persistence_schema_anti_rot.rs` (the AC-6 ratchet); the form has precedent.
+7. **T6 — Wrap artifacts.** `roadmap.md` (status → done). `iteration-log.md` entry. `progress.md` update. `EPIC-003.md` STORY-0099 status note: AC-5 done in 0005a.2 for current writers; AC-5 wording fix-up (limit to extant writers); note AC-7 remains pending in 0005a.3. SCENARIO-0099 card unchanged (still validates the envelope contract end-to-end). SCENARIO-0111 (NEW) authored — writer→loader round-trip per PayloadKind variant; cadence `sentinel` in `behavior-corpus.md`.
+
+**Verification gates:**
+
+- Each sweep target's round-trip test passes (compiler×1, object×2 [index + record], parse-state×1, position-spill×1, memo×1 — 6 round-trips total).
+- T5's grep invariant gate is green (zero raw `keyspace.insert(` outside `persistence/envelope.rs`).
+- SCENARIO-0099 passes (envelope contract unchanged from 0005a.1).
+- SCENARIO-0111 (NEW) passes (writer→loader round-trip per PayloadKind variant).
+- Sentinel sweep green (no regression).
+- Clippy clean on default features AND `--features fjall-persistence`.
+
+**Out of scope (deferred to ITER-0005a.3):**
+
+- `LoaderStats { loaded, skipped_incompatible, skipped_corrupt, skipped_unknown_kind }` public API (AC-7).
+- Each `load_from_fjall` site permanently rewired through `loader::decode` (instead of the T1-T4 transitional manual prefix-strip).
+- SCENARIO-0099 harness rebinding from local `u32` counters to public `LoaderStats` reads.
+
+**Out of scope (deferred to other iterations):**
+
+- New payload classes (`Lambda`, `VmSnapshot`, `Grammar` as standalone — ITER-0005d/e).
+- `Hash` newtype around `[u8; 32]` (ITER-0005b).
+- Closing the `#[cfg(feature = "fjall-persistence")]` gating asymmetry between writer call sites (future hardening iteration).
+- Converting `stream_input.rs` writers from `.expect()` panic-on-write to `Result` propagation (future hardening iteration).
+
+**PAR-aggregate findings → resolution map:**
+
+| Finding | Severity | Resolution in this revised card |
+|---|---|---|
+| AC-7 omitted from build order | Critical | Split AC-7 into new ITER-0005a.3 (loader read-side wiring + LoaderStats public API + harness rebinding). 0005a.2 stays writer-only. |
+| Helper signature uses non-existent `Hash` type | Critical | Helper accepts `source_hash: [u8; 32]` directly; all callers pass `NO_SOURCE_HASH`. `Hash` newtype lands in ITER-0005b. |
+| `object.rs` two-record-shape problem | Serious | Sweep calls helper twice per save: `PayloadKind::ObjectIndex` for `__object_ids__`, loop of `ObjectRecord` per object. No batch-mode in helper. |
+| `stream_input.rs` `.expect()` vs `Result` | Serious | Preserve panic-on-write: `.expect()` the helper's result. Documented as transitional; future hardening can plumb `Result`. |
+| Wire-format break not acknowledged | Serious | Explicitly acknowledged: fjall-persistence has no production consumers, format break is acceptable, CHANGELOG entry at T6. |
+| T5 visibility-constraint infeasible as stated | Serious | T5 commits to form #4 (grep gate) as the strongest **feasible** form, with explicit rationale: `fjall::Keyspace::insert` is foreign-crate, can't be sealed. |
+| T5 conflates 3 forms — pragmatic vs principled | Serious | T5 commits to form #4 with principled rationale; no hedging. |
+| AC-5 wording names payload classes without writers | Serious | EPIC-003 AC-5 wording updated at T6 to "currently-extant writers"; `Lambda`/`Grammar`/`VmSnapshot` writer adoption naturally folds in when those classes acquire writers in 0005d/e. |
+| Feature-flag asymmetry unresolved | Serious | Preserve existing asymmetry (mechanical sweep); envelope helper stays unconditional. Closing asymmetry is a future hardening iteration. |
+| Read-side integration elided | Serious | T1-T4 use transitional manual prefix-strip (`// TODO(ITER-0005a.3)`); permanent `loader::decode` wiring lands in 0005a.3. |
+| AC-7 has no consumer in scope | Serious | AC-7 moved to 0005a.3 where its consumer (SCENARIO-0099 harness rebinding) lives. |
+
+---
+
+#### ITER-0005a.3 — STORY-0099 AC-7 LoaderStats + iter_keyspace public API (PAR-revised + PAR-split 2026-05-13)
+
+**Stories:** STORY-0099 (versioned envelope) — AC-7 (LoaderStats public API surface) only.
+
+**Status:** pending (PAR-revised 2026-05-13 — see "PAR-aggregate findings → resolution map" at bottom).
+
+**Rationale (twice-PAR-revised):** Original 0005a.3 bundled the public API (T0-T1) + the per-call-site rewire (T2-T5) + scenario rebinding (T6-T7). The 2026-05-13 pre-iteration PAR review found this violated the same writer/reader split discipline that drove 0005a.0/0005a.1/0005a.2 — and additionally surfaced 2 Critical findings (fjall 3 iterator API mismatch in the proposed `iter_keyspace` signature; semantic regression from graceful `None` → panic in `stream_input.rs`'s read paths). Re-split per `feedback_split_iterations_on_reader_writer_asymmetry.md`: this iteration ships the public API + first consumer (SCENARIO-0099 rebinding); ITER-0005a.4 ships the per-call-site rewire + the 24+ caller-update fanout. The 0005a.4 split lets the API shape pressure-test against one real consumer before 4 downstream sites commit to it.
+
+**Critical findings from 2026-05-13 PAR (both auditors) — resolved in this revision:**
+
+1. **C1: fjall 3 `Keyspace::iter()` yields `Iter<Item=Guard>` where `Guard::into_inner() -> Result<(UserKey, Option<UserValue>)>` with `UserKey`/`UserValue` = owned `Slice` (reference-counted), NOT `&'k [u8]`.** The original card's `FnMut(&[u8], DecodedRecord<'_>)` callback with `'k`-tied lifetime cannot be implemented as written. Revised T1 signature below uses owned `(UserKey, UserValue)` per iteration step.
+2. **C2: `iter_keyspace` must propagate `fjall::Error`.** Each `Guard::into_inner()` is fallible; the original card silently swallowed errors. Revised signature returns `Result<LoaderStats, fjall::Error>`.
+
+**Impacted scenarios:** SCENARIO-0099 (rebinding to consume the public `LoaderStats` API + new SCENARIO-0099-iter sub-test for keyspace-iteration coverage — original decode-pathway test preserved per PAR S5/S8 finding); new SCENARIO-0112 (NEW; operator-detection scenario per PAR S7/S9 finding — writes a mixed-validity corpus, calls `iter_keyspace`, asserts an operator can pinpoint silent data loss from the returned stats).
+
+**Depends on:** ITER-0005a.2 (writer sweep + transitional manual prefix-strip already in place at each load site — 0005a.4 will remove the markers).
+
+**Look-ahead:** ITER-0005a.4 will rewire all `load_from_fjall` call sites through the API this iteration ships. ITER-0005b/c/d/e/f use `iter_keyspace` for keyspace-iterating reads + the public stats API for operator observability.
+
+**LoaderStats granularity decision (resolves PAR Serious #4):**
+
+`LoaderStats` carries both aggregate counters AND a per-skip-reason histogram so operators can distinguish "5 records all checksum-mismatch" (disk corruption — call sysadmin) from "5 records all UnknownSchemaVersion" (post-upgrade schema drift — re-extract or recompile). Concrete fields:
+
+```rust
+pub struct LoaderStats {
+    pub loaded: u32,
+    pub skipped_incompatible: u32,
+    pub skipped_corrupt: u32,
+    pub skipped_unknown_kind: u32,
+    // Sub-reason histograms (added per PAR S4 to preserve DecodeOutcome's
+    // 9 sub-reasons; aggregate fields above are the headline summary).
+    pub incompatible_reasons: SubReasonCounts,
+    pub corrupt_reasons: SubReasonCounts,
+    pub unknown_kind_reasons: SubReasonCounts,
+}
+```
+
+`SubReasonCounts` is a small struct with one `u32` field per sub-reason. The aggregate counters and histogram totals must agree (typed invariant — see T0).
+
+**Return-shape decision (resolves PAR Serious #5):**
+
+The `iter_keyspace` helper returns `Result<LoaderStats, fjall::Error>` (no value tuple — values are delivered via the `on_record` callback). For 0005a.4's per-call-site rewires (point-key `load_from_fjall` paths), the return shape decision is deferred to that iteration's PAR review; this iteration explicitly does NOT lock in `(Option<T>, LoaderStats)` for the point-key path.
+
+**Feature-gate decision (resolves PAR Serious #6):**
+
+`LoaderStats` itself is unconditional (lives in `persistence/loader.rs`, which is unconditional today). `iter_keyspace` takes `&fjall::Keyspace`; since `fjall = "3"` is unconditional in fmpl-core's Cargo.toml (NOT `optional = true`), `iter_keyspace` is unconditional. No new feature-gating decisions; the existing asymmetry in `load_from_fjall` call sites is inherited unchanged into 0005a.4.
+
+**Build order:**
+
+1. **T0 — `LoaderStats` + `SubReasonCounts` structs (AC-7).** Land in `fmpl-core/src/persistence/loader.rs`. Derives: `Debug, Clone, Copy, Default, PartialEq, Eq`. Public API for operators. Includes a typed invariant test: `loaded + skipped_incompatible + skipped_corrupt + skipped_unknown_kind == total processed records`, AND each skip-reason aggregate equals the sum of its sub-reason histogram. Compile-time invariant where feasible; runtime invariant via debug_assert otherwise.
+
+2. **T1 — `loader::iter_keyspace` helper, corrected against fjall 3's actual API.** New public function:
+   ```rust
+   pub fn iter_keyspace<F>(
+       keyspace: &fjall::Keyspace,
+       mut on_record: F,
+   ) -> Result<LoaderStats, fjall::Error>
+   where
+       F: FnMut(&[u8], DecodedRecord<'_>),
+   ```
+   Implementation: `for guard in keyspace.iter()` → `let (key, value) = guard.into_inner()?;` → `value.as_ref()` for the byte slice → `decode(value_bytes)` → if `Loaded`, invoke `on_record(key.as_ref(), record)`; otherwise increment the appropriate `LoaderStats` field (aggregate + sub-reason). Returns the accumulated stats at end-of-iteration or propagates `fjall::Error` from any per-guard `into_inner`. The callback's `&[u8]` and `DecodedRecord<'_>` borrows live within one iteration step (not `'k`-tied) — this is the corrected lifetime per PAR Critical #1.
+   Unit tests in `loader.rs::tests`:
+   - Empty keyspace → `LoaderStats::default()`.
+   - One record, all-valid → `loaded=1`, all skip counters 0, callback fires once.
+   - Mixed-validity records (1 valid + 1 vm-major-mismatch + 1 checksum-corrupt) → aggregate counters match, sub-reason histograms match.
+
+3. **T2 — SCENARIO-0099 harness rebinding (AC-7 consumer — first real public API user) + new sub-test.** Per PAR S5/S8: do NOT replace the existing decode-pathway test. Instead:
+   - Preserve the existing `scenario_0099_six_record_skip_journey` test as-is (proves the decoder dispatches correctly at the unit-of-decode seam — form-#1 typed invariant evidence per `feedback_prefer_proof_tests.md`).
+   - Add a NEW test in the same file, `scenario_0099_iter_keyspace_aggregates_stats`, that constructs a real `fjall::Keyspace` (via the `tempfile` + `fjall::Database::builder` pattern used in `grammar/incremental.rs::tests`), writes 6 synthetic records (the same 6 as the existing test) via `keyspace.insert`, then calls `loader::iter_keyspace(&keyspace, |_key, _rec| {...})`. Asserts the returned `LoaderStats == (loaded=1, skipped_incompatible=1, skipped_unknown_kind=3, skipped_corrupt=1)` AND asserts the sub-reason histograms pinpoint the exact reason per skip.
+   This is the AC-7 consumer rebinding per `feedback_ship_infrastructure_with_first_consumer.md` — the public surface is in active use by a test on the same day it ships.
+
+4. **T3 — SCENARIO-0112 (NEW): operator-detection scenario (AC-7 narrative validation).** Per PAR S7/S9, AC-7's narrative is "operators can detect silent data loss after an upgrade." The proof-test:
+   - Construct a keyspace simulating a real upgrade scenario: 3 valid CompiledCode records (would have loaded pre-upgrade), 2 vm-major-future records (data lost across upgrade), 2 unknown-schema-version records (post-upgrade schema drift), 1 checksum-corrupt record (disk corruption).
+   - Call `iter_keyspace`, capture returned `LoaderStats`.
+   - Assert: `loaded=3, skipped_incompatible=2, skipped_unknown_kind=2, skipped_corrupt=1`.
+   - Assert sub-reason histograms: `incompatible_reasons.vm_major_mismatch=2`, `unknown_kind_reasons.unknown_schema_version=2`, `corrupt_reasons.checksum_mismatch=1`.
+   - Author `scenario_0112_operator_detects_silent_data_loss` in a new file `fmpl-core/tests/scenario_0112_operator_detection.rs`. Sentinel cadence.
+
+5. **T4 — Wrap artifacts.** `roadmap.md` ITER-0005a.3 status → done. `iteration-log.md` entry. `progress.md` update. `EPIC-003.md` STORY-0099 status note: AC-7 done in 0005a.3 (public API + first consumer + operator-detection scenario); the per-call-site load rewire deferred to 0005a.4. behavior-corpus.md: add SCENARIO-0099-iter (sentinel) + SCENARIO-0112 (sentinel) entries.
+
+**Verification gates:**
+
+- `LoaderStats` + `SubReasonCounts` compile with documented fields/derives; aggregate-vs-sub-reason invariant holds in unit tests.
+- `iter_keyspace` iterates a real `fjall::Keyspace`, returns correct stats, propagates `fjall::Error`.
+- SCENARIO-0099's existing test passes unchanged.
+- New `scenario_0099_iter_keyspace_aggregates_stats` test passes.
+- SCENARIO-0112 (operator-detection) passes.
+- Sentinel sweep green on default features (1342 baseline +N new tests).
+- Clippy clean on default features AND `--features fjall-persistence`.
+- Citation check clean.
+
+**Out of scope (deferred to ITER-0005a.4):**
+
+- Rewiring `compiler.rs::CompiledCode::load_from_fjall`, `object.rs::ObjectDb::load_from_fjall`, `grammar/incremental.rs::ParseState::load_from_fjall`, `grammar/stream_input.rs::restore_from_fjall`/`get_memo` through `loader::decode`.
+- Removing the 5 `// TODO(ITER-0005a.3)` markers in `src/` (they update to `// TODO(ITER-0005a.4)` here OR stay as-is — pick at iteration entry).
+- Caller-update fanout (~24 test sites) for `load_from_fjall` signature changes.
+- Decision on point-key load return shape: `(Option<T>, LoaderStats)` vs `LoadResult<T>` struct vs `&mut LoaderStats` parameter.
+- SCENARIO-0111 rewrite (per PAR S6/S10 finding, SCENARIO-0111 stays at point-key roundtrip evidence; iter_keyspace evidence is the new SCENARIO-0099-iter sub-test).
+- The 4 single-auditor Minor findings from 0005a.2's audit (inconsistent corruption-handling across load sites, saturation patterns, silent-None semantics) — all land in 0005a.4 when the call sites are actually touched.
+
+**Out of scope (deferred to other iterations):**
+
+- Closing `#[cfg(feature = "fjall-persistence")]` gating asymmetry (future hardening; preserved here).
+- Converting `stream_input.rs` writers from panic-on-write to `Result` (future hardening).
+- New payload classes (ITER-0005d/e).
+- `Hash` newtype (ITER-0005b).
+
+**PAR-aggregate findings → resolution map (2026-05-13):**
+
+| PAR finding | Severity | Resolution in this revised card |
+|---|---|---|
+| C1 — fjall 3 `iter_keyspace` signature mismatch | Critical | T1 signature corrected: owned `(UserKey, UserValue)` per iteration step; `Result<LoaderStats, fjall::Error>` return; callback borrow lifetime per-step, not `'k`-tied |
+| C2 — `iter_keyspace` swallowed `fjall::Error` | Critical | T1 returns `Result<LoaderStats, fjall::Error>` |
+| C3 — 24+ hidden caller-update sites in T2/T3/T4 | Critical | Removed: T2-T4 of original card deferred wholesale to ITER-0005a.4 (split) |
+| C4 — T5 panic-on-skip semantic regression | Critical | Removed: T5 of original card deferred to ITER-0005a.4 with explicit "graceful skip, no panic-on-skip" requirement in that card |
+| S1 — `LoaderStats` 4-counter flattening | Serious | Added `SubReasonCounts` per category; aggregate + histogram both present |
+| S2 — Tuple-return `(Option<T>, LoaderStats)` undeliberated | Serious | Decision deferred to 0005a.4 where the point-key callers actually live; this iteration explicitly does not lock in the tuple-return shape |
+| S3 — Feature-gate × public API asymmetry | Serious | `LoaderStats` + `iter_keyspace` are unconditional (fjall itself is unconditional); 0005a.4 inherits existing asymmetry unchanged |
+| S4 — Deferred 0005a.2 audit findings not enumerated | Serious | All 4 single-auditor findings explicitly moved to 0005a.4's scope (they're per-call-site, not API-side) |
+| S5 — T6 rebinding loses SCENARIO-0099 decode-pathway coverage | Serious | T2 in revised card preserves existing test AND adds new iter sub-test; original decode-pathway evidence retained |
+| S6 — T7 SCENARIO-0111 rewrite changes coverage same-day | Serious | Removed: SCENARIO-0111 stays at point-key roundtrip evidence; iter coverage comes from new sub-test |
+| S7 — No operator-detection scenario for AC-7 narrative | Serious | New T3: SCENARIO-0112 explicit operator-detection scenario with mixed-validity corpus + sub-reason assertions |
+| S8 — Iteration should split along API-vs-rewire axis | Serious | This split (0005a.3 = API + first consumer; 0005a.4 = per-call-site rewire) |
+| S9 — `(Option<T>, LoaderStats)` tuple boxing-in | Serious | Tuple-return shape decision deferred to 0005a.4 |
+| Minor — TODO marker count enumeration | Minor | Listed explicitly: 5 markers across 4 files (compiler.rs, object.rs, incremental.rs, stream_input.rs has 2) |
+| Minor — `on_record` skip-context elision | Minor | Documented: `on_record` fires only on `Loaded`; per-skip context lives in `LoaderStats.SubReasonCounts` aggregated histograms. If per-record skip detail is needed later, add a separate `FnMut(&[u8], DecodeOutcome)` on-skip callback (deferred) |
+
+---
+
+#### ITER-0005a.4 — STORY-0099 read-side decode wiring through LoaderStats API (PAR-split 2026-05-13)
+
+**Stories:** none new. Closes STORY-0099 fully by wiring every `load_from_fjall` call site through ITER-0005a.3's public API + addressing the 4 single-auditor Minor findings deferred from 0005a.2's audit (inconsistent corruption-handling across load sites).
+
+**Status:** pending.
+
+**Rationale:** Split from the original ITER-0005a.3 per the 2026-05-13 pre-iteration PAR review. ITER-0005a.3 ships the public API (`LoaderStats`, `iter_keyspace`) + first consumer (SCENARIO-0099 iter sub-test); 0005a.4 wires every existing point-key `load_from_fjall` call site through the API. Splitting lets 0005a.3's API design pressure-test against one real consumer (the SCENARIO-0099 rebinding) before 4 downstream sites lock in the return-shape decision.
+
+**Critical decision pinned in scope card (resolves PAR C4 from 0005a.3 review):**
+
+`stream_input.rs::restore_from_fjall` + `get_memo` MUST preserve graceful-skip semantics. Today's behavior on envelope-short / corrupted bytes is `None` (graceful — caller falls back to pulling from upstream); changing to panic-on-skip would contradict AC-2/AC-3/AC-4's "skip and continue" promise specifically at the points where stream-position spills are read across an upgrade. T5 in this iteration explicitly preserves graceful skip — non-`Loaded` decode outcomes return `None` from these methods, AND increment a stats accumulator that the caller can read separately.
+
+**Return-shape decision pinned in scope card (resolves PAR S2/S9 from 0005a.3 review):**
+
+For point-key `load_from_fjall` methods (`CompiledCode`, `Object`, `ParseState`): use `&mut LoaderStats` parameter, returning `Result<Option<T>>` as today. This composes naturally for `ObjectDb::load_from_fjall` which does N+1 point reads and wants a single accumulated `LoaderStats`. Alternative (`(Option<T>, LoaderStats)` tuple) requires manual `.0 += .0; .1 += .1` aggregation across the N+1 calls. The `&mut LoaderStats` pattern is also the more Rust-idiomatic choice for "accumulator across multiple sub-operations."
+
+Revised signature pattern:
+```rust
+pub fn load_from_fjall(
+    keyspace: &fjall::Keyspace,
+    key: &str,
+    stats: &mut LoaderStats,
+) -> Result<Option<Self>>;
+```
+
+`stats` is `&mut` so callers can accumulate across multiple loads; the existing `Result<Option<T>>` return shape is preserved (no breaking signature change for the "return value" side; only the new parameter is breaking).
+
+**Caller-update enumeration (resolves PAR C3 from 0005a.3 review):**
+
+The 24 caller sites that need updating to pass a `&mut LoaderStats` parameter (read each before scope-card finalization per `feedback_read_actual_code_before_scope_finalization.md`):
+
+- `tests/bytecode_persistence.rs:38, 54, 70, 78, 86, 103, 123, 126` — 8 sites for `CompiledCode::load_from_fjall`.
+- `tests/object_persistence.rs:33, 76, 114, 144` — 4 sites for `ObjectDb::load_from_fjall`.
+- `tests/parse_state_persistence.rs:63, 84, 120, 179, 222, 255` — 6 sites for `ParseState::load_from_fjall`.
+- `src/grammar/incremental.rs:228, 249` — 2 sites for `ParseState::load_from_fjall` inside its own tests.
+- `fmpl-web` callers — TBD, check at iteration entry (likely 0 since fmpl-web persistence is the deferred ITER-0005-WEB-PERSISTENCE territory).
+
+Total: ~20+ caller sites. Each receives `&mut LoaderStats::default()` in the simple case OR an accumulator threaded through a test.
+
+**Impacted scenarios:** SCENARIO-0099 (no change — its existing test stays at decode-pathway seam; its iter sub-test stays at the API seam); SCENARIO-0111 (no change — stays at point-key roundtrip); SCENARIO-0112 (no change — operator-detection scenario stays as the AC-7 narrative proof).
+
+**Depends on:** ITER-0005a.3 (`LoaderStats` + `iter_keyspace` public API + SCENARIO-0099 iter sub-test + SCENARIO-0112).
+
+**Look-ahead:** ITER-0005b/c/d/e/f use the rewired `load_from_fjall` signatures with `&mut LoaderStats` accumulators.
+
+**Build order:**
+
+1. **T0 — Rewire `compiler.rs::CompiledCode::load_from_fjall`** through `loader::decode`. Signature becomes `load_from_fjall(ks, key, stats: &mut LoaderStats) -> Result<Option<Self>>`. Update 8 test caller sites. Remove the `// TODO(ITER-0005a.3)` marker.
+2. **T1 — Rewire `object.rs::ObjectDb::load_from_fjall`** through `loader::decode`. Two-step: decode `__object_ids__` (PayloadKind::ObjectIndex), then loop decoding `obj:{id}` records (PayloadKind::ObjectRecord). Single `&mut LoaderStats` accumulator across the N+1 calls. Update 4 test caller sites. Remove the marker.
+3. **T2 — Rewire `grammar/incremental.rs::ParseState::load_from_fjall`** through `loader::decode`. Replace the `.min(ENVELOPE_HEADER_SIZE)` saturation pattern (PAR deferred-finding #2 from 0005a.2 audit) with proper `DecodeOutcome` handling. Update 6 test caller sites + 2 src caller sites. Remove the marker.
+4. **T3 — Rewire `grammar/stream_input.rs::restore_from_fjall`** through `loader::decode`. **Graceful-skip preservation:** non-`Loaded` outcomes return `None` (matches today's behavior). Stats accumulator threaded through. Remove the marker. (PAR deferred-finding #3 from 0005a.2 audit closed.)
+5. **T4 — Rewire `grammar/stream_input.rs::get_memo`** through `loader::decode`. Same graceful-skip preservation as T3. Remove the marker. (PAR deferred-finding #4 from 0005a.2 audit closed.)
+6. **T5 — Corruption-handling consistency gate** (PAR deferred-finding #1 from 0005a.2 audit closed). Add a behavior-corpus entry (sentinel cadence) that constructs a corrupted record (e.g., `ValueTooShort`) and verifies each load path surfaces the same shape of outcome (typed error OR stats-recorded skip; pick per-site appropriately). Per-site disposition documented inline:
+   - `compiler.rs::load_from_fjall`: typed error → `BytecodePersistenceError`.
+   - `object.rs::load_from_fjall`: typed error → `ObjectPersistenceError`.
+   - `incremental.rs::load_from_fjall`: typed error → `ParseStateError`.
+   - `stream_input.rs::restore_from_fjall` + `get_memo`: graceful `None` + stats increment.
+7. **T6 — Wrap artifacts.** `roadmap.md` ITER-0005a.4 status → done. `iteration-log.md` entry. `progress.md` update. `EPIC-003.md` STORY-0099 status note: all 7 ACs done. behavior-corpus.md updates.
+
+**Verification gates:**
+
+- All 5 `// TODO(ITER-0005a.3)` markers removed from `src/`.
+- All 4 `load_from_fjall` sites use `&mut LoaderStats` parameter.
+- All 20+ caller sites updated.
+- `stream_input.rs::restore_from_fjall` + `get_memo` graceful-skip preserved (verified by a new test that writes a corrupted value + asserts `restore_from_fjall` returns `None` AND stats records the skip).
+- Corruption-handling consistency gate (T5) green.
+- Sentinel sweep green.
+- Clippy clean on default features AND `--features fjall-persistence`.
+- SCENARIO-0099 (both existing decode test + new iter sub-test from 0005a.3) still passes.
+- SCENARIO-0111 still passes.
+- SCENARIO-0112 still passes.
+
+**Out of scope:**
+
+- Closing `#[cfg(feature = "fjall-persistence")]` gating asymmetry (future hardening).
+- Converting `stream_input.rs` writers from panic-on-write to `Result` (future hardening).
+- New payload classes (ITER-0005d/e).
+- `Hash` newtype (ITER-0005b).
+- fmpl-web persistence sweep (ITER-0005-WEB-PERSISTENCE — separately deferred).
+
+---
+
+#### ITER-0005b — Content-addressed source store
+
+**Stories:** STORY-0100.
+
 **Status:** pending
-**Impacted scenarios:** SCENARIO-0007, SCENARIO-0008, SCENARIO-0009, SCENARIO-0010, SCENARIO-0011, SCENARIO-0099, SCENARIO-0100, SCENARIO-0101, SCENARIO-0102
-**Depends on:** ITER-0004b (single canonical representation — see ITER-0004b "Why before persistence")
-**Look-ahead check:** Unblocks self-compile seed creation (ITER-0006).
 
-**Build order within iteration (STORY-0099 and STORY-0100 are foundational):**
-1. **STORY-0099 first** — versioned envelope is the schema all other persistence callers will write through. Land it before any single payload writer is plumbed in, so no caller is ever rewritten away from raw `serde_json::to_vec`.
-2. **STORY-0100 second** — content-addressed source store. The envelope (STORY-0099) carries a `source_hash` field; nothing populates it until this story lands. Constructor synthesis for sourceless artifacts (objects, anonymous lambdas, runtime grammars) is the hard part — implement and test in isolation before the per-payload stories depend on it.
-3. **STORY-0013/0014/0015/0019/0021** — per-payload writers (objects, bytecode, grammars, memo tables) all built on the STORY-0099 envelope and STORY-0100 source store. None should bypass the envelope.
-4. **STORY-0016/0017/0018/0020** — VM snapshot, full-image roundtrip, normal-startup loading. Depend on the per-payload writers above.
-5. **STORY-0069** — feature flag wiring; ship last so the default-disabled path is well-defined.
+**Rationale:** ITER-0005a's envelope carries a `source_hash` field nothing populates yet. This iteration adds the content-addressed store + the constructor-expression synthesizer for sourceless artifacts (anonymous lambdas, runtime grammars, ObjectDb objects without a source file). Constructor synthesis is the hard part — implement and test in isolation before per-payload stories depend on it. Independent of any payload class; depends only on ITER-0005a's envelope.
+
+**Impacted scenarios:** SCENARIO-0100, SCENARIO-0101, SCENARIO-0102.
+
+**Depends on:** ITER-0005a.
+
+**Look-ahead:** ITER-0005c/d will populate `source_hash` on every write.
+
+**Build order:**
+
+1. **T1 — Hash function + content-addressed store API.** Pick hash (blake3 or xxh3 — public, fast, single-dep). Store: `put(content) -> Hash`, `get(hash) -> Option<Bytes>`. Fjall-backed.
+2. **T2 — Constructor-expression synthesizer for sourceless artifacts.** For each class of sourceless artifact (anonymous lambda, runtime grammar, ObjectDb object): emit a FMPL source string that, when re-parsed and compiled, reproduces an equivalent artifact. Test in isolation (unit tests; no envelope coupling).
+3. **T3 — SCENARIO-0101 card** (sourceless artifact gets synthesized constructor expression).
+4. **T4 — SCENARIO-0102 card** (loader recovers from incompatible payload via source recompilation — combines envelope's `source_hash` lookup with constructor synthesis).
+5. **T5 — Wrap artifacts.**
+
+**Verification gates:** unit tests on constructor synthesizer per artifact class, SCENARIO-0101/0102 pass, sentinel sweep green.
+
+---
+
+#### ITER-0005c — Single-payload-class persistence: bytecode (proof case)
+
+**Stories:** STORY-0014.
+
+**Status:** pending
+
+**Rationale:** Bytecode is the smallest, best-understood payload class (`CompiledCode` already has rkyv support per the original scope card). Use it as the **proof case** for the envelope + source-store + payload-writer pattern. If something breaks, debug it on a small target before scaling to the other four payload classes. This iteration validates that ITER-0005a's envelope and ITER-0005b's source-store compose cleanly through a real round-trip.
+
+**Impacted scenarios:** SCENARIO-0007 (or whichever sentinel proves bytecode survives a restart).
+
+**Depends on:** ITER-0005a, ITER-0005b.
+
+**Look-ahead:** ITER-0005d will mirror this pattern across objects, grammar definitions, GrammarRegistry, memo tables.
+
+**Build order:**
+
+1. **T1 — Wire `CompiledCode` through the envelope writer.** Use ITER-0005a.2's `persistence::envelope::write` helper. Populate `source_hash` from ITER-0005b's content-addressed source store. Loader uses ITER-0005a.1's keyspace iterator + skip-on-incompatible logic. (Note: pre-2026-05-12 wording referenced `MigrationEngine::migrate` here; that engine was deferred per ITER-0005a.0's deferral rationale and will be revived as `MigrationVisitor` on ITER-0005e's tracer substrate when the first real schema change arrives.)
+2. **T2 — Process-restart round-trip test.** Spawn a subprocess (or simulate restart via a Vm wipe + reload), compile a simple expression, persist, restart, reload, verify result. Probably the integration boundary that proves the stack.
+3. **T3 — Scenario evidence** (the existing or new SCENARIO covering bytecode-persistence).
+4. **T4 — Wrap artifacts.**
+
+**Verification gates:** bytecode persistence round-trip passes, sentinel sweep green, clippy clean.
+
+---
+
+#### ITER-0005d — Remaining payload classes
+
+**Stories:** STORY-0013 (objects), STORY-0015 (grammar definitions), STORY-0019 (GrammarRegistry), STORY-0021 (memo tables).
+
+**Status:** pending
+
+**Rationale:** Four payload classes that share the same machinery proven in ITER-0005c. Each has its own serialization detail (objects already derive Serialize; grammar semantic actions contain AST expressions — the hardest case per the original scope; memo tables are partially Fjall-integrated already). This is parallel work across four targets, not a single monolithic story.
+
+**Caveat at iteration entry:** if this still feels too large after running-an-iteration's pre-scope review, split along the AC hardness boundary — one iteration for "objects + GrammarRegistry" (easier; existing Serialize derives), another for "grammar definitions with AST semantic actions + memo tables" (harder; needs careful round-trip semantics). The PAR scope review at iteration entry will surface whether this split is needed.
+
+**Impacted scenarios:** SCENARIO-0008 (objects), SCENARIO-0010/0011 (grammars).
+
+**Depends on:** ITER-0005c (proves the pattern works on a small target).
+
+**Look-ahead:** ITER-0005e's VM snapshot composes all four payload writers.
+
+**Build order:**
+
+1. **T1 — Object persistence (STORY-0013).** Use ObjectDb's existing Serialize derives; wire through envelope; round-trip test.
+2. **T2 — GrammarRegistry persistence (STORY-0019).** Standard envelope adapter; tests follow STORY-0014's pattern.
+3. **T3 — Grammar definitions with AST semantic actions (STORY-0015).** The hard case — semantic actions contain AST expressions that may reference compiler internals. Round-trip test specifically exercises a grammar with a non-trivial semantic action.
+4. **T4 — Memo table persistence (STORY-0021).** Build on the partial Fjall integration already present; complete the round-trip.
+5. **T5 — Wrap artifacts.**
+
+**Verification gates:** four per-payload round-trip tests pass, scenario evidence updated, sentinel sweep green, clippy clean.
+
+---
+
+#### ITER-0005e — VM snapshot + full image roundtrip (lands tracer substrate as foundation)
+
+**Stories:** STORY-0016 (VM snapshot), STORY-0017 (full image roundtrip), STORY-0018 (normal startup loading), STORY-0020 (Vm::snapshot/restore API).
+
+**Status:** pending
+
+**Rationale:** Snapshot composes all per-payload writers from ITER-0005d into a single API (`Vm::snapshot(dir)` / `Vm::restore(dir)`). SCENARIO-0019's `let x = 42 → snapshot → restore → access` is the **journey-level test** that proves the whole stack holds together. Also wires the normal-startup-from-image path so a fresh process loads the image transparently.
+
+**Architectural framing (2026-05-12, post-PAR retrospective):** Per `docs/superpowers/specs/2026-05-12-lessons-from-siblings.md` §2.5 — the Smalltalk tracer family is a **generic object-graph walker with pluggable visitor semantics**, not just a migration tool. ITER-0005e is the right home for the **tracer substrate** because `Vm::snapshot`'s determinism + reproducibility requirements pin the substrate's design correctly. The substrate's first visitor (`SerializationVisitor`) is the consumer that earns its keep; ITER-0006's `ReachabilityVisitor` (seed-snapshot) then inherits the substrate without rework; the eventual `MigrationVisitor` (first real schema change) lands as a third visitor on the same substrate, replacing what was deferred from ITER-0005a.0. This is the "infrastructure ships with its first consumer" discipline (per `feedback_ship_infrastructure_with_first_consumer.md`) applied at the right granularity — the visitor pattern, not the engine, is what waits for a consumer; the substrate ships when the first visitor demands it.
+
+**Implication for build order:** rather than hand-rolling `Vm::snapshot`'s traversal, design the snapshot as the first visitor on the tracer substrate. The substrate's design is pinned by `SerializationVisitor`'s needs (deterministic traversal order, cycle handling, single-write-per-object guarantee) — NOT by speculation about future visitors.
+
+**Impacted scenarios:** SCENARIO-0009, SCENARIO-0019.
+
+**Depends on:** ITER-0005d.
+
+**Look-ahead:** ITER-0005f wires the feature flag around this surface. ITER-0006 inherits the tracer substrate and adds `ReachabilityVisitor` for seed-snapshot creation. A future schema-change iteration adds `MigrationVisitor` to the same substrate (this is the revival path for the deferred ITER-0005a.0 work).
+
+**Build order:**
+
+1. **T0 (NEW) — Tracer substrate + `SerializationVisitor`.** Land `fmpl-core/src/persistence/tracer/` (new module). Substrate surface: worklist-based object-graph walker with cycle handling, single-visit guarantee, deterministic ordering, and visitor-dispatch via a `TracerVisitor` trait. First visitor: `SerializationVisitor` that emits payloads through ITER-0005d's per-payload writers in deterministic order. Design specifically pinned to `SerializationVisitor`'s needs; speculative features for future visitors (ReachabilityVisitor, MigrationVisitor) are NOT in scope here — those iterations will extend the substrate when they need to.
+2. **T1 — `Vm::snapshot(dir)` API (STORY-0020 AC-1).** Wires through T0's substrate + `SerializationVisitor` to write scope, ObjectDb, GrammarRegistry, compiled-code cache to the given directory.
+3. **T2 — `Vm::restore(dir)` API (STORY-0020 AC-2).** Loads all state into a fresh Vm. (Note: restore is not a tracer visitor — it's a payload-by-payload reader using ITER-0005a.1's envelope loader. The tracer substrate is for writing, not reading.)
+4. **T3 — `let x = 42` journey roundtrip (STORY-0020 AC-3).** SCENARIO-0019 evidence.
+5. **T4 — Normal-startup loading (STORY-0018).** A fresh process detects a persisted image and loads from it transparently.
+6. **T5 — Full-image roundtrip composition test (STORY-0017).** A non-trivial program survives a full snapshot/restore.
+7. **T6 — Substrate-genericity gate (proof-like).** A typed-invariant test that asserts the substrate's API doesn't reference `Serialization` anywhere (i.e., the substrate is genuinely generic over visitor type, not silently coupled to its first consumer). Per `feedback_prefer_proof_tests.md` form #1 (typed invariants > greps), the strongest form is a separate test crate or module that depends only on the substrate (not on `SerializationVisitor`) and compiles. ITER-0006 will validate the substrate's genericity in practice by adding `ReachabilityVisitor` on top.
+8. **T7 — Wrap artifacts.**
+
+**Verification gates:** SCENARIO-0019 passes; normal-startup loads a persisted image; substrate-genericity gate (T7) is green; sentinel sweep green; clippy clean.
+
+**PAR scope review focus (at iteration entry):** Specifically probe whether the substrate API surface (worklist representation, cycle-tracking, visitor-dispatch shape) is generic enough to admit `ReachabilityVisitor` (ITER-0006) and `MigrationVisitor` (eventual schema change) WITHOUT rework — AND conservative enough that it isn't carrying speculative features for those future visitors. The two reviewers should disagree on the right answer if there's genuine ambiguity; that disagreement is signal.
+
+**Out of scope:**
+- `ReachabilityVisitor` (deferred to ITER-0006 — that iteration's consumer is the bootstrap seed snapshot).
+- `MigrationVisitor` + `MigrationEngine` (deferred to the first schema-change iteration — this is the revival path for ITER-0005a.0).
+- `QueryVisitor` / `RewriteVisitor` / any other visitor class (no near-term consumer).
+
+---
+
+#### ITER-0005f — Feature flag wiring + final polish
+
+**Stories:** STORY-0069.
+
+**Status:** pending
+
+**Rationale:** Ship the `fjall-persistence` feature flag last so the default-disabled path is well-defined and byte-identical to today's behavior. This makes ITER-0005-family the last iteration where persistence is opt-in; downstream work (ITER-0006 et seq.) can begin assuming the feature is available.
+
+**Impacted scenarios:** the cross-iteration sentinel sweep — proving default-disabled and feature-enabled both pass.
+
+**Depends on:** ITER-0005e.
+
+**Look-ahead:** ITER-0006 (Self-Compile and Seed) can now depend on `fjall-persistence` being a stable, available feature.
+
+**Build order:**
+
+1. **T1 — `fjall-persistence` feature flag.** Cargo.toml feature definition; `#[cfg(feature = "fjall-persistence")]` gates on the persistence module entry points.
+2. **T2 — Default-disabled regression test.** A sentinel-level test that asserts default-feature builds behave byte-identically to pre-ITER-0005 behavior (no persistence side-effects, no Fjall files written).
+3. **T3 — Doc update.** Persistence section in the user docs; the feature is now documented as opt-in but stable.
+4. **T4 — Wrap artifacts.**
+
+**Verification gates:** both `cargo test -p fmpl-core` (default) and `cargo test -p fmpl-core --features fjall-persistence` pass, sentinel sweep green on both, clippy clean on both.
+
+---
+
+**Cross-family out-of-scope (deferred to later iterations):**
+
+- **Cache freshness via `invalidation`.** Once persisted artifacts exist (post-ITER-0005f) and recompilation cost is measurable, a follow-up iteration ports `invalidation` to track source-file → bytecode-artifact dependency edges. Public Rust crate (`invalidation = "0.2"`), 1 transitive dep, acceptable footprint per `feedback_dependency_policy.md`.
+- **FMPL-side authorship of MigrationRules.** ITER-0006+ (metacircular lift). Once `io::read_dir` exists (deferred from ITER-0004d.4 → ITER-0004d.5), FMPL programs author migration rules that satisfy the Rust trait. Same pattern as moor-echo's MOO authorial layer.
+- **Cairn-style span-on-every-Instruction discipline.** Separate iteration; orthogonal to persistence. Architectural improvement to the compiler, not the persistence layer.
 
 ### ITER-0006 — Self-Compile and Seed
 
@@ -1069,7 +1674,7 @@ After this iteration, ITER-0005 (Image Persistence) has direct evidence for what
 **Rationale:** Create seed snapshot from current Rust compiler (Stage 0). Add --snapshot and --from-seed flags to fmpl-bootstrap. Write fmpl_compiler.fmpl — the FMPL compiler driver that orchestrates the full pipeline (fmpl_parser.fmpl → ast_to_ir.fmpl → ast_optimizer.fmpl → ir::compile). Verify round-trip: snapshot → restore → compile "1 + 2" → get 3.
 **Status:** pending
 **Impacted scenarios:** SCENARIO-0020
-**Depends on:** ITER-0004 (compiler cutover), ITER-0004b + ITER-0004c + ITER-0004d (full canonical-representation refactor — runtime burn + FMPL stdlib migration + parser/AST burn), and ITER-0005 (persistence). The fmpl_compiler.fmpl pipeline `fmpl_parser.fmpl → ast_to_ir.fmpl → ast_optimizer.fmpl → ir::compile` requires that *every* stdlib file in that chain be in the canonical list-pattern syntax (delivered by ITER-0004c) AND that the parser accepts only one AST shape (delivered by ITER-0004d).
+**Depends on:** ITER-0004 (compiler cutover), ITER-0004b + ITER-0004c + ITER-0004d (full canonical-representation refactor — runtime burn + FMPL stdlib migration + parser/AST burn), and the ITER-0005a–ITER-0005f sub-iteration family (persistence — ITER-0005f's close is the explicit gate). The fmpl_compiler.fmpl pipeline `fmpl_parser.fmpl → ast_to_ir.fmpl → ast_optimizer.fmpl → ir::compile` requires that *every* stdlib file in that chain be in the canonical list-pattern syntax (delivered by ITER-0004c) AND that the parser accepts only one AST shape (delivered by ITER-0004d).
 **Look-ahead check:** Unblocks fixpoint verification.
 
 ### ITER-0007 — Fixpoint Verification
@@ -1119,3 +1724,64 @@ After this iteration, ITER-0005 (Image Persistence) has direct evidence for what
 **Stories:** STORY-0029 through STORY-0042
 **Rationale:** Post-self-hosting initiative. Not in scope for bootstrap stabilization.
 **Status:** deferred
+
+### ITER-0005-WEB-PERSISTENCE — Sweep fmpl-web writers through the envelope helper
+
+**Stories:** STORY-0099 AC-5 extension (fmpl-web scope).
+
+**Status:** candidate (added 2026-05-13 from ITER-0005a.2 audit fix-up G3).
+
+**Rationale:** ITER-0005a.2's PAR audit (2026-05-13) flagged that `fmpl-web/src/` contains 4 pre-existing raw `partition.insert(...)` sites that violate AC-5's literal wording ("no caller writes raw `serde_json` bytes to a Fjall keyspace"):
+- `fmpl-web/src/continuations.rs:66` — initial save of a `SnapshotEnvelope`.
+- `fmpl-web/src/continuations.rs:126` — previous-state save during stream rotation.
+- `fmpl-web/src/continuations.rs:142` — update-last-action save.
+- `fmpl-web/src/image_store.rs:26` — raw FMPL source storage.
+
+ITER-0005a.2's scope was `fmpl-core/src/` only; sweeping fmpl-web is non-trivial because:
+
+1. **`fjall::PartitionHandle` vs `fjall::Keyspace`** — fmpl-web uses partition handles; the `persistence::envelope::write` helper takes `&fjall::Keyspace`. Either widen the helper's signature or add a parallel `write_partition` helper.
+2. **Parallel `SnapshotEnvelope` abstraction** — `continuations.rs` already has its own envelope with `schema_version` / `bytecode_version` / `engine_version` / `created_at` fields. Wrapping it in the fmpl-core envelope produces double-envelope semantics that need a design pass.
+3. **Unstructured FMPL source payload class** — `image_store.rs` writes raw FMPL source text, not a typed Serialize-shaped payload. Needs either a new `PayloadKind::Source` variant or a "raw bytes" envelope-write helper.
+
+**Anticipated scope (per the audit doc; actual scope card to be PAR-reviewed at iteration entry):**
+
+- Decide write-helper API (single helper with `Into<&Keyspace>`-style adapter, or two helpers).
+- Decide envelope-of-envelope vs. retire `SnapshotEnvelope` in favor of the fmpl-core envelope.
+- Add `PayloadKind::FmplSource` (or similar) for raw FMPL source storage.
+- Sweep the 4 sites + their corresponding `load` paths (transitional manual prefix-strip pattern, same as ITER-0005a.2).
+- Extend the AC-5 invariant gate to scan `fmpl-web/src/` as well.
+- Widen AC-5 wording in EPIC-003 back to "all currently-extant writers" once this iteration ships.
+
+**Depends on:** ITER-0005a.3 (load-side decode rewire in fmpl-core; reusing the pattern here).
+
+**Look-ahead:** unblocks fully-uniform persistence across fmpl-core + fmpl-web. After this, AC-5 covers the whole workspace, not just `fmpl-core/src/`.
+
+**Reference:** ITER-0005a.2 audit fix-up G3 (2026-05-13).
+
+---
+
+### ITER-FFI-PROLOG-PHASE-1 — Expose backtracking via FMPL-surface builtins
+
+**Stories:** none (infrastructure-only; no story currently captures this surface).
+
+**Status:** candidate (added 2026-05-13; not sequenced).
+
+**Rationale:** First phase of the Prolog-shaped FFI reframe surveyed in `docs/superpowers/specs/2026-05-13-prolog-shaped-ffi.md`. The grammar engine already runs a Prolog-style backtracking evaluator via `PegRuntime` (`backtrack` at `fmpl-core/src/grammar/runtime.rs:1751`, `get_all_alternatives` at line 1859), validated by 19 backtracking tests across `tests/{backtracking,guard_backtracking,send_more_money_fmpl}.rs` (all passing 2026-05-13, including full SEND+MORE=MONEY CSP solving). The capability exists in Rust but isn't surfaced to FMPL code outside `grammar { ... }` blocks. Phase 1 exposes the Rust APIs as FMPL builtins so FMPL code can drive backtracking explicitly without writing a grammar.
+
+This is the **smallest standalone step** toward the Prolog-shaped FFI reframe. It earns its keep independently (CSP-style FMPL programs become writable without a grammar wrapper) AND it produces the surface ergonomics signal that informs whether Phases 2-5 (tuple-space primitives, method dispatch via roles, builtin migration, persistence convergence) are worth scheduling. Per `feedback_ship_infrastructure_with_first_consumer.md`, Phase 1 has a concrete consumer the day it lands (any FMPL CSP/search program); Phases 2-5 should only schedule after Phase 1 reveals real usage pressure.
+
+**Anticipated scope (per the lessons doc — actual scope card will be PAR-reviewed at iteration entry):**
+
+- Add `__builtin_backtrack::next_alternative` (or similar) routing to `PegRuntime::backtrack`.
+- Add `__builtin_backtrack::all_alternatives` routing to `PegRuntime::get_all_alternatives`.
+- Wire `Stream<Alternative>` integration so FMPL code can iterate alternatives.
+- 1-2 example tests demonstrating FMPL-driven backtracking outside a grammar context.
+- Add a behavior-corpus scenario covering "FMPL CSP program iterates alternatives via builtins."
+
+Probable size: 3-5 tasks per the lessons doc estimate; verify at scope-card time per `feedback_read_actual_code_before_scope_finalization.md`.
+
+**Depends on:** nothing in the ITER-0005 family. Could schedule any time after ITER-0004 close.
+
+**Look-ahead:** if usage materializes, Phase 2 (`make_relation`/`assert`/query-with-logic-variable as builtins routed to `tuplespace/`) becomes the natural next iteration. If not, Phase 1 stays a useful narrow feature and the broader reframe stays at design-doc stage.
+
+**Reference:** `docs/superpowers/specs/2026-05-13-prolog-shaped-ffi.md` for the full 5-phase path, risk analysis, and decisions deferred to Phase 2+ schedulers.
