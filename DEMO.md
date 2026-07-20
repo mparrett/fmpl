@@ -79,11 +79,12 @@ cursor2::position(cursor2)   // => 0 (unchanged)
 
 ### 9. Grammar Application (Pattern Matching)
 ```fmpl
--- Pattern match on values
+-- Pattern match on values, with a guard.
+-- `if` and `when` are interchangeable guard keywords.
 let value = 42
 value @ {
-  n if n.is_number() => n * 2,
-  s => s.length()
+  n if n > 0 => n * 2,
+  _ => 0
 }
 // => 84
 ```

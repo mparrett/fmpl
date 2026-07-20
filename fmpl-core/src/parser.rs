@@ -1041,11 +1041,13 @@ impl<'a> Parser<'a> {
         Ok(cases)
     }
 
-    /// Parse a single pattern case: pattern [when guard] => body
+    /// Parse a single pattern case: pattern [(when|if) guard] => body
     fn parse_pattern_case(&mut self) -> Result<PatternCase> {
         let pattern = self.parse_pattern()?;
 
-        let guard = if self.check(&Token::When) {
+        // `if` is an alias for `when`; `n if cond => body` is the near-universal
+        // match-guard idiom and the form the docs/tutorial use.
+        let guard = if self.check(&Token::When) || self.check(&Token::If) {
             self.advance();
             Some(Box::new(self.parse_expr()?))
         } else {
@@ -1121,24 +1123,27 @@ impl<'a> Parser<'a> {
             // _ (wildcard): inline pattern — compile_match handles Wildcard directly
             Token::Underscore => self
                 .peek_ahead(2)
-                .map(|t| matches!(t.token, Token::Arrow | Token::When))
+                .map(|t| matches!(t.token, Token::Arrow | Token::When | Token::If))
                 .unwrap_or(false),
 
             // :Symbol patterns:
-            // - `:Symbol =>` or `:Symbol when` is inline pattern (symbol match)
+            // - `:Symbol =>`, `:Symbol when`, or `:Symbol if` is inline pattern (symbol match)
             // - `:Symbol(...)` is constructor pattern — compile_match handles recursively
             Token::Symbol(_) => {
                 if let Some(t2) = self.peek_ahead(2) {
-                    matches!(t2.token, Token::Arrow | Token::When | Token::LParen)
+                    matches!(
+                        t2.token,
+                        Token::Arrow | Token::When | Token::If | Token::LParen
+                    )
                 } else {
                     false
                 }
             }
 
-            // Identifier is inline if followed by => or when
+            // Identifier is inline if followed by =>, when, or if (guard)
             Token::Ident(_) => self
                 .peek_ahead(2)
-                .map(|t| matches!(t.token, Token::Arrow | Token::When))
+                .map(|t| matches!(t.token, Token::Arrow | Token::When | Token::If))
                 .unwrap_or(false),
 
             // [ could be list pattern or character class
@@ -1172,7 +1177,7 @@ impl<'a> Parser<'a> {
                     if matches!(second.token, Token::Ident(_) | Token::Symbol(_))
                         && matches!(third.token, Token::RBracket)
                         && let Some(fourth) = self.peek_ahead(4)
-                        && matches!(fourth.token, Token::Arrow | Token::When)
+                        && matches!(fourth.token, Token::Arrow | Token::When | Token::If)
                     {
                         return true;
                     }
@@ -1180,10 +1185,10 @@ impl<'a> Parser<'a> {
                 false
             }
 
-            // Integer/Float literals followed by => are inline patterns
+            // Integer/Float literals followed by =>, when, or if are inline patterns
             Token::Int(_) | Token::Float(_) => self
                 .peek_ahead(2)
-                .map(|t| matches!(t.token, Token::Arrow | Token::When))
+                .map(|t| matches!(t.token, Token::Arrow | Token::When | Token::If))
                 .unwrap_or(false),
 
             // String literals are ambiguous - default to grammar
@@ -1854,7 +1859,8 @@ impl<'a> Parser<'a> {
     fn parse_match_case(&mut self) -> Result<MatchCase> {
         let pattern = self.parse_pattern()?;
 
-        let guard = if self.check(&Token::When) {
+        // `if` is an alias for `when` (see parse_pattern_case).
+        let guard = if self.check(&Token::When) || self.check(&Token::If) {
             self.advance();
             Some(Box::new(self.parse_expr()?))
         } else {

@@ -326,7 +326,10 @@ let fmpl_parser = grammar fmpl_parser {
     pattern = pat_as | pat_primary
 
     -- Match expression
-    match_case_guard = "when" sp or_expr:guard => guard
+    -- `if` is an alias for `when` (mirrors the Rust parser; DESIGN-001 keeps the
+    -- two parsers describing the same language). `n if cond => body` is the
+    -- match-guard idiom the docs/tutorial use.
+    match_case_guard = ("when" | "if") sp or_expr:guard => guard
     match_case = pattern:pat match_case_guard?:guard "=>" sp expr:body => [:MatchCase, pat, guard, body]
     match_case_sep = seq_semi | sp
     match_case_rest = match_case_sep match_case:c => c
