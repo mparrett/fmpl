@@ -2,7 +2,6 @@
 // reduce clarity in this large dispatch table.
 #![allow(clippy::collapsible_if)]
 #![allow(clippy::collapsible_match)]
-#![allow(clippy::manual_checked_ops)]
 
 //! IR to Rust transpiler.
 //!
