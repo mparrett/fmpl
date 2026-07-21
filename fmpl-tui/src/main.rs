@@ -2520,11 +2520,10 @@ impl App {
             .iter()
             .map(|m| m.content.len() / 4 + 1)
             .sum();
-        let savings_percent = if original_tokens > 0 {
-            ((original_tokens - compacted_tokens) * 100) / original_tokens
-        } else {
-            0
-        };
+        // saturating_sub: compaction can in principle grow the estimate
+        let savings_percent = (original_tokens.saturating_sub(compacted_tokens) * 100)
+            .checked_div(original_tokens)
+            .unwrap_or(0);
 
         self.compaction_warning = None;
 
@@ -2896,7 +2895,7 @@ impl App {
         };
 
         // Create a single-turn request (not adding to conversation DAG)
-        let fmpl_code = format!("{}.chat({:?})", provider_name, &prompt);
+        let fmpl_code = format!("{}.chat({:?})", provider_name, prompt);
 
         match eval(&mut self.vm, &fmpl_code) {
             Ok(result) => match wait_for_async(result) {
@@ -2943,7 +2942,7 @@ impl App {
         };
 
         // Create a single-turn request
-        let fmpl_code = format!("{}.chat({:?})", provider_name, &prompt);
+        let fmpl_code = format!("{}.chat({:?})", provider_name, prompt);
 
         match eval(&mut self.vm, &fmpl_code) {
             Ok(result) => {

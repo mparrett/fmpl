@@ -131,7 +131,7 @@ impl TupleSpace {
 
     /// Non-blocking read (returns None if no match).
     pub fn rdp(&mut self, pattern: &TuplePattern) -> Result<Option<Tuple>> {
-        for (_, tuple) in self.tuples.iter() {
+        for tuple in self.tuples.values() {
             if pattern.matches(tuple) {
                 return Ok(Some(tuple.clone()));
             }

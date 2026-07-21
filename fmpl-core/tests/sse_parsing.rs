@@ -22,7 +22,7 @@ async fn test_sse_parse_ollama_format() {
                 assert_eq!(map.get("response"), Some(&Value::String("Hello".into())));
                 assert_eq!(map.get("done"), Some(&Value::Bool(false)));
             } else {
-                panic!("Expected Map for first event, got {:?}", &items[0]);
+                panic!("Expected Map for first event, got {:?}", items[0]);
             }
             // Verify second event
             if let Value::Map(map) = &items[1] {
@@ -70,7 +70,7 @@ async fn test_sse_parse_anthropic_format() {
                     panic!("Expected delta to be a Map");
                 }
             } else {
-                panic!("Expected Map for event, got {:?}", &items[0]);
+                panic!("Expected Map for event, got {:?}", items[0]);
             }
         }
         other => panic!("Expected List, got {:?}", other),
