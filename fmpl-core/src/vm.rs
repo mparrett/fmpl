@@ -424,7 +424,11 @@ impl Vm {
                     } else {
                         match a.add(&b) {
                             Ok(r) => r,
-                            Err(_) => Value::Null, // Type error - return Null to allow pattern to fail
+                            // A genuine arithmetic error (e.g. integer overflow)
+                            // must propagate, not silently become Null.
+                            Err(e @ Error::Runtime(_)) => return Err(e),
+                            // Type mismatch stays Null so patterns can fail gracefully.
+                            Err(_) => Value::Null,
                         }
                     };
                     let frame = self.frames.last_mut().unwrap();
@@ -5345,6 +5349,21 @@ mod tests {
         let mut vm = Vm::new();
         let result = eval(&mut vm, "[1, 2, 3].len()").unwrap();
         assert_eq!(result, Value::Int(3));
+    }
+
+    #[test]
+    fn test_integer_overflow_is_error_not_panic() {
+        // Runtime arithmetic overflow must be a clean error, never a process
+        // abort (debug) or silent wraparound (release). Reachable from user input.
+        for src in [
+            "9000000000000000000 * 2",
+            "9000000000000000000 + 9000000000000000000",
+            "-9000000000000000000 - 9000000000000000000",
+        ] {
+            let mut vm = Vm::new();
+            let r = eval(&mut vm, src);
+            assert!(r.is_err(), "{src} should overflow to an error, got {r:?}");
+        }
     }
 
     #[test]

@@ -321,7 +321,13 @@ impl Value {
     /// Add two values.
     pub fn add(&self, other: &Value) -> Result<Value> {
         match (self, other) {
-            (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+            // Checked so an overflowing literal or sum is a clean error, not a
+            // process abort (debug) / silent wraparound (release). Reachable from
+            // user input, e.g. a 26-digit integer literal.
+            (Value::Int(a), Value::Int(b)) => a
+                .checked_add(*b)
+                .map(Value::Int)
+                .ok_or_else(|| Error::Runtime("integer overflow in addition".to_string())),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
             (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 + b)),
             (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a + *b as f64)),
@@ -343,7 +349,10 @@ impl Value {
     /// Subtract two values.
     pub fn sub(&self, other: &Value) -> Result<Value> {
         match (self, other) {
-            (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
+            (Value::Int(a), Value::Int(b)) => a
+                .checked_sub(*b)
+                .map(Value::Int)
+                .ok_or_else(|| Error::Runtime("integer overflow in subtraction".to_string())),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
             (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 - b)),
             (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a - *b as f64)),
@@ -357,7 +366,10 @@ impl Value {
     /// Multiply two values.
     pub fn mul(&self, other: &Value) -> Result<Value> {
         match (self, other) {
-            (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
+            (Value::Int(a), Value::Int(b)) => a
+                .checked_mul(*b)
+                .map(Value::Int)
+                .ok_or_else(|| Error::Runtime("integer overflow in multiplication".to_string())),
             (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
             (Value::Int(a), Value::Float(b)) => Ok(Value::Float(*a as f64 * b)),
             (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a * *b as f64)),
