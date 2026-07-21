@@ -13,7 +13,7 @@ fn corpus_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("CARGO_MANIFEST_DIR has a parent")
-        .join("docs/superpowers/iterations/behavior-scenarios.md")
+        .join("docs/behavior-scenarios.md")
 }
 
 #[test]

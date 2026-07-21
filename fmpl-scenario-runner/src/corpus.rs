@@ -7,9 +7,10 @@
 //! to skip them.
 //!
 //! The parser is intentionally line-oriented and dependency-free (no
-//! `pulldown_cmark` or similar). See
+//! `pulldown_cmark` or similar). The authoritative card-format grammar is in
 //! `docs/superpowers/specs/2026-05-12-scenario-runner-design.md` — section
-//! "Card format" — for the authoritative grammar.
+//! "Card format" — on the `archive/agent-harness` branch (the agent-dev docs
+//! were sidelined from `main`).
 //!
 //! ## State machine
 //!

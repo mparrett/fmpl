@@ -2,10 +2,10 @@
 //!
 //! This file is intentionally TINY. The real test functions are generated
 //! at build time by `fmpl-core/build.rs::generate_scenario_tests` from the
-//! markdown corpus at `docs/superpowers/iterations/behavior-scenarios.md`.
+//! markdown corpus at `docs/behavior-scenarios.md`.
 //!
 //! Architecture:
-//! - `docs/superpowers/iterations/behavior-scenarios.md` is the source of
+//! - `docs/behavior-scenarios.md` is the source of
 //!   truth. Each scenario card has a `**Action type:**` line and a
 //!   `**Cases:**` block per the data-driven runner's card format.
 //! - `fmpl-core/build.rs` calls `fmpl_scenario_runner::corpus::parse_corpus`

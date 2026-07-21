@@ -3,7 +3,8 @@
 //! Satisfies AC-1 of STORY-0099. The header is a fixed-layout, 56-byte,
 //! unaligned `#[repr(C)]` struct decoded zero-copy via the
 //! [`zerocopy`] crate. See `docs/superpowers/iterations/roadmap.md` →
-//! ITER-0005a.1 for the design rationale.
+//! ITER-0005a.1 on the `archive/agent-harness` branch for the design
+//! rationale (the agent-dev docs were sidelined from `main`).
 //!
 //! Wire layout (56 bytes total, little-endian, no padding):
 //!

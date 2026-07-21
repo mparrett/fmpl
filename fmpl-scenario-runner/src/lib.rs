@@ -1,7 +1,9 @@
 //! Data-driven scenario runner for FMPL behavior-corpus tests.
 //!
 //! Public API surface described in
-//! `docs/superpowers/specs/2026-05-12-scenario-runner-design.md`.
+//! `docs/superpowers/specs/2026-05-12-scenario-runner-design.md` on the
+//! `archive/agent-harness` branch (the agent-dev docs were sidelined from
+//! `main`).
 
 pub mod corpus;
 pub mod error;

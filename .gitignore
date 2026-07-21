@@ -43,8 +43,3 @@ __pycache__/
 test_*
 # Keep test source files
 !tests/
-
-# Override global ignore for iterative-development artifacts
-!docs/superpowers/
-docs/superpowers/iterations/scratch/
-docs/superpowers/specs/.clearance-rendered-preview-*/
