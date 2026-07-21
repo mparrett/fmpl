@@ -79,7 +79,7 @@ while runtime.has_more_choices() {
 
 - `test_prolog_solver.rs` (6 tests) - Backtracking patterns
 - `test_send_more_money_full.rs` (3 tests) - CSP solver implementation
-- `send_more_money.fmpl` - FMPL demo (needs builtins for full solving)
+- `examples/send_more_money.fmpl` - FMPL demo (needs builtins for full solving)
 
 ### Next Steps for Full FMPL CSP
 
