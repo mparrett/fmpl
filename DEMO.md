@@ -69,12 +69,12 @@ let data = [10, 20, 30]
 let cursor1 = stream::observe(data)
 let cursor2 = stream::observe(data)
 
-cursor1::position(cursor1)  // => 0
-cursor2::position(cursor2)  // => 0 (independent cursor)
+cursor::position(cursor1)  // => 0
+cursor::position(cursor2)  // => 0 (independent cursor)
 
 let advanced = cursor::advance(cursor1, 1)
-cursor1::position(advanced)   // => 1
-cursor2::position(cursor2)   // => 0 (unchanged)
+cursor::position(advanced)   // => 1
+cursor::position(cursor2)   // => 0 (unchanged)
 ```
 
 ### 9. Grammar Application (Pattern Matching)

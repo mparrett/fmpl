@@ -136,6 +136,33 @@ let y = ::foo::bar::baz
 
 ---
 
+### Issue 5: Newlines Don't Terminate Expressions — `[` Continues as Indexing
+
+**Status**: DOCUMENTED (2026-07-21, discovered by the doctest harness)
+**Impact**: MEDIUM - Affects multi-statement scripts; invisible in the REPL
+
+**Description**: The parser is newline-insensitive, so a `[` opening a new line
+is parsed as an *index* of the preceding expression, not a new list literal.
+The REPL evaluates line-at-a-time and never hits this; scripts and whole-block
+`eval` do.
+
+```fmpl
+[1, 2, 3]
+["a", "b"]   -- parse error: parsed as [1, 2, 3]["a", "b"]
+```
+
+**Workaround**: terminate the earlier statement with `;`:
+
+```fmpl
+[1, 2, 3];
+["a", "b"]   -- two separate list expressions
+```
+
+A trailing `;` preserves the expression's value. Any change to make newlines
+statement-significant is a language design decision (not planned).
+
+---
+
 ## Migration Guide
 
 ### For Library Code Authors

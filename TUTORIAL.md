@@ -125,10 +125,11 @@ concatenation uses `+` and requires both operands to be strings — a mixed
 ### Lists
 
 ```fmpl
--- List literals
-[1, 2, 3]
-["apple", "banana", "cherry"]
-[1, "mixed", true]
+-- List literals (`;` separates consecutive expressions — a `[` opening a
+-- new line would otherwise be read as indexing the previous expression)
+[1, 2, 3];
+["apple", "banana", "cherry"];
+[1, "mixed", true];
 
 -- Empty list
 []
@@ -434,7 +435,7 @@ addc(3)(4)          -- 7
 let apply_twice = \f, x f(f(x))
 let add_one = \x x + 1
 
-apply_twice(add_one, 5)
+apply_twice(add_one, 5);
 -- Returns: 7
 
 -- Built-in higher-order list methods
@@ -501,8 +502,8 @@ first element is a symbol (DESIGN-002, the single canonical list form):
 
 ```fmpl
 -- Create tagged values
-[:Int, 42]
-[:Binary, :+, [:Int, 1], [:Int, 2]]
+[:Int, 42];
+[:Binary, :+, [:Int, 1], [:Int, 2]];
 [:User, "alice", %{active: true}]
 
 -- Pattern match on tagged values (bare identifiers bind in tagged patterns)
@@ -615,6 +616,7 @@ parsed @ {
 
 ### Example 2: HTTP Requests with Tool Calling
 
+<!-- fmpl-doctest: skip -->
 ```fmpl
 -- Make HTTP GET request using the curl builtin (requires network)
 let response = curl.get("https://api.example.com/data")
@@ -632,6 +634,7 @@ data @ {
 
 ### Example 3: Building a Simple Agent Loop
 
+<!-- fmpl-doctest: skip -->
 ```fmpl
 -- Dispatch tool calls by binding the tool name and guarding on it
 let handle_tool_call = \tc tc @ {
@@ -661,6 +664,7 @@ shared plumbing in `lib/llm-common.fmpl`.
 
 ### The Agent Loop
 
+<!-- fmpl-doctest: skip -->
 ```fmpl
 -- 1. User sends message
 let user_message = "What's the weather in NYC?"
@@ -677,7 +681,7 @@ llm_response @ { %{tool: _:t, args: _:a} when t == "curl.get" => curl.get(a.url)
 The same shape extends to a recursive agent loop (sketch — `llm_complete` and
 `execute_tool` stand in for your LLM client and tool registry):
 
-```fmpl
+```fmpl-sketch
 let agent_turn = \input, history
   llm_complete(%{history: history, input: input}) @ {
     %{tool: _:t, args: _:a} => agent_turn(execute_tool(t, a), history);
@@ -699,7 +703,7 @@ This is the project's north star, not yet a working feature — the sketch
 below shows the intended shape (see
 `docs/plans/2026-01-19-unified-grammars-and-agents-design.md`):
 
-```fmpl
+```fmpl-sketch
 grammar ToolAgent <: base::tree {
   -- Main loop: process messages
   turn = message:m => {
@@ -730,7 +734,7 @@ FMPL's engine supports **durable state** via Fjall (embedded key-value
 store) — see `specs/persistence.md`. Language-level checkpoint/resume
 builtins are designed but not yet exposed:
 
-```fmpl
+```fmpl-sketch
 -- Design sketch (not yet implemented as builtins)
 checkpoint("stage_name", data)
 resume_from(saved_checkpoint)
