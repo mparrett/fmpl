@@ -1168,6 +1168,24 @@ macro_rules! trace_exit {
                 code.push_str(GRAMMAR_HELPERS);
                 code.push('\n');
 
+                // Emit rules in name order. The rules list arrives in
+                // Value::Map iteration order (HashMap — random per process),
+                // which made repeated generator runs produce differently-
+                // ordered output and fail build.rs's determinism check.
+                // Function definition order is semantically irrelevant in
+                // Rust; sorting fixes the byte-stability. Sorting BEFORE
+                // transpiling also keeps the shared temp-var counter
+                // deterministic.
+                let mut rules = rules;
+                rules.sort_by_key(|rule| {
+                    self.extract_tag_children(rule)
+                        .and_then(|(_, children)| match children.first() {
+                            Some(Value::Symbol(name)) => Some(name.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default()
+                });
+
                 for rule in rules {
                     if let Some((rule_tag, rule_children)) = self.extract_tag_children(&rule)
                         && rule_tag.as_str() == "ParseRuleDef" && rule_children.len() >= 2 {

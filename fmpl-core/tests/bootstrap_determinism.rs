@@ -67,7 +67,6 @@ fn cd_workspace() {
 }
 
 #[test]
-#[ignore = "fmpl-bootstrap parser generation is currently non-deterministic across runs"]
 fn parser_generation_is_deterministic_across_runs() {
     let first = run_bootstrap_generator();
     let second = run_bootstrap_generator();
@@ -85,7 +84,7 @@ fn parser_generation_is_deterministic_across_runs() {
 }
 
 #[test]
-#[ignore = "Generated parser regression — see bootstrap_determinism.rs. Run with FMPL_USE_GENERATED_PARSER=1 once bootstrap is fixed."]
+#[ignore = "generated parser can't yet parse ast_to_ir.fmpl ('negative lookahead matched') — metacircular parser gap, see docs/known-gaps.md"]
 fn ast_to_ir_loads_through_generated_parser() {
     cd_workspace();
     // SAFETY: this test is #[ignore]d and won't race in default test runs.
