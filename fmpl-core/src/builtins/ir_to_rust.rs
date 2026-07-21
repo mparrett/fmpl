@@ -116,17 +116,20 @@ fn float_parse(s: Value) -> Value {
     }
 }
 
-/// Fold a list with a native Rust closure
-fn fold<F: Fn(Value, Value) -> Value>(f: F, init: Value, list: Value) -> Value {
+/// Fold a list with a native Rust closure.
+/// Result-aware: the closure can fail (e.g. integer overflow while
+/// accumulating digits), and that error propagates to the parse function
+/// instead of panicking.
+fn fold<F: Fn(Value, Value) -> std::result::Result<Value, Error>>(f: F, init: Value, list: Value) -> std::result::Result<Value, Error> {
     match list {
         Value::List(items) => {
             let mut acc = init;
             for item in items.as_ref() {
-                acc = f(acc, item.clone());
+                acc = f(acc, item.clone())?;
             }
-            acc
+            Ok(acc)
         }
-        _ => init,
+        _ => Ok(init),
     }
 }
 
@@ -507,7 +510,19 @@ impl IrToRust {
             .collect::<Vec<_>>()
             .join(", ");
 
-        Ok(format!("|{}| {{ {} }}", params_str, body))
+        // Grammar mode: the closure returns Result so `?` on arithmetic in
+        // the body (e.g. digit accumulation overflowing i64) propagates
+        // instead of panicking; fold() in GRAMMAR_HELPERS is Result-aware.
+        if self.is_grammar_mode {
+            // Fully qualified: the generated file is included into parser.rs,
+            // where `Result` is the crate's one-argument alias.
+            Ok(format!(
+                "|{}| -> std::result::Result<Value, Error> {{ Ok({}) }}",
+                params_str, body
+            ))
+        } else {
+            Ok(format!("|{}| {{ {} }}", params_str, body))
+        }
     }
 
     fn transpile_tagged(&mut self, tag: &str, children: &[Value]) -> Result<String> {
@@ -562,10 +577,14 @@ impl IrToRust {
             "Add" => {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
-                // In grammar mode, add() returns Result<Value> so we unwrap
-                // In standalone mode, RUNTIME_PRELUDE's add() returns Value directly
+                // In grammar mode, add() returns Result<Value>; `?` propagates
+                // arithmetic errors (e.g. i64 overflow) out of the generated
+                // parse function instead of panicking. Every grammar-mode
+                // context is Result-typed: parse functions return ParseResult
+                // and action lambdas are emitted as Result-returning closures.
+                // In standalone mode, RUNTIME_PRELUDE's add() returns Value directly.
                 if self.is_grammar_mode {
-                    Ok(format!("({}).add(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).add(&({}))?", lhs, rhs))
                 } else {
                     Ok(format!("({}).add(&{})", lhs, rhs))
                 }
@@ -575,7 +594,7 @@ impl IrToRust {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).sub(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).sub(&({}))?", lhs, rhs))
                 } else {
                     Ok(format!("({}).sub(&{})", lhs, rhs))
                 }
@@ -585,7 +604,7 @@ impl IrToRust {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).mul(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).mul(&({}))?", lhs, rhs))
                 } else {
                     Ok(format!("({}).mul(&{})", lhs, rhs))
                 }
@@ -595,7 +614,7 @@ impl IrToRust {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).div(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).div(&({}))?", lhs, rhs))
                 } else {
                     Ok(format!("({}).div(&{})", lhs, rhs))
                 }
@@ -605,7 +624,7 @@ impl IrToRust {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).modulo(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).modulo(&({}))?", lhs, rhs))
                 } else {
                     Ok(format!("({}).modulo(&{})", lhs, rhs))
                 }
@@ -614,7 +633,7 @@ impl IrToRust {
             "Neg" => {
                 let operand = self.transpile_ir(&children[0])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).neg().unwrap()", operand))
+                    Ok(format!("({}).neg()?", operand))
                 } else {
                     Ok(format!("({}).neg()", operand))
                 }
@@ -641,9 +660,9 @@ impl IrToRust {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).lt(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).lt(&({}))?", lhs, rhs))
                 } else {
-                    Ok(format!("({}).lt(&({})", lhs, rhs))
+                    Ok(format!("({}).lt(&({}))", lhs, rhs))
                 }
             }
 
@@ -651,9 +670,9 @@ impl IrToRust {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).gt(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).gt(&({}))?", lhs, rhs))
                 } else {
-                    Ok(format!("({}).gt(&({})", lhs, rhs))
+                    Ok(format!("({}).gt(&({}))", lhs, rhs))
                 }
             }
 
@@ -661,9 +680,9 @@ impl IrToRust {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).le(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).le(&({}))?", lhs, rhs))
                 } else {
-                    Ok(format!("({}).le(&({})", lhs, rhs))
+                    Ok(format!("({}).le(&({}))", lhs, rhs))
                 }
             }
 
@@ -671,9 +690,9 @@ impl IrToRust {
                 let lhs = self.transpile_ir(&children[0])?;
                 let rhs = self.transpile_ir(&children[1])?;
                 if self.is_grammar_mode {
-                    Ok(format!("({}).ge(&({})).unwrap()", lhs, rhs))
+                    Ok(format!("({}).ge(&({}))?", lhs, rhs))
                 } else {
-                    Ok(format!("({}).ge(&({})", lhs, rhs))
+                    Ok(format!("({}).ge(&({}))", lhs, rhs))
                 }
             }
 
@@ -788,14 +807,17 @@ impl IrToRust {
                                     return Ok(format!("fold_pipe_at({}, {})", arg_strs[0], arg_strs[1]));
                                 }
                                 "reduce" | "fold" if args.len() == 3 => {
+                                    // Grammar mode: fold() returns Result (its closure can fail
+                                    // on arithmetic), so the call site needs `?`.
+                                    let try_op = if self.is_grammar_mode { "?" } else { "" };
                                     // For fold/reduce, if the first arg is a Lambda, generate a native Rust closure
                                     if let Some((lambda_tag, lambda_children)) = self.extract_tag_children(&args[0])
                                         && lambda_tag.as_str() == "Lambda" && lambda_children.len() >= 2 {
                                             let closure = self.transpile_lambda_as_closure(&lambda_children[0], &lambda_children[1])?;
-                                            return Ok(format!("fold({}, {}, {})", closure, arg_strs[1], arg_strs[2]));
+                                            return Ok(format!("fold({}, {}, {}){}", closure, arg_strs[1], arg_strs[2], try_op));
                                         }
                                     // Fallback for non-lambda first arg
-                                    return Ok(format!("fold({}, {}, {})", arg_strs[0], arg_strs[1], arg_strs[2]));
+                                    return Ok(format!("fold({}, {}, {}){}", arg_strs[0], arg_strs[1], arg_strs[2], try_op));
                                 }
                                 _ => {}
                             }
@@ -970,14 +992,18 @@ impl IrToRust {
                 code.push_str("{\n    let start_pos = pos;\n");
 
                 // Generate chained alternatives
-                // Each alternative is wrapped in a closure to capture its internal early returns
+                // Each alternative is wrapped in a closure to capture its internal early returns.
+                // Only Error::Parser (a normal match failure) falls through to the next
+                // alternative; runtime errors from semantic actions (e.g. integer overflow)
+                // propagate, matching the interpreted grammar runtime where evaluate_action
+                // errors are hard errors, not backtrackable failures.
                 for (i, item) in items.iter().enumerate() {
                     let item_code = self.transpile_ir(item)?;
 
                     if i == 0 {
                         code.push_str(&format!("    let mut choice_result = (|| {{ let pos = start_pos; {} }})();\n", item_code));
                     } else {
-                        code.push_str(&format!("    if choice_result.is_err() {{\n        choice_result = (|| {{ let pos = start_pos; {} }})();\n    }}\n", item_code));
+                        code.push_str(&format!("    if matches!(choice_result, Err(Error::Parser {{ .. }})) {{\n        choice_result = (|| {{ let pos = start_pos; {} }})();\n    }}\n", item_code));
                     }
                 }
 
@@ -987,40 +1013,44 @@ impl IrToRust {
 
             // :ParseStar(ir) - zero or more repetitions
             // Inner is wrapped in closure so 'return' doesn't escape
+            // Only Error::Parser ends the repetition; runtime errors propagate (see ParseChoice)
             // Note: Like the grammar runtime, if all results are strings, join them (but not if empty)
             "ParseStar" => {
                 let inner = self.transpile_ir(&children[0])?;
                 Ok(format!(
-                    "{{\n    let mut results: Vec<Value> = Vec::new();\n    let mut current_pos = pos;\n    loop {{\n        match (|| {{ let pos = current_pos; {} }})() {{\n            Ok((v, new_pos)) => {{\n                if new_pos == current_pos {{ break; }}\n                results.push(v);\n                current_pos = new_pos;\n            }}\n            Err(_) => break,\n        }}\n    }}\n    // Auto-join strings like the grammar runtime does (but keep empty list as list)\n    let result = if !results.is_empty() && results.iter().all(|v| matches!(v, Value::String(_))) {{\n        let s: String = results.iter().filter_map(|v| if let Value::String(s) = v {{ Some(s.as_str()) }} else {{ None }}).collect();\n        Value::String(SmolStr::new(&s))\n    }} else {{\n        Value::List(Arc::new(results))\n    }};\n    Ok::<_, Error>((result, current_pos))\n}}",
+                    "{{\n    let mut results: Vec<Value> = Vec::new();\n    let mut current_pos = pos;\n    loop {{\n        match (|| {{ let pos = current_pos; {} }})() {{\n            Ok((v, new_pos)) => {{\n                if new_pos == current_pos {{ break; }}\n                results.push(v);\n                current_pos = new_pos;\n            }}\n            Err(Error::Parser {{ .. }}) => break,\n            Err(e) => return Err(e),\n        }}\n    }}\n    // Auto-join strings like the grammar runtime does (but keep empty list as list)\n    let result = if !results.is_empty() && results.iter().all(|v| matches!(v, Value::String(_))) {{\n        let s: String = results.iter().filter_map(|v| if let Value::String(s) = v {{ Some(s.as_str()) }} else {{ None }}).collect();\n        Value::String(SmolStr::new(&s))\n    }} else {{\n        Value::List(Arc::new(results))\n    }};\n    Ok::<_, Error>((result, current_pos))\n}}",
                     inner
                 ))
             }
 
             // :ParsePlus(ir) - one or more repetitions
             // Inner is wrapped in closure so 'return' doesn't escape
+            // Only Error::Parser ends the repetition; runtime errors propagate (see ParseChoice)
             // Note: Like the grammar runtime, if all results are strings, join them
             "ParsePlus" => {
                 let inner = self.transpile_ir(&children[0])?;
                 Ok(format!(
-                    "{{\n    let mut results: Vec<Value> = Vec::new();\n    let mut current_pos = pos;\n    match (|| {{ let pos = current_pos; {} }})() {{\n        Ok((v, new_pos)) => {{\n            results.push(v);\n            current_pos = new_pos;\n        }}\n        Err(e) => return Err(e),\n    }}\n    loop {{\n        match (|| {{ let pos = current_pos; {} }})() {{\n            Ok((v, new_pos)) => {{\n                if new_pos == current_pos {{ break; }}\n                results.push(v);\n                current_pos = new_pos;\n            }}\n            Err(_) => break,\n        }}\n    }}\n    // Auto-join strings like the grammar runtime does\n    let result = if results.iter().all(|v| matches!(v, Value::String(_))) {{\n        let s: String = results.iter().filter_map(|v| if let Value::String(s) = v {{ Some(s.as_str()) }} else {{ None }}).collect();\n        Value::String(SmolStr::new(&s))\n    }} else {{\n        Value::List(Arc::new(results))\n    }};\n    Ok::<_, Error>((result, current_pos))\n}}",
+                    "{{\n    let mut results: Vec<Value> = Vec::new();\n    let mut current_pos = pos;\n    match (|| {{ let pos = current_pos; {} }})() {{\n        Ok((v, new_pos)) => {{\n            results.push(v);\n            current_pos = new_pos;\n        }}\n        Err(e) => return Err(e),\n    }}\n    loop {{\n        match (|| {{ let pos = current_pos; {} }})() {{\n            Ok((v, new_pos)) => {{\n                if new_pos == current_pos {{ break; }}\n                results.push(v);\n                current_pos = new_pos;\n            }}\n            Err(Error::Parser {{ .. }}) => break,\n            Err(e) => return Err(e),\n        }}\n    }}\n    // Auto-join strings like the grammar runtime does\n    let result = if results.iter().all(|v| matches!(v, Value::String(_))) {{\n        let s: String = results.iter().filter_map(|v| if let Value::String(s) = v {{ Some(s.as_str()) }} else {{ None }}).collect();\n        Value::String(SmolStr::new(&s))\n    }} else {{\n        Value::List(Arc::new(results))\n    }};\n    Ok::<_, Error>((result, current_pos))\n}}",
                     inner, inner
                 ))
             }
 
             // :ParseOptional(ir) - zero or one
+            // Only Error::Parser means "absent"; runtime errors propagate (see ParseChoice)
             "ParseOptional" => {
                 let inner = self.transpile_ir(&children[0])?;
                 Ok(format!(
-                    "match {{ let pos = pos; {} }} {{ Ok((v, new_pos)) => Ok((v, new_pos)), Err(_) => Ok((Value::Null, pos)) }}",
+                    "match {{ let pos = pos; {} }} {{ Ok((v, new_pos)) => Ok((v, new_pos)), Err(Error::Parser {{ .. }}) => Ok((Value::Null, pos)), Err(e) => Err(e) }}",
                     inner
                 ))
             }
 
             // :ParseNot(ir) - negative lookahead
+            // Only Error::Parser counts as "did not match"; runtime errors propagate (see ParseChoice)
             "ParseNot" => {
                 let inner = self.transpile_ir(&children[0])?;
                 Ok(format!(
-                    "match {{ let pos = pos; {} }} {{ Ok(_) => Err(Error::Parser {{ token: pos, message: \"negative lookahead matched\".to_string() }}), Err(_) => Ok((Value::Null, pos)) }}",
+                    "match {{ let pos = pos; {} }} {{ Ok(_) => Err(Error::Parser {{ token: pos, message: \"negative lookahead matched\".to_string() }}), Err(Error::Parser {{ .. }}) => Ok((Value::Null, pos)), Err(e) => Err(e) }}",
                     inner
                 ))
             }

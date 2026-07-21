@@ -80,6 +80,15 @@
 //!   from `pat_symbol` consuming `:Pair` and the trailing `(` being unexpected.
 //!   The change is a postlude raw-string edit, which the bump policy lists as
 //!   a trigger.
+//! - 6 — rehab follow-up (2026-07-20). Error propagation through generated
+//!   grammar actions: arithmetic/comparison ops in grammar mode emit `?`
+//!   instead of `.unwrap()` (an i64-overflowing literal is now a clean
+//!   `Error::Runtime`, not a panic), `fold` in GRAMMAR_HELPERS became
+//!   Result-aware with Result-returning action closures, and backtracking
+//!   combinators (choice/star/plus/optional/not) only swallow
+//!   `Error::Parser` — runtime errors propagate, matching the interpreted
+//!   grammar runtime. Helper-signature + emitted-source changes, both bump
+//!   triggers.
 
 /// Parser-generator epoch. See module-level docs for the bump policy.
-pub const PARSER_EPOCH: u32 = 5;
+pub const PARSER_EPOCH: u32 = 6;

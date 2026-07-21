@@ -225,3 +225,30 @@ fn parity_ast_canonical_list_form() {
         "source-tree and canonical produced different ASTs for `{source}`:\n  source-tree: {st:?}\n  canonical:   {cn:?}"
     );
 }
+
+/// An integer literal that overflows i64 must be rejected cleanly by BOTH
+/// parsers — no panic. The source-tree parser rejects it in the lexer
+/// (logos fails to produce an i64 token); the canonical parser's digit-fold
+/// action (`acc * 10 + d`) hits checked arithmetic, and the generated
+/// grammar machinery propagates that as `Error::Runtime` instead of
+/// unwrapping (the pre-epoch-6 codegen panicked here — rehab Tier 4 #16).
+#[test]
+fn parity_rejects_i64_overflowing_int_literal() {
+    let source = "99999999999999999999999";
+
+    let st = parse_source_tree(source);
+    assert!(
+        st.is_err(),
+        "source-tree parser accepted an i64-overflowing literal: {st:?}"
+    );
+
+    let cn = generated_parse(source);
+    let err = match cn {
+        Err(e) => e.to_string(),
+        Ok(ast) => panic!("canonical parser accepted an i64-overflowing literal: {ast:?}"),
+    };
+    assert!(
+        err.contains("overflow"),
+        "canonical parser error should surface the arithmetic overflow, got: {err}"
+    );
+}
