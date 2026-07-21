@@ -1,5 +1,8 @@
 # AGENTS.md
 
+Workflow rules and gotchas for working in this repo. Codebase inventory,
+key-file locations, and doc pointers live in [`DEV.md`](DEV.md).
+
 ## Design Principles (read first)
 
 Durable invariants live in [`docs/design-principles.md`](docs/design-principles.md).
@@ -10,197 +13,89 @@ single canonical list-form for structured data (DESIGN-002), symbols for type
 names (DESIGN-003), tree-based IR with named temporaries (DESIGN-004), grammar
 inheritance deferred (DESIGN-005).
 
-## Project Overview
+## Orientation
 
-FMPL is a streaming-first DSL for building AI agents with grammars, capabilities, and durable state. It features:
+FMPL is a streaming-first DSL for AI agents: prototype objects, OMeta-style
+PEG grammars, pattern matching via `@`, and an Indexed RPN bytecode VM.
 
-- **Prototype-based objects** with Goblins-inspired patterns (spawn, facets, bcom)
-- **OMeta-style PEG grammars** with inheritance and memoization for parsing any stream (text, bytes, objects)
-- **Indexed RPN bytecode VM** with async support (`<-` operator, streams)
-- **Fjall-backed persistence** for live image and streaming overflow
-- **Pattern matching via `@` operator** for parsing and data transformation
-
-**Historical note**: FMPL ("of Accardi") originated as a prototype-based OOP language developed at the Experimental Computing Facility (XCF) of UC Berkeley in 1992. This repository builds on that foundation with modern streaming and agent capabilities.
-
-## Architecture
-
-**Rust workspace** with 6 crates:
-
-- `fmpl-core/` — Lexer, parser, compiler, bytecode VM, object system, grammar engine
-  - `builtins/` — 16 builtin modules (ast, ir, io, curl, grammar_to_ir, ir_to_rust, human, etc.)
-  - `grammar/` — OMeta-style PEG engine (parser, runtime, optimizer, trampoline, incremental)
-  - `instructions/` — Bytecode instruction definitions (arithmetic, control_flow, functions, objects)
-  - `pattern/` — Pattern matching implementation
-  - `vm_internal/` — VM internals (frame, parse_state)
-- `fmpl-cli/` — REPL with rustyline history
-- `fmpl-web/` — Axum server with HTMX frontend, per-user sessions, approval queue, storylet system
-- `fmpl-tui/` — Ratatui TUI with DAG-based conversation management (Ctrl+L for chat mode)
-- `fmpl-bootstrap/` — Minimal interpreter for build-time parser generation (avoids circular deps)
-- `benches/` — Performance benchmarks (pattern matching, VM comparison)
-
-**FMPL standard library** (`lib/`):
-
-- `lib/core/` — Compiler pipeline modules written in FMPL
-  - `prelude.fmpl` — Standard library prelude
-  - `ast_to_ir.fmpl` — AST→IR tree grammar transformer
-  - `fmpl_parser.fmpl` — Metacircular FMPL parser
-  - `parser_generator.fmpl`, `grammar_optimizer.fmpl`, `ast_optimizer.fmpl`
-  - `ir_to_rust.fmpl`, `ir_to_execution_tape.fmpl` — Backend code generators
-- `lib/anthropic.fmpl` — Claude API client (requires `ANTHROPIC_API_KEY`)
-- `lib/ollama.fmpl` — Ollama local LLM client
-- `lib/llm-common.fmpl` — Shared LLM utilities
-- `lib/rlm.fmpl` — Reinforcement learning module
-- `lib/json.fmpl`, `lib/yaml.fmpl` — Format parsers in FMPL
-
-**Core flow**: Source → Lexer (logos) → Parser (recursive descent) → AST → Compiler → Indexed RPN bytecode → VM execution
-
-**Bootstrap pipeline**: `ast::parse(source)` → `ast @ ast_to_ir.expr` → `ir::compile(ir)` → `code::eval(code)` — the FMPL-in-FMPL compilation pipeline being built toward self-hosting
-
-## Development Conventions
-
-### Quality Gates
-
-- **TDD**: Write tests first, then implementation. In green mode, don't fix failing tests by changing the test.
-- **DRY, KISS, YAGNI**: Don't over-engineer. Only implement what's needed now.
-- **Green build is a precondition, not a postcondition.** If tests are failing when you start, fixing them is your first task. There is no such thing as a "pre-existing" failure — if it's failing, it's your problem.
-- **cargo test must pass before commit**. Run full suite once before commit; targeted tests during development.
-- **cargo clippy must pass before commit with zero warnings**. Run clippy workspace-wide (`cargo clippy`), never on individual test files (`--test`). Apply all suggestions. Zero warnings required — including build-script warnings, dead code, unused fields. If you need `#[allow(...)]`, add it at the file top with a comment explaining why.
-- **Zero warnings**: There MUST be no warnings while building.
-
-### Rust Development
-
-- Always run `cargo clippy` after implementation changes to catch warnings before committing
-- When working with unfamiliar Rust crate APIs (e.g., Fjall, tower-sessions, Axum extractors), read the actual docs or source first rather than guessing the API shape
-- If a dependency API doesn't work after 2 attempts, use `Read` to check the actual type signatures in the dependency source under the cargo registry or target directory
-
-### Documentation Conventions
-
-- Discoveries during implementation that need fixing → document in `specs/` directory.
-- Design decisions → `docs/` directory.
-- Build/implementation instructions → `AGENTS.md` (this file). Don't pollute with design decisions.
-- Specs should be clear, concise, < 200 lines. Break large specs into a directory with subspecs.
-
-## Version Control (jj)
-
-- When using `jj`, describe the current working copy change with `jj describe -m "message"` instead of `jj new -m "message"` (which creates an empty new change)
-- After `jj commit` or `jj describe`, the working copy will show as modified — this is normal jj behavior, not an error
-- When committing, ensure changes are properly separated: check `jj diff` before committing to avoid mixing unrelated changes across commits
-- To split commits: use `jj split` rather than trying manual workarounds
+- **Core flow**: Source → Lexer (logos) → Parser → AST → Compiler → Indexed RPN bytecode → VM
+- **Bootstrap pipeline**: `ast::parse(source)` → `ast @ ast_to_ir.expr` → `ir::compile(ir)` → `code::eval(code)` — the FMPL-in-FMPL path being built toward self-hosting
+- Current limitations are tracked in [`docs/known-gaps.md`](docs/known-gaps.md), grouped by root cause.
 
 ## Build & Test
 
 ```bash
-cargo build                      # Build all crates
-cargo test                       # Run all tests
-cargo test -p fmpl-core <name>   # Run specific test (e.g., tool_calling, apply_operator)
-cargo run -p fmpl-cli            # Launch REPL
-cargo run -p fmpl-web            # Launch web server (port 3000)
-cargo run -p fmpl-tui            # Launch TUI (Ctrl+L for LLM chat)
+just build                       # REQUIRED build: bootstraps the FMPL-generated parser, then builds
+just test                        # full suite with the canonical parser active
+cargo test -p fmpl-core <name>   # targeted test during development
+just repl                        # REPL (dot-prefixed commands: .help, .quit)
+just web                         # web server (port 3000)
+just tui                         # TUI (Ctrl+L for LLM chat)
 ```
 
-### Test Organization
+- **Plain `cargo build` silently uses the Rust *fallback* parser**, not the
+  canonical FMPL-generated one. Use `just build` (or run the two bootstrap
+  steps in README). `canonical_pipeline_parity` fails loudly if the fallback
+  is active.
+- Changing parser codegen (`ir_to_rust.rs`) or anything the generated parser
+  embeds? Read the bump policy in `fmpl-core/src/parser_epoch.rs` and bump
+  `PARSER_EPOCH`.
+- Feature flags: `fjall-persistence` (durable storage), `trampolined-grammar`
+  (bounded stack), `cross_compile` (dormant — needs the external
+  `execution_tape` crate, see Cargo.toml comments).
+- Test helpers: `eval(&mut vm, source)` for VM tests, `parse(source)` for
+  parser tests; `wiremock` for async HTTP tests (see `tests/async_curl.rs`).
 
-- **Unit tests**: Inline in source files (`#[cfg(test)] mod tests`)
-- **Integration tests**: `fmpl-core/tests/` — 60+ test files covering parser, compiler, VM, grammar, streaming, async, objects, patterns, tool calling
-- **Parity tests**: `fmpl-core/tests/ast_to_ir_parity.rs` — Verifies FMPL bootstrap pipeline produces identical results to Rust compiler
-- **Test helpers**: Use `eval(&mut vm, source)` for VM tests, `parse(source)` for parser tests
-- **Mock HTTP**: Use `wiremock` for async HTTP tests (see `fmpl-core/tests/async_curl.rs`)
-- **Always run tests after changes**: `cargo test -p fmpl-core`
+## Quality Gates
 
-### Feature Flags
+- **TDD**: write tests first. Don't fix failing tests by changing the test.
+- **Green build is a precondition, not a postcondition.** If tests fail when
+  you start, fixing them is your first task — there is no "pre-existing" failure.
+- **`just test` must pass before commit**; full suite once before commit,
+  targeted tests during development.
+- **clippy: zero warnings, workspace-wide** (`cargo clippy --workspace --all-targets`),
+  never on individual test files (`--test`). Includes build-script warnings,
+  dead code, unused fields. If you need `#[allow(...)]`, put it at file top
+  with a comment explaining why.
+- **CI runs the latest stable toolchain.** Keep local rust current
+  (`rustup update stable`) — a locally-clean clippy on an older toolchain is
+  not proof of a green CI.
+- DRY, KISS, YAGNI: only implement what's needed now.
 
-- `fjall-persistence` — Enable Fjall-backed durable storage (optional)
-- `trampolined-grammar` — Bounded stack usage for grammar evaluation
-- `cross_compile` — Cross-compilation to execution_tape (disabled by default)
+## Critical Patterns & Gotchas
 
-## Critical Patterns
+- **Indexed RPN, not a stack machine**: each instruction stores its result in
+  `values[ip]`; operands are `InstrIndex` references to earlier results, never
+  immediate values (`Add { lhs: InstrIndex(5), rhs: InstrIndex(7) }`). See
+  `fmpl-core/src/vm.rs`.
+- **Grammars in FMPL, not Rust** (DESIGN-001): parsers are written in FMPL via
+  the grammar system. Rust builtins are only for low-level I/O, external
+  interfaces, and performance-critical primitives.
+- **Parser changes go to BOTH parsers**: `fmpl-core/src/parser.rs` (fallback)
+  and `lib/core/fmpl_parser.fmpl` (canonical) describe the same language.
+- **Strings/memory**: `SmolStr` for identifiers and small strings, `Arc<T>`
+  for shared data, `rkyv` for zero-copy serialization, `serde_json` for
+  external JSON I/O. Errors are `thiserror` enums returning `Result<T>`.
+- **`docs/behavior-scenarios.md` is a build input** — fmpl-core's build.rs
+  generates the scenario test suite from it; don't move it without updating
+  the path refs.
+- When a dependency API doesn't work after 2 attempts, read the actual source
+  under the cargo registry instead of guessing.
 
-### 1. Indexed RPN Execution (NOT stack-based)
+## Documentation Conventions
 
-The VM uses **Indexed RPN**: each instruction stores its result in `values[ip]`, operands reference results by instruction index. See `fmpl-core/src/vm.rs`.
+- Discoveries during implementation that need fixing → `specs/`
+- Design decisions → `docs/`
+- Build/workflow rules and gotchas → `AGENTS.md` (this file); codebase
+  inventory and pointers → `DEV.md`. Don't pollute either with design decisions.
+- Specs should be clear, concise, < 200 lines; break large specs into a
+  directory with subspecs.
 
-```rust
-// WRONG: Traditional stack-based thinking
-// RIGHT: Operands are InstrIndex, results stored at IP
-Frame { values: Vec<Value>, ip: usize }
+## Version Control (jj)
 
-// Instructions reference operands by index:
-Add { lhs: InstrIndex(5), rhs: InstrIndex(7) }  // Add results from instructions 5 and 7
-```
-
-When adding instructions, operands MUST be `InstrIndex` references to previous results, not immediate values.
-
-### 2. Grammars in FMPL, Not Rust
-
-Parsers should be written in FMPL using the grammar system, not hardcoded in Rust. Use Rust builtins only for low-level I/O, external system interfaces, and performance-critical primitives. See `docs/design/language-guide.md` for language features and `specs/grammar-system.md` for grammar implementation details.
-
-### 3. String and Memory Management
-
-- **Use `SmolStr`** for identifiers and small strings (< 23 bytes, stack-allocated)
-- **Use `Arc<T>`** for shared data (lists, maps, compiled code)
-- **Use `rkyv`** for zero-copy serialization (bytecode, persistence)
-- **Use `serde_json`** for JSON I/O with external systems
-
-### 4. Error Handling Patterns
-
-Use `thiserror` for error types, `Result<T>` returns:
-
-```rust
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("Parse failed at {position}: {message}")]
-    ParseFailed { position: usize, message: String },
-}
-```
-
-All integration tests use `run(code).expect("runtime error")` or `map_err(|e| e.to_string())`.
-
-## Key Files Reference
-
-- `fmpl.ebnf` — Language grammar (reference only, not used by parser)
-- `fmpl-core/src/ast.rs` — AST node definitions (`QualifiedName`, `Expr`, `Pattern`)
-- `fmpl-core/src/compiler.rs` — AST → Indexed RPN bytecode compilation
-- `fmpl-core/src/vm.rs` — Indexed RPN VM execution with async support
-- `fmpl-core/src/value.rs` — Runtime value enum (`Int`, `String`, `Map`, `AsyncStream`, etc.)
-- `fmpl-core/src/grammar/mod.rs` — OMeta-style PEG grammar system entry point
-- `fmpl-core/src/grammar/runtime.rs` — Grammar pattern matching engine (TagMatch, ListMatch, Repeat)
-- `fmpl-core/src/grammar/optimizer.rs` — Grammar optimization (first-set computation)
-- `fmpl-core/src/builtins/ir.rs` — `ir::compile` builtin (IR tagged values → bytecode)
-- `fmpl-core/src/builtins/ast.rs` — `ast::parse` builtin (source → AST tagged values)
-- `fmpl-core/src/ir_builder.rs` — IR construction utilities
-- `fmpl-core/src/error.rs` — Unified error types with `thiserror`
-- `fmpl-core/src/object.rs` — Prototype-based object system (spawn, facets)
-- `lib/core/prelude.fmpl` — Standard library prelude
-- `lib/core/ast_to_ir.fmpl` — FMPL-in-FMPL AST→IR tree grammar
-- `lib/core/fmpl_parser.fmpl` — Metacircular FMPL parser
-- `lib/anthropic.fmpl` — Claude API client (requires `ANTHROPIC_API_KEY`)
-- `lib/ollama.fmpl` — Ollama local LLM client
-
-## Design Documentation
-
-- `docs/STANDARDS.md` — **Documentation standards** for design docs, implementation plans, and specs
-- `specs/README.md` — Spec index and crate overview
-- `docs/design/language-guide.md` — DSL concepts and examples
-- `docs/plans/2026-01-19-unified-grammars-and-agents-design.md` — `@` operator unification
-- `specs/grammar-system.md` — PEG grammar implementation details
-- `specs/indexed-rpn-conversion.md` — Indexed RPN design rationale
-- `specs/persistence.md` — Fjall-backed storage and continuations
-
-## Codebase Discovery Docs
-
-`docs/codebase/` contains consolidated implementation patterns discovered during development.
-**Read these before exploring the codebase** — they save significant research time.
-
-- `docs/codebase/fjall-persistence-patterns.md` — Save/load patterns, serde serialization, keyspace layout, test setup
-
-## Current Limitations (Mar 2026)
-
-- **Bootstrap pipeline**: `ast_to_ir.fmpl` handles core expressions but several AST node types still produce incorrect IR (lists, lambdas, maps, sequences, match, for, while, try/catch, pipe, slice, block). 21 parity tests track progress.
-- **Recursive let bindings**: Lambda self-reference requires special handling (e.g., `let rec` in ML or Y combinator pattern)
-- Object system persistence not fully integrated with Fjall backend
-
-## Language & REPL Reference
-
-- `docs/design/language-guide.md` — Language features, syntax, examples
-- `fmpl.ebnf` — Formal grammar (reference only, not used by parser)
-- `specs/fmpl-cli.md` — REPL commands, features, keybindings
+- Describe the current change with `jj describe -m "message"`, not
+  `jj new -m "message"` (which creates an empty change).
+- After `jj commit`/`jj describe` the working copy shows as modified — normal,
+  not an error.
+- Check `jj diff` before committing to avoid mixing unrelated changes; use
+  `jj split` rather than manual workarounds.
