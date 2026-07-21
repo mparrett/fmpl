@@ -1744,9 +1744,9 @@ impl<'a, 'e, I: PegInput> TrampolinedRuntime<'a, 'e, I> {
             }
         }
 
-        Err(Error::Runtime(format!(
-            "undefined rule: {} in grammar {}",
-            name, self.grammar.name
+        Err(Error::Runtime(super::undefined_rule_message(
+            name,
+            &self.grammar.name,
         )))
     }
 

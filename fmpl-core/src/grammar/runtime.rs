@@ -9,7 +9,7 @@
 //! - Values: Object stream parsing for AST transformation
 //! - Streams: Lazy async stream parsing with blocking
 
-use super::{Grammar, GrammarRegistry, ParseResult, Pattern, Rule};
+use super::{Grammar, GrammarRegistry, ParseResult, Pattern, Rule, undefined_rule_message};
 use crate::error::{Error, Result};
 use crate::pattern::{BinaryPattern, CharPattern, RepeatKind};
 use crate::value::Value;
@@ -240,9 +240,9 @@ impl<'a, 'e, I: PegInput> PegRuntime<'a, 'e, I> {
             }
         }
 
-        Err(Error::Runtime(format!(
-            "undefined rule: {} in grammar {}",
-            name, self.grammar.name
+        Err(Error::Runtime(undefined_rule_message(
+            name,
+            &self.grammar.name,
         )))
     }
 

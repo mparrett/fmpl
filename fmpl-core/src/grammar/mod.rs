@@ -95,6 +95,22 @@ use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Build the "undefined rule" error message, with an extra hint when the
+/// grammar is the anonymous `<match>` block produced by `expr @ { ... }`.
+/// In that context a bare name is read as a grammar-rule reference, which is a
+/// common surprise when the block was intended as a value pattern-match.
+pub(crate) fn undefined_rule_message(name: &SmolStr, grammar_name: &SmolStr) -> String {
+    let mut msg = format!("undefined rule: {name} in grammar {grammar_name}");
+    if grammar_name.as_str() == "<match>" {
+        msg.push_str(&format!(
+            "\n  note: this `@ {{ ... }}` block was parsed as an inline grammar, so \
+             `{name}` is treated as a grammar-rule reference. For a value pattern \
+             match, write each arm as `pattern => body` (or `pattern when guard => body`)."
+        ));
+    }
+    msg
+}
+
 /// A grammar definition with rules and optional parent.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Grammar {
@@ -499,6 +515,17 @@ impl GrammarRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_undefined_rule_message_hints_for_match_block() {
+        // Anonymous `@ { ... }` blocks get the match-oriented hint...
+        let m = undefined_rule_message(&SmolStr::new("greet"), &SmolStr::new("<match>"));
+        assert!(m.starts_with("undefined rule: greet in grammar <match>"));
+        assert!(m.contains("pattern => body"));
+        // ...but a real named grammar does not.
+        let named = undefined_rule_message(&SmolStr::new("verb"), &SmolStr::new("mud::commands"));
+        assert_eq!(named, "undefined rule: verb in grammar mud::commands");
+    }
 
     #[test]
     fn test_char_range_single() {
