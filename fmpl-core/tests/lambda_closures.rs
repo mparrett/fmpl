@@ -116,7 +116,7 @@ fn test_closure_returned_from_function() {
 // See specs/parser-limitations.md for planned features like recursive let
 // bindings and mutable closure captures (bcom pattern).
 #[test]
-#[ignore]
+#[ignore = "mutable closure capture / recursive let not yet implemented — see specs/parser-limitations.md"]
 fn test_mutated_closure() {
     let mut vm = Vm::new();
     // Closure that captures a mutable variable
@@ -134,7 +134,7 @@ fn test_mutated_closure() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "mutable closure capture / recursive let not yet implemented — see specs/parser-limitations.md"]
 fn test_self_referential_closure() {
     let mut vm = Vm::new();
     // Complex closure with recursion

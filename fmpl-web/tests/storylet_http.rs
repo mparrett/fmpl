@@ -46,7 +46,7 @@ async fn test_play_route_redirects() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "storylet /play rendering incomplete — WIP feature (asserts storylet content not yet emitted)"]
 async fn test_play_route_renders_storylet_from_db() {
     let dir = temp_path();
     let session_store = MemoryStore::default();
@@ -74,7 +74,7 @@ async fn test_play_route_renders_storylet_from_db() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "storylet /play rendering incomplete — WIP feature (asserts storylet content not yet emitted)"]
 async fn test_play_route_includes_debug_panel() {
     let dir = temp_path();
     let session_store = MemoryStore::default();
@@ -103,7 +103,7 @@ async fn test_play_route_includes_debug_panel() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "storylet /play rendering incomplete — WIP feature (asserts storylet content not yet emitted)"]
 async fn test_choice_updates_continuation_payload() {
     let dir = temp_path();
     let session_store = MemoryStore::default();
