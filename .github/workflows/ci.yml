@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-test:
+    name: build · test · clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Metacircular bootstrap: build fmpl-bootstrap first (parser generation is
+      # skipped on this pass), then force fmpl-core to regenerate the canonical
+      # FMPL parser on the next build. See README "Build & run".
+      - name: Bootstrap the FMPL-generated parser
+        run: |
+          FMPL_BOOTSTRAP_PHASE=1 cargo build -p fmpl-bootstrap
+          touch fmpl-core/build.rs
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Clippy (zero warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
