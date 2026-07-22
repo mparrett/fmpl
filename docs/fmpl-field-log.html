@@ -380,7 +380,7 @@
 <section id="setup">
   <div class="sec-head"><span class="sec-num">§1</span><h2>The setup</h2></div>
   <div class="prose">
-    <p>After the public-release rehabilitation (the 24-commit sweep reviewed in PR&nbsp;#1), the repo had a working build, CI, and an honest ledger of what didn&rsquo;t work: <code>docs/known-gaps.md</code>, dominated by one bucket of ~120 ignored tests labeled <em>metacircular parser not yet complete</em>. FMPL&rsquo;s flagship commitment (DESIGN-001) is that the canonical parser is written in FMPL and the Rust parser is stage-0 scaffolding — so this bucket wasn&rsquo;t a feature gap, it was the language not yet being what it claims to be.</p>
+    <p>After the public-release rehabilitation (the 24-commit sweep reviewed in PR&nbsp;#1 and chronicled in <a href="fmpl-rehab-log.html">its own field log</a>), the repo had a working build, CI, and an honest ledger of what didn&rsquo;t work: <code>docs/known-gaps.md</code>, dominated by one bucket of ~120 ignored tests labeled <em>metacircular parser not yet complete</em>. FMPL&rsquo;s flagship commitment (DESIGN-001) is that the canonical parser is written in FMPL and the Rust parser is stage-0 scaffolding — so this bucket wasn&rsquo;t a feature gap, it was the language not yet being what it claims to be.</p>
     <p>The plan ordered three workstreams deliberately. First a documentation test harness, <em>because</em> the parser work would change language behavior and we wanted the docs to break loudly when it did. Then a WebAssembly build — independent of parser internals, safe to do while thinking. Then the critical path. The sequencing mattered: by the time the grammar changed, every code block in the tutorial was executing in CI and would have caught a regression the unit suite missed.</p>
   </div>
 </section>
@@ -486,7 +486,7 @@
 
 <footer>
   <span>FMPL &middot; MIT &middot; github.com/mparrett/fmpl (fork of nnunley/fmpl)</span>
-  <span>Field log written 2026-07-22 &middot; companion to <a href="fmpl-tour.html">the engineering tour</a></span>
+  <span>Field log written 2026-07-22 &middot; sequel to <a href="fmpl-rehab-log.html">the rehab log</a> &middot; companion to <a href="fmpl-tour.html">the engineering tour</a></span>
 </footer>
 
 </div>
