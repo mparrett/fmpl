@@ -1,0 +1,73 @@
+name: Pages
+
+# Builds the browser REPL's wasm from source and deploys docs/ to GitHub
+# Pages on every main push, so the published REPL can never drift from the
+# code (the wasm binary is never committed — docs/repl/ is gitignored).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build site (docs + wasm REPL)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # Metacircular bootstrap: the host fmpl-bootstrap binary generates the
+      # canonical parser that the wasm build embeds. See README "Build & run".
+      - name: Bootstrap the FMPL-generated parser
+        run: |
+          FMPL_BOOTSTRAP_PHASE=1 cargo build -p fmpl-bootstrap
+          touch fmpl-core/build.rs
+
+      - name: Build fmpl-wasm (release)
+        run: cargo build -p fmpl-wasm --release --target wasm32-unknown-unknown
+
+      # Must match the exact wasm-bindgen version pinned in fmpl-wasm/Cargo.toml.
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.114 --locked
+
+      - name: Generate JS bindings into the site
+        run: |
+          wasm-bindgen target/wasm32-unknown-unknown/release/fmpl_wasm.wasm \
+            --out-dir docs/repl --target web --no-typescript
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    name: deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
