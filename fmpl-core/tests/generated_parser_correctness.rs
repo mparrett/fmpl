@@ -672,13 +672,11 @@ fn test_async_call_parses() {
     assert!(ast.is_ok(), "Failed to parse '<- x': {:?}", ast);
 }
 
-#[ignore = "AtInlineBlock conversion not yet implemented in the generated-parser postlude (ir_to_rust.rs)"]
 #[test]
 fn test_at_inline_pattern_block() {
     assert_evals_to("let (x = 42) x @ { y => y + 1 }", Value::Int(43));
 }
 
-#[ignore = "AtInlineBlock conversion not yet implemented in the generated-parser postlude (ir_to_rust.rs)"]
 #[test]
 fn test_at_inline_pattern_wildcard() {
     assert_evals_to("42 @ { _ => 0 }", Value::Int(0));

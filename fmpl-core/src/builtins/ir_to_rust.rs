@@ -1809,10 +1809,34 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
                 body: Box::new(func),
             })
         }
+        // AtInlineBlock(input, [:InlinePatternBlock, cases]) -> Expr::InlinePatternBlock
+        // (from fold_pipe_at's :at_inline op). Cases share the [:MatchCase,
+        // pat, guard, body] shape used by the Match arm above.
         "AtInlineBlock" if children.len() >= 2 => {
-            // AtInlineBlock needs pattern conversion which requires value_to_pattern_cases
-            // For now, delegate to the standalone value_to_ast module at runtime
-            Err(Error::Runtime("AtInlineBlock in generated parser template not yet supported - use standalone value_to_ast".to_string()))
+            let input = value_to_expr(&children[0])?;
+            let cases_list = match children[1].as_node() {
+                Some((btag, bc)) if btag.as_str() == "InlinePatternBlock" => match bc.first() {
+                    Some(Value::List(case_vals)) => case_vals.clone(),
+                    _ => return Err(Error::Runtime("Invalid InlinePatternBlock cases".to_string())),
+                },
+                _ => return Err(Error::Runtime("Invalid AtInlineBlock body".to_string())),
+            };
+            let cases = cases_list.iter().map(|case| {
+                let Some((tag, cs)) = case.as_node() else {
+                    return Err(Error::Runtime("Invalid MatchCase".to_string()));
+                };
+                if tag.as_str() != "MatchCase" || cs.len() < 3 {
+                    return Err(Error::Runtime("Invalid MatchCase".to_string()));
+                }
+                let pattern = value_to_pattern(&cs[0])?;
+                let guard = match &cs[1] {
+                    Value::Null => None,
+                    other => Some(Box::new(value_to_expr(other)?)),
+                };
+                let body = value_to_expr(&cs[2])?;
+                Ok(PatternCase { pattern, guard, body: Box::new(body) })
+            }).collect::<Result<Vec<_>>>()?;
+            Ok(Expr::InlinePatternBlock { input: Box::new(input), cases })
         }
         "AtGrammarApply" if children.len() >= 3 => {
             let input = value_to_expr(&children[0])?;

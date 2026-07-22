@@ -102,5 +102,11 @@
 //!   in the generator postlude, paired with the new vp_* rules in
 //!   `lib/core/fmpl_parser.fmpl`. Postlude raw-string edit, a bump trigger.
 
+//! - 9 — self-hosting critical path, burn-down (issue #4, 2026-07-22).
+//!   Implemented the `AtInlineBlock` arm in the postlude's `value_to_expr`
+//!   (was a hard error), converting `[:InlinePatternBlock, cases]` to
+//!   `Expr::InlinePatternBlock` via the shared `[:MatchCase, ...]` shape.
+//!   Postlude raw-string edit, a bump trigger.
+
 /// Parser-generator epoch. See module-level docs for the bump policy.
-pub const PARSER_EPOCH: u32 = 8;
+pub const PARSER_EPOCH: u32 = 9;

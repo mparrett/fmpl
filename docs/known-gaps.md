@@ -3,7 +3,7 @@
 FMPL is an experimental prototype, and the test suite encodes where the language
 is *going* as well as where it *is*. Roughly **75 tests are `#[ignore]`d** — not
 because they're broken, but because they pin behavior for features that aren't
-finished yet. Every one now carries a machine-readable reason:
+finished yet. Every one carries a machine-readable reason:
 
 ```sh
 cargo test --workspace                       # ignored tests print their reason
@@ -14,22 +14,22 @@ FMPL_SCENARIO_LIST_SKIPPED=1 cargo test -p fmpl-core scenario   # list skipped b
 This file groups those gaps by root cause so the count reads as intent, not
 neglect. Counts are approximate and drift as work lands.
 
-## 1. Metacircular parser (2)
+## 1. Metacircular parser (CLOSED)
 
 Formerly the largest bucket (~120). FMPL is self-hosting by design (see
 `docs/design-principles.md` DESIGN-001): the canonical parser is generated from
 `lib/core/fmpl_parser.fmpl`.
 
-Issue #4 (2026-07-22) closed most of it: the generated parser parses
+Issue #4 (2026-07-22) closed it: the generated parser parses
 `lib/core/prelude.fmpl` and `lib/core/ast_to_ir.fmpl` end to end (tree/value
 patterns, multi-rule grammar bodies, newline-separated top-level statements,
-non-ASCII source, and full-input enforcement in `generated_parse`), and the
-interpreted grammar runtime executes fmpl_parser.fmpl itself
-(`"src" @ fmpl_parser.code`) — `bootstrap_determinism.rs`, `core_prelude.rs`,
-and `parser_equivalence.rs` have no ignored tests left.
-
-- `fmpl-core/tests/generated_parser_correctness.rs` (2) — `AtInlineBlock`
-  conversion missing from the generated-parser postlude
+non-ASCII source, `AtInlineBlock` conversion, and full-input enforcement in
+`generated_parse`), and the interpreted grammar runtime executes
+fmpl_parser.fmpl itself (`"src" @ fmpl_parser.code`).
+`bootstrap_determinism.rs`, `core_prelude.rs`, `parser_equivalence.rs`, and
+`generated_parser_correctness.rs` have no ignored tests left. Remaining
+self-hosting work is tracked by the roadmap (self-compile milestone), not by
+ignored tests.
 
 ## 2. Pattern-matching completeness (~50)
 
@@ -68,5 +68,5 @@ bootstrap compile path yet (still in legacy syntax; roadmap ITER-0004c).
 ## How to help
 
 Pick a bucket, run its file with `-- --ignored`, and land the feature the tests
-describe. With the metacircular-parser bucket (#1) nearly closed, the
-pattern-matching bucket (#2) is the next-largest lever.
+describe. With the metacircular-parser bucket (#1) closed, the
+pattern-matching bucket (#2) is the largest lever.
