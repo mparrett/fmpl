@@ -404,9 +404,9 @@
   <p class="dek">A 1992 MUD-server language, revived in Rust as a streaming-first substrate for AI agents — with first-class PEG grammars, an indexed-RPN bytecode VM, and a parser that compiles itself.</p>
   <div class="meta-row">
     <span><b>Rust</b> edition 2024</span>
-    <span><b>6</b> workspace crates</span>
-    <span><b>1,390</b> tests passing</span>
-    <span><b>185</b> pinned to future features</span>
+    <span><b>7</b> workspace crates</span>
+    <span><b>1,519</b> tests passing</span>
+    <span><b>74</b> pinned to future features</span>
     <span><b>MIT</b> license</span>
   </div>
 
@@ -443,7 +443,7 @@
   <div class="prose">
     <p>FMPL was created in 1992 by Jon Blow at UC Berkeley&rsquo;s Experimental Computing Facility — a MUD server language in the LambdaMOO / ColdMUD tradition. Those systems shared a distinctive shape: a <em>live image</em> of prototype-based objects, edited from inside, serving many users at once, persisting across restarts. The program wasn&rsquo;t a file you ran; it was a world you inhabited.</p>
     <p>This repository is a from-scratch Rust revival that bets that the MUD shape is the right shape for AI agents. A modern agent system wants exactly what a MUD had: long-lived stateful objects, many concurrent actors (now LLMs as well as humans), capability-scoped access between them, and durable state that survives a crash mid-conversation. FMPL adds the modern half: streaming as a first-class concern, OMeta-style PEG grammars as the universal tool for parsing any stream — text, bytes, or structured values — and an async runtime for tool calls.</p>
-    <p>One more thing worth saying plainly, because it shapes the codebase: most of this implementation was written by an autonomous LLM agent loop, iterating against a roadmap for months. It was recently rehabilitated for public release by hand — the agent harness sidelined to an archive branch (~30,000 lines), a build that works on a fresh clone, CI, and a documentation pass in which every claim in the tutorial was re-verified against a live REPL. The result is unusually honest about itself: the test suite encodes where the language <em>is</em> and, via 185 deliberately-ignored tests, where it is <em>going</em>.</p>
+    <p>One more thing worth saying plainly, because it shapes the codebase: most of this implementation was written by an autonomous LLM agent loop, iterating against a roadmap for months. It was recently rehabilitated for public release by hand — the agent harness sidelined to an archive branch (~30,000 lines), a build that works on a fresh clone, CI, and a documentation pass in which every claim in the tutorial was re-verified against a live REPL. The result is unusually honest about itself: the test suite encodes where the language <em>is</em> and, via 74 deliberately-ignored tests, where it is <em>going</em>.</p>
   </div>
 </section>
 
@@ -479,6 +479,7 @@
     <div class="crate"><h4>fmpl-tui</h4><p>Ratatui terminal UI with DAG-based conversation management and LLM chat.</p></div>
     <div class="crate"><h4>fmpl-bootstrap</h4><p>Stage-0 interpreter that runs the parser generator at build time, breaking the circular dependency.</p></div>
     <div class="crate"><h4>fmpl-scenario-runner</h4><p>Data-driven test runner; the build script generates a test suite from a markdown corpus of behavior scenarios.</p></div>
+    <div class="crate"><h4>fmpl-wasm</h4><p>wasm-bindgen bindings for the browser REPL — the same VM compiled to WebAssembly, rebuilt from source on every deploy.</p></div>
   </div>
 
   <div class="prose">
@@ -525,7 +526,7 @@ Frame { values: Vec&lt;Value&gt;, ip: usize }
   </div>
 
   <div class="prose">
-    <p>An FMPL grammar describing FMPL is executed by a minimal interpreter, which emits a complete recursive-descent Rust parser that is compiled into the core crate. <code>ast::parse</code> in the hero transcript above runs through this generated parser. Because a stale or silently-substituted parser would make every parity test vacuously true, the build embeds a generator <em>epoch number</em> (currently 6) checked at compile time, and a <code>canonical_pipeline_must_be_active</code> test fails loudly if the fallback parser is in use.</p>
+    <p>An FMPL grammar describing FMPL is executed by a minimal interpreter, which emits a complete recursive-descent Rust parser that is compiled into the core crate. <code>ast::parse</code> in the hero transcript above runs through this generated parser. Because a stale or silently-substituted parser would make every parity test vacuously true, the build embeds a generator <em>epoch number</em> (currently 9) checked at compile time, and a <code>canonical_pipeline_must_be_active</code> test fails loudly if the fallback parser is in use.</p>
     <p>The same discipline extends downstream: <code>lib/core/ast_to_ir.fmpl</code> is a tree-transformation grammar that lowers AST to IR, <code>ir::compile</code> linearizes IR to bytecode, and 21 parity tests compare the FMPL pipeline&rsquo;s output against the Rust compiler&rsquo;s, node type by node type. The self-hosting loop is genuinely closed for core expressions and genuinely open for the rest — the ledger in §5 is precise about which.</p>
   </div>
 
@@ -588,14 +589,14 @@ code::eval(ir::compile(ir))
 <section id="gaps">
   <div class="sec-head"><span class="sec-num">§5</span><h2>The gap ledger</h2></div>
   <div class="prose">
-    <p>185 tests are <code>#[ignore]</code>d, each with a machine-readable reason, grouped by root cause in <code>docs/known-gaps.md</code>. Read as a ledger, the count is intent rather than neglect — the suite pins behavior for features before they exist:</p>
+    <p>74 tests are <code>#[ignore]</code>d, each with a machine-readable reason, grouped by root cause in <code>docs/known-gaps.md</code>. Read as a ledger, the count is intent rather than neglect — the suite pins behavior for features before they exist:</p>
   </div>
 
   <div class="ledger">
     <div class="ledger-row">
-      <div class="count">~120</div>
-      <div class="desc"><b>Metacircular parser incomplete — the critical path</b>
-      <span>The FMPL grammar doesn&rsquo;t cover the whole language yet; the generated pipeline still mis-produces ASTs for some constructs (it cannot yet parse <code>ast_to_ir.fmpl</code> itself). Most other buckets ease when this one closes.</span></div>
+      <div class="count" style="color: var(--works);">0</div>
+      <div class="desc"><b>Metacircular parser — closed 2026-07-22</b>
+      <span>Formerly ~120 tests and the critical path. The generated parser now parses <code>ast_to_ir.fmpl</code> end to end, and <code>fmpl_parser.fmpl</code> runs as an interpreted grammar in the VM. How it went to zero — five stacked bugs behind one error message — is written up in <a href="fmpl-field-log.html">the field log</a>.</span></div>
     </div>
     <div class="ledger-row">
       <div class="count">~50</div>
@@ -648,7 +649,7 @@ code::eval(ir::compile(ir))
 
 <pre><code>git clone https://github.com/mparrett/fmpl && cd fmpl
 just build      # bootstrap the FMPL-generated parser, then build the workspace
-just test       # 1,390 passing / 185 pinned to future work
+just test       # 1,519 passing / 74 pinned to future work
 just repl       # REPL        (dot-commands: .help, .quit)
 just web        # web REPL    http://localhost:3000
 just tui        # terminal UI (Ctrl+L for LLM chat)</code></pre>
@@ -660,7 +661,8 @@ just tui        # terminal UI (Ctrl+L for LLM chat)</code></pre>
 
 <footer>
   <span>FMPL &middot; MIT &middot; github.com/mparrett/fmpl (fork of nnunley/fmpl)</span>
-  <span>Written 2026-07-20 &middot; all claims verified against a fresh REPL</span>
+  <span>Written 2026-07-20, counts updated 2026-07-22 &middot; all claims verified against a fresh REPL</span>
+  <span><a href="fmpl-field-log.html">Field log: closing the metacircular-parser gap</a></span>
 </footer>
 
 </div>

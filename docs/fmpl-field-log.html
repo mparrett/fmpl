@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Closing the Loop: An FMPL Field Log</title>
+<style>
+  :root {
+    --ground: #f7f5f0;
+    --surface: #fffefb;
+    --panel: #f0ede4;
+    --ink: #26241e;
+    --muted: #6c6a60;
+    --faint: #97948a;
+    --accent: #a5661a;
+    --accent-ink: #8a5413;
+    --works: #296e63;
+    --works-bg: #e3ede9;
+    --partial: #986013;
+    --partial-bg: #f2e8d5;
+    --missing: #a44a3d;
+    --missing-bg: #f2e2dd;
+    --line: #e2ded2;
+    --line-strong: #cfcaba;
+    --code-bg: #f0ede4;
+    --term-ground: #16181d;
+    --term-ink: #d8d4c8;
+    --term-amber: #e0a458;
+    --term-teal: #7db8ac;
+    --term-red: #c7705f;
+    --term-muted: #6e7076;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #16181d;
+      --surface: #1d2026;
+      --panel: #1a1d23;
+      --ink: #e3e0d7;
+      --muted: #9b988d;
+      --faint: #6e6c64;
+      --accent: #e0a458;
+      --accent-ink: #e6b06c;
+      --works: #7db8ac;
+      --works-bg: #1d2b28;
+      --partial: #d9a763;
+      --partial-bg: #2b2519;
+      --missing: #c7705f;
+      --missing-bg: #2d1f1c;
+      --line: #2c2f37;
+      --line-strong: #3d414b;
+      --code-bg: #1a1d23;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f7f5f0;
+    --surface: #fffefb;
+    --panel: #f0ede4;
+    --ink: #26241e;
+    --muted: #6c6a60;
+    --faint: #97948a;
+    --accent: #a5661a;
+    --accent-ink: #8a5413;
+    --works: #296e63;
+    --works-bg: #e3ede9;
+    --partial: #986013;
+    --partial-bg: #f2e8d5;
+    --missing: #a44a3d;
+    --missing-bg: #f2e2dd;
+    --line: #e2ded2;
+    --line-strong: #cfcaba;
+    --code-bg: #f0ede4;
+  }
+  :root[data-theme="dark"] {
+    --ground: #16181d;
+    --surface: #1d2026;
+    --panel: #1a1d23;
+    --ink: #e3e0d7;
+    --muted: #9b988d;
+    --faint: #6e6c64;
+    --accent: #e0a458;
+    --accent-ink: #e6b06c;
+    --works: #7db8ac;
+    --works-bg: #1d2b28;
+    --partial: #d9a763;
+    --partial-bg: #2b2519;
+    --missing: #c7705f;
+    --missing-bg: #2d1f1c;
+    --line: #2c2f37;
+    --line-strong: #3d414b;
+    --code-bg: #1a1d23;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.5rem; }
+  .prose { max-width: 44rem; }
+  .prose p { margin: 0 0 1.1em; }
+  a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0.08em 0.35em;
+    white-space: nowrap;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    margin: 1.25rem 0;
+  }
+  pre code { background: none; border: none; padding: 0; white-space: pre; font-size: inherit; }
+
+  /* ---------- masthead ---------- */
+  header.masthead { padding: 4.5rem 0 0; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 1.25rem;
+  }
+  h1 {
+    font-size: clamp(2.6rem, 6vw, 4rem);
+    line-height: 1.05;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 0 0 1rem;
+    text-wrap: balance;
+  }
+  h1 .of { font-style: italic; font-weight: 400; color: var(--muted); }
+  .dek {
+    font-size: 1.3rem;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 40rem;
+    margin: 0 0 1.75rem;
+    text-wrap: balance;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.75rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    border-top: 1px solid var(--line-strong);
+    border-bottom: 1px solid var(--line-strong);
+    padding: 0.7rem 0;
+    margin-bottom: 2.5rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .meta-row b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- terminal hero ---------- */
+  .term {
+    background: var(--term-ground);
+    border: 1px solid #2c2f37;
+    border-radius: 6px;
+    padding: 1.1rem 1.4rem 1.3rem;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.75;
+    color: var(--term-ink);
+    white-space: pre;
+    overflow-x: auto;
+    margin: 0 0 1rem;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.25), 0 12px 40px -18px rgba(224,164,88,0.25);
+  }
+  .term .bar { color: var(--term-muted); display: block; margin-bottom: 0.6rem; user-select: none; }
+  .term .p { color: var(--term-amber); }
+  .term .o { color: var(--term-teal); }
+  .term .e { color: var(--term-red); }
+  .term .c { color: var(--term-muted); }
+  .term-cap {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    color: var(--faint);
+    margin: 0 0 3.5rem;
+  }
+
+  /* ---------- sections ---------- */
+  section { margin: 0 0 4.5rem; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    border-top: 2px solid var(--ink);
+    padding-top: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    color: var(--accent-ink);
+    white-space: nowrap;
+  }
+  h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 2.2rem 0 0.6rem;
+  }
+  h3 code { font-size: 0.85em; }
+
+  /* ---------- toc ---------- */
+  nav.toc { margin: 0 0 4.5rem; }
+  nav.toc ol {
+    list-style: none;
+    margin: 0; padding: 0;
+    columns: 2;
+    column-gap: 3rem;
+    max-width: 44rem;
+  }
+  nav.toc li { margin: 0 0 0.35rem; break-inside: avoid; }
+  nav.toc a {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--ink);
+    padding: 0.15rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  nav.toc a:hover { color: var(--accent-ink); }
+  nav.toc .n { font-family: var(--mono); font-size: 0.7rem; color: var(--accent-ink); }
+  @media (max-width: 40rem) { nav.toc ol { columns: 1; } }
+
+  /* ---------- field notes ---------- */
+  .fieldnote {
+    border-left: 3px solid var(--accent);
+    background: var(--panel);
+    padding: 1rem 1.4rem;
+    margin: 1.75rem 0;
+    max-width: 44rem;
+  }
+  .fieldnote .fn-label {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+  .fieldnote p { margin: 0 0 0.75em; font-size: 0.95rem; }
+  .fieldnote p:last-child { margin-bottom: 0; }
+
+  /* ---------- gap stack (the five bugs) ---------- */
+  .stack { border: 1px solid var(--line-strong); margin: 1.5rem 0; max-width: 48rem; }
+  .stack-row {
+    display: grid;
+    grid-template-columns: 3.2rem 1fr;
+    border-bottom: 1px solid var(--line);
+  }
+  .stack-row:last-child { border-bottom: none; }
+  .stack-row .n {
+    font-family: var(--mono);
+    font-size: 1.05rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent-ink);
+    padding: 0.9rem 0 0.9rem 1.1rem;
+  }
+  .stack-row .desc { padding: 1rem 1.25rem 1rem 0.5rem; }
+  .stack-row .desc b { display: block; font-size: 0.95rem; }
+  .stack-row .desc span { font-size: 0.875rem; color: var(--muted); }
+
+  /* ---------- fork points ---------- */
+  .forks { margin: 1.5rem 0; padding: 0; max-width: 46rem; }
+  .forks dt {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--accent-ink);
+    margin: 1.4rem 0 0.2rem;
+  }
+  .forks dt b { color: var(--ink); font-size: 0.95rem; font-family: var(--serif); font-weight: 600; margin-left: 0.5rem; letter-spacing: 0; }
+  .forks dd { margin: 0; color: var(--muted); font-size: 0.95rem; }
+
+  /* ---------- before/after ledger ---------- */
+  .ledger { border: 1px solid var(--line-strong); margin: 1.5rem 0; max-width: 48rem; }
+  .ledger-row {
+    display: grid;
+    grid-template-columns: 11rem 1fr;
+    border-bottom: 1px solid var(--line);
+  }
+  .ledger-row:last-child { border-bottom: none; }
+  .ledger-row .count {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--works);
+    padding: 0.9rem 0 0.9rem 1.1rem;
+    white-space: nowrap;
+  }
+  .ledger-row .desc { padding: 0.95rem 1.25rem 0.95rem 0.5rem; font-size: 0.9rem; color: var(--muted); }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 2px solid var(--ink);
+    padding: 1.25rem 0 4rem;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 2rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Engineering field log &middot; github.com/mparrett/fmpl</p>
+  <h1>Closing the Loop<span class="of">, in three moves</span></h1>
+  <p class="dek">How the metacircular-parser ledger — 120 ignored tests gating self-hosting — went to zero: the decisions, dead ends, and five stacked bugs hiding behind a single error message.</p>
+  <div class="meta-row">
+    <span><b>2</b> days, 2026-07-21&ndash;22</span>
+    <span><b>3</b> issues closed (#2 #3 #4)</span>
+    <span><b>10</b> commits</span>
+    <span><b>parser epoch</b> 6 &rarr; 9</span>
+    <span><b>tests</b> 1,398 &rarr; 1,519 passing</span>
+    <span><b>ignored</b> 185 &rarr; 74</span>
+  </div>
+
+  <div class="term" role="img" aria-label="Terminal transcript: the milestone test failing before the work and passing after, then the FMPL parser parsing FMPL source in the grammar runtime">
+<span class="bar">$ cargo test ast_to_ir_loads_through_generated_parser -- --ignored</span><span class="c">-- before (2026-07-21):</span>
+<span class="e">FAILED: Parser { token: 738, message: "negative lookahead matched" }</span>
+<span class="c">-- after five fixes (2026-07-22):</span>
+<span class="o">test ast_to_ir_loads_through_generated_parser ... ok</span>
+
+<span class="bar">$ just repl</span><span class="p">fmpl&gt;</span> io::load("lib/core/prelude.fmpl"); io::load("lib/core/fmpl_parser.fmpl")
+<span class="p">fmpl&gt;</span> "1 + 2" @ fmpl_parser.code
+<span class="o">=&gt; [:Binary, :+, [:Int, 1], [:Int, 2]]</span>
+<span class="c">-- FMPL's grammar for FMPL, parsing FMPL, inside FMPL's own grammar runtime</span></div>
+  <p class="term-cap">The first transcript is the milestone. The second is the point of it: the same grammar that generates the Rust parser now also runs as an ordinary grammar value. Background reading: <a href="fmpl-tour.html">the engineering tour</a> &middot; try it in <a href="repl.html">the browser REPL</a>.</p>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#setup"><span class="n">§1</span> The setup</a></li>
+    <li><a href="#docs"><span class="n">§2</span> Documentation that runs</a></li>
+    <li><a href="#wasm"><span class="n">§3</span> The VM in a browser tab</a></li>
+    <li><a href="#five-bugs"><span class="n">§4</span> One error message, five bugs</a></li>
+    <li><a href="#forks"><span class="n">§5</span> Fork points</a></li>
+    <li><a href="#burndown"><span class="n">§6</span> The burn-down that collapsed</a></li>
+    <li><a href="#lessons"><span class="n">§7</span> What the log says</a></li>
+  </ol>
+</nav>
+
+<section id="setup">
+  <div class="sec-head"><span class="sec-num">§1</span><h2>The setup</h2></div>
+  <div class="prose">
+    <p>After the public-release rehabilitation (the 24-commit sweep reviewed in PR&nbsp;#1), the repo had a working build, CI, and an honest ledger of what didn&rsquo;t work: <code>docs/known-gaps.md</code>, dominated by one bucket of ~120 ignored tests labeled <em>metacircular parser not yet complete</em>. FMPL&rsquo;s flagship commitment (DESIGN-001) is that the canonical parser is written in FMPL and the Rust parser is stage-0 scaffolding — so this bucket wasn&rsquo;t a feature gap, it was the language not yet being what it claims to be.</p>
+    <p>The plan ordered three workstreams deliberately. First a documentation test harness, <em>because</em> the parser work would change language behavior and we wanted the docs to break loudly when it did. Then a WebAssembly build — independent of parser internals, safe to do while thinking. Then the critical path. The sequencing mattered: by the time the grammar changed, every code block in the tutorial was executing in CI and would have caught a regression the unit suite missed.</p>
+  </div>
+</section>
+
+<section id="docs">
+  <div class="sec-head"><span class="sec-num">§2</span><h2>Documentation that runs</h2></div>
+  <div class="prose">
+    <p>Issue #2 made <code>TUTORIAL.md</code>, <code>DEMO.md</code>, and <code>README.md</code> build inputs: a harness (<code>fmpl-core/tests/doc_examples.rs</code>) extracts every <code>fmpl</code> code fence, executes it against the real VM, and asserts <code>-- Returns:</code> / <code>-- =&gt;</code> comments against actual results. Blocks that can&rsquo;t run are marked, not skipped silently — <code>fmpl-doctest: skip</code> for network calls, a <code>fmpl-sketch</code> fence tag for design sketches.</p>
+    <p>Building the harness immediately caught two real documentation bugs — examples that read correctly and behaved otherwise. Both traced to the same root: the parser is newline-insensitive, so a <code>[</code> opening a line indexes the previous expression instead of starting a list. That gotcha (issue&nbsp;5 in <code>specs/parser-limitations.md</code>) became a recurring character in this log; it later explained two &ldquo;failing&rdquo; tests in §6 as well.</p>
+  </div>
+</section>
+
+<section id="wasm">
+  <div class="sec-head"><span class="sec-num">§3</span><h2>The VM in a browser tab</h2></div>
+  <div class="prose">
+    <p>Issue #3&rsquo;s opening assumption — that wasm would need a <code>no_std</code> campaign — died in the first hour, pleasantly. <code>wasm32-unknown-unknown</code> ships full <code>std</code> (threads and files trap at runtime rather than failing to compile), so the real blockers were exactly four native-only dependencies: curl, fjall, stacker, and tokio&rsquo;s multi-threaded runtime. Target- and feature-gating those got <code>fmpl-core</code> compiling for wasm32 with the native build untouched.</p>
+    <p>The gating surfaced a wrong assumption worth recording: fjall was <em>not</em> all behind the <code>fjall-persistence</code> feature flag. Stream overflow spill, parse-state save, and the persistence envelope are live in default native builds — so the wasm exclusion had to be <code>cfg(not(target_arch = "wasm32"))</code> seams at each touchpoint, not a feature toggle. Those seams are now the documented slot-in points if a persistent browser image (IndexedDB-backed) ever becomes a goal — a direction the upstream author raised in review.</p>
+    <p>The deploy fork point: commit the built <code>.wasm</code> to the repo (simple, binary-in-git) or switch GitHub Pages to Actions-based deploys that rebuild it from source on every push. We chose Actions — the binary never lands in git, and the <a href="repl.html">live REPL</a> can&rsquo;t drift from <code>main</code>. That choice quietly paid off in §4: when the parser changed, the browser REPL picked it up on the next push with zero extra work.</p>
+  </div>
+</section>
+
+<section id="five-bugs">
+  <div class="sec-head"><span class="sec-num">§4</span><h2>One error message, five bugs</h2></div>
+  <div class="prose">
+    <p>The milestone test was precise: load <code>lib/core/ast_to_ir.fmpl</code> — the tree grammar that lowers AST to IR — through the generated parser. It failed with <code>Parser { token: 738, message: "negative lookahead matched" }</code>, and that error message was the first adversary. Token 738 mapped to an innocent-looking <code>[</code> mid-file; a scratch tool that dumped the token stream around it pointed at a line structurally identical to twenty lines that parsed fine. Then a truncated 50-line version of the file produced <em>the same error at the same position</em> — position 738 turned out to be a byte offset, and the byte offset of the start of the failed statement. The error was pointing at where the parse <em>began</em>, not where it died.</p>
+    <p>So we stopped reading the error and started bisecting: truncate the file, parse, narrow. What looked like one bug decomposed into five, stacked such that each was only visible after fixing the one above it:</p>
+  </div>
+
+  <div class="stack">
+    <div class="stack-row"><div class="n">1</div><div class="desc"><b>Grammar definitions parsed but couldn&rsquo;t convert</b>
+      <span>The generated parser&rsquo;s conversion layer had no <code>GrammarDef</code> arm — any source containing a grammar literal died with &ldquo;Unknown AST node type.&rdquo; The full conversion existed in an orphaned module that was no longer compiled anywhere (§5, fork 1).</span></div></div>
+    <div class="stack-row"><div class="n">2</div><div class="desc"><b>Multi-rule grammar bodies didn&rsquo;t parse</b>
+      <span>In <code>digit = [0-9] letter = [a-z]</code>, the sequence parser consumed <code>letter</code> as a rule reference inside <code>digit</code>&rsquo;s body, then choked on the <code>=</code>. The legacy Rust parser had a rule-start lookahead; the FMPL meta-grammar didn&rsquo;t. One negative-lookahead rule fixed it.</span></div></div>
+    <div class="stack-row"><div class="n">3</div><div class="desc"><b>Tree patterns didn&rsquo;t exist in the meta-grammar</b>
+      <span>The syntax ast_to_ir is <em>made of</em> — <code>[:Int, any:n]</code>, nested <code>[[:Binding, &hellip;]]</code> — had no rules at all. Flat patterns silently mis-parsed as character classes (the char-class rule accepts almost any characters); nested ones failed outright. The biggest single piece of new grammar, mirrored against the legacy parser with AST-equality tests.</span></div></div>
+    <div class="stack-row"><div class="n">4</div><div class="desc"><b>The parser accepted prefixes</b>
+      <span><code>generated_parse</code> returned success when the parse stopped mid-input, so syntax errors became wrong programs: <code>[1] @ g.rule</code> parsed as just <code>[1]</code>, and multi-statement files parsed as their first statement. Enforcing end-of-input revealed that <code>prelude.fmpl</code> had never once fully parsed.</span></div></div>
+    <div class="stack-row"><div class="n">5</div><div class="desc"><b>Any non-ASCII character killed the parse</b>
+      <span>Character matchers sliced <code>input.get(pos..pos+1)</code>, which returns <code>None</code> on a multi-byte UTF-8 character. The final blocker for the whole milestone was a <code>&#8658;</code> arrow in an ast_to_ir <em>comment</em>. Matchers now advance by UTF-8 length.</span></div></div>
+  </div>
+
+  <div class="fieldnote">
+    <span class="fn-label">Field note &middot; the test that passed by coincidence</span>
+    <p>Bug 4 explains an old mystery. A long-ignored test applied a grammar with <code>"5" @ g.digit</code> and asserted the result <code>"5"</code>. It &ldquo;passed&rdquo; during this work — but the <code>@</code> application was being silently dropped by the prefix parse, and the expression evaluated to&hellip; the string <code>"5"</code>. The expected value equaled the input, so a parser that discarded the interesting half of the program produced exactly the asserted answer. A new test whose transformation output <em>differs</em> from its input (<code>[:Int, 42]</code> &rarr; <code>[:LoadInt, 42]</code>) is what exposed the drop. Choose fixtures where wrong &ne; right.</p>
+  </div>
+</section>
+
+<section id="forks">
+  <div class="sec-head"><span class="sec-num">§5</span><h2>Fork points</h2></div>
+  <div class="prose">
+    <p>Five decisions shaped the work more than any single fix. Recorded here with the road not taken:</p>
+  </div>
+  <dl class="forks">
+    <dt>FORK-1<b>Extend the embedded postlude, or resurrect the orphan module</b></dt>
+    <dd>The generated parser&rsquo;s value&rarr;AST conversion is a large raw string embedded in the generator; a fuller standalone version (<code>value_to_ast.rs</code>) exists but is registered in no module tree — dead code, maintained by hand for months, with one function reduced to a match arm that can only return an error. Delegating to it would have deduplicated ~700 lines but meant trusting code that provably never ran. We extended the postlude (the epoch-bump history shows that&rsquo;s the established pattern) and used the orphan only as a porting reference — where its rot was itself informative.</dd>
+    <dt>FORK-2<b>Mirror the legacy heuristic, or trust PEG backtracking</b></dt>
+    <dd>Is <code>[&hellip;]</code> a character class or a list pattern? The legacy parser decides with a 20-character lookahead scan for commas. The PEG formulation instead <em>attempts</em> the list-pattern parse behind a lookahead and falls through to char-class on failure — which turned out strictly more robust: <code>[_a-z]</code> hard-errors in the legacy parser but degrades gracefully in the canonical one. We kept the divergence and documented it, rather than reproducing a 20-character quirk bug-for-bug.</dd>
+    <dt>FORK-3<b>Accept prefix parses, or break everything that relied on them</b></dt>
+    <dd>Enforcing end-of-input was the scariest change — any test quietly depending on prefix parsing would fail. That is precisely why it was right: the failures it created were all real bugs previously invisible, including the fact that top-level statements couldn&rsquo;t be newline-separated. A parser that accepts prefixes doesn&rsquo;t have errors; it has undefined behavior.</dd>
+    <dt>FORK-4<b>Split the operand like the legacy parser, or restrict the grammar</b></dt>
+    <dd>In <code>x @ g.rule</code>, the legacy parser reads a full postfix expression and retroactively splits the final <code>.rule</code> off it. Faithfully mirroring that in PEG is awkward; instead the canonical operand is a plain (possibly qualified) variable. Narrower in theory than the legacy parser — but the old rule could never match <em>anything</em> (its operand ate <code>.rule</code> as property access), so the restriction is a strict improvement, sized to the real corpus.</dd>
+    <dt>FORK-5<b>Route via env var, or drive the parser directly</b></dt>
+    <dd>The milestone test originally flipped a process-global env var to route evaluation through the generated parser — safe only while the test was ignored. Un-ignoring it made the flag race every parallel test that touches <code>io::load</code>. The rewrite drives <code>generated_parse</code> directly, no globals. Process-global toggles and parallel test runners compose exactly once.</dd>
+  </dl>
+</section>
+
+<section id="burndown">
+  <div class="sec-head"><span class="sec-num">§6</span><h2>The burn-down that collapsed</h2></div>
+  <div class="prose">
+    <p>The plan sized the remaining bucket — 98 ignored tests in <code>core_prelude.rs</code> — as open-ended, likely multiple sessions. Those tests do something more ambitious than the milestone: they run <code>fmpl_parser.fmpl</code> as an <em>interpreted grammar</em> in the VM&rsquo;s grammar runtime — <code>"true" @ fmpl_parser.code</code> — the same grammar that generates the Rust parser, executed live.</p>
+    <p>Every one of the 98 failed with the identical error: <code>Type { expected: "callable", got: "null" }</code>. Uniform failure across a hundred tests is not a hundred problems; it&rsquo;s one. Isolating by rule showed <code>bool</code>, <code>expr</code>, and <code>stmts</code> all working and only the top-level <code>code</code> rule failing — whose semantic action calls <code>length()</code>. That function existed only as a Rust helper baked into the generated parser; interpreted, it resolved to null. One pure-FMPL <code>length</code> in the prelude later, the next null was <code>string.to_symbol</code> — referenced by the prelude&rsquo;s <code>symbol</code> helper since its beginning and never implemented as a VM builtin. Two definitions, ninety tests.</p>
+    <p>The five stragglers were a different genre: tests pinning semantics the language had deliberately moved past — assertions on the deleted <code>Tagged</code> value shape (canonical list form replaced it, DESIGN-002) and grammars using bare <code>n</code> as a binding where bare identifiers had since become rule references (DESIGN-004). Modernizing a test is legitimate exactly when the language change was on purpose and documented; all five updates cite the design decision they align to. Two long-ignored &ldquo;stack overflow&rdquo; tests turned out to just pass — the grammar engine had grown segmented-stack support in the meantime, and nobody had re-run them.</p>
+  </div>
+
+  <div class="fieldnote">
+    <span class="fn-label">Field note &middot; estimation, inverted</span>
+    <p>Milestone 1 was expected to be the hard part and the burn-down the long tail. The reality inverted: the milestone was five distinct bugs across two parsers and a code generator; the &ldquo;open-ended&rdquo; burn-down was two missing definitions found in under an hour. The signal was there in advance — one error shape across the whole bucket — and reading it early is the cheapest estimation tool we know.</p>
+  </div>
+</section>
+
+<section id="lessons">
+  <div class="sec-head"><span class="sec-num">§7</span><h2>What the log says</h2></div>
+  <div class="prose">
+    <p>Condensed for whoever picks up the next bucket:</p>
+    <p><strong>Error positions lie; bisection doesn&rsquo;t.</strong> The reported position was the start of the failed statement, three layers of tooling below where the failure lived. Truncate-and-retry located every one of the five bugs; reading the error message located none of them.</p>
+    <p><strong>A parser that accepts prefixes hides every other bug.</strong> Bugs 1&ndash;3 were invisible for months partly because bug 4 converted their failures into quietly-wrong successes. When a milestone is &ldquo;make X parse,&rdquo; the first commit should be making <em>failure loud</em>.</p>
+    <p><strong>Uniform failure means one cause.</strong> Ninety-eight tests, one error string, two missing definitions. Sizing work by test count assumes failures are independent; check that assumption before writing the estimate.</p>
+    <p><strong>The whole input space includes comments.</strong> A single <code>&#8658;</code> in a comment blocked the flagship milestone. Character-level code that indexes bytes must be tested on multi-byte input, and &ldquo;source code&rdquo; is multi-byte the moment someone writes prose in it.</p>
+    <p><strong>Keep the two parsers honest with equality, not vibes.</strong> Every tree-pattern rule added to the FMPL grammar is pinned by a test asserting the generated parser&rsquo;s AST equals the legacy parser&rsquo;s, node for node. DESIGN-001&rsquo;s &ldquo;both parsers describe the same language&rdquo; is only real if something fails when it stops being true.</p>
+  </div>
+
+  <div class="ledger">
+    <div class="ledger-row"><div class="count">1,398 &rarr; 1,519</div><div class="desc">tests passing, zero failures throughout — every slice landed on a green suite</div></div>
+    <div class="ledger-row"><div class="count">185 &rarr; 74</div><div class="desc">ignored tests; the metacircular-parser bucket itself went ~120 &rarr; 0</div></div>
+    <div class="ledger-row"><div class="count">6 &rarr; 9</div><div class="desc">parser-generator epoch — three postlude-affecting changes, each with a history entry</div></div>
+    <div class="ledger-row"><div class="count">#5, #6</div><div class="desc">advisory review PRs, one per phase, each based on the previous phase&rsquo;s frozen tip</div></div>
+  </div>
+
+  <div class="prose">
+    <p>The loop this log is named for: an FMPL grammar describes FMPL, generates the Rust parser that parses FMPL, and now also runs directly in FMPL&rsquo;s own grammar runtime, parsing the language that defines it. The remaining distance to full self-compilation is roadmap, not mystery — and the next traveler starts with a suite that tells the truth.</p>
+  </div>
+</section>
+
+<footer>
+  <span>FMPL &middot; MIT &middot; github.com/mparrett/fmpl (fork of nnunley/fmpl)</span>
+  <span>Field log written 2026-07-22 &middot; companion to <a href="fmpl-tour.html">the engineering tour</a></span>
+</footer>
+
+</div>
+
+</body>
+</html>
