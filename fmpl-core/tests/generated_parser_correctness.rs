@@ -672,13 +672,13 @@ fn test_async_call_parses() {
     assert!(ast.is_ok(), "Failed to parse '<- x': {:?}", ast);
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
+#[ignore = "AtInlineBlock conversion not yet implemented in the generated-parser postlude (ir_to_rust.rs)"]
 #[test]
 fn test_at_inline_pattern_block() {
     assert_evals_to("let (x = 42) x @ { y => y + 1 }", Value::Int(43));
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
+#[ignore = "AtInlineBlock conversion not yet implemented in the generated-parser postlude (ir_to_rust.rs)"]
 #[test]
 fn test_at_inline_pattern_wildcard() {
     assert_evals_to("42 @ { _ => 0 }", Value::Int(0));
@@ -840,14 +840,13 @@ fn test_object_facets_runtime() {
 
 // ===== Batch 6: Grammar Definitions =====
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
 #[test]
 fn test_grammar_simple_rule() {
     let ast = generated_parse(r#"grammar G { digit = [0-9] }"#);
     assert!(ast.is_ok(), "Failed to parse grammar: {:?}", ast);
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
+#[ignore = "canonical meta-grammar cannot yet parse multi-rule grammar bodies (missing rule-start boundary), see docs/known-gaps.md"]
 #[test]
 fn test_grammar_multiple_rules() {
     let ast = generated_parse(r#"grammar G { digit = [0-9] letter = [a-zA-Z] }"#);
@@ -858,7 +857,6 @@ fn test_grammar_multiple_rules() {
     );
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
 #[test]
 fn test_grammar_with_action() {
     let ast = generated_parse(r#"grammar G { digit = [0-9]:d => d }"#);
@@ -869,7 +867,7 @@ fn test_grammar_with_action() {
     );
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
+#[ignore = "canonical meta-grammar cannot yet parse multi-rule grammar bodies (missing rule-start boundary), see docs/known-gaps.md"]
 #[test]
 fn test_grammar_with_repetition() {
     let ast = generated_parse(r#"grammar G { digits = [0-9]+ word = [a-z]* }"#);
@@ -880,7 +878,6 @@ fn test_grammar_with_repetition() {
     );
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
 #[test]
 fn test_grammar_with_choice() {
     let ast = generated_parse(r#"grammar G { bool = "true" | "false" }"#);
@@ -891,7 +888,6 @@ fn test_grammar_with_choice() {
     );
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
 #[test]
 fn test_grammar_with_negation() {
     let ast = generated_parse(r#"grammar G { non_digit = ~[0-9] . }"#);
@@ -902,7 +898,6 @@ fn test_grammar_with_negation() {
     );
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
 #[test]
 fn test_grammar_string_literal() {
     let ast = generated_parse(r#"grammar G { hello = "hello" "world" }"#);
@@ -913,14 +908,12 @@ fn test_grammar_string_literal() {
     );
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
 #[test]
 fn test_grammar_let_binding() {
     let ast = generated_parse(r#"let g = grammar G { digit = [0-9] }"#);
     assert!(ast.is_ok(), "Failed to parse let grammar: {:?}", ast);
 }
 
-#[ignore = "Generated parser regression — bootstrap pipeline produces incorrect AST"]
 #[test]
 fn test_grammar_runtime() {
     // Define grammar and apply it

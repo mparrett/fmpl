@@ -24,7 +24,9 @@ constructs. These tests are gated on finishing that work (roadmap ITER-0004c and
 the self-compile milestone).
 
 - `fmpl-core/tests/core_prelude.rs` (98) — "fmpl_parser.fmpl grammar not yet ready"
-- `fmpl-core/tests/generated_parser_correctness.rs` (11) — "generated parser regression — bootstrap pipeline produces incorrect AST"
+- `fmpl-core/tests/generated_parser_correctness.rs` (4) — 2× multi-rule grammar
+  bodies (meta-grammar lacks a rule-start boundary), 2× `AtInlineBlock`
+  conversion missing from the generated-parser postlude
 - `fmpl-core/tests/parser_equivalence.rs`, `fmpl_interpreter.rs` — related parser-parity gaps
 
 ## 2. Pattern-matching completeness (~50)

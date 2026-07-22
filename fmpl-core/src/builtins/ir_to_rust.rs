@@ -1815,6 +1815,49 @@ fn value_to_expr(value: &Value) -> Result<Expr> {
                 rule,
             })
         }
+        // GrammarDef(name, parent, rules) -> Expr::GrammarLiteral.
+        // rules is a list of [:Rule, name, pattern, backtracking] nodes produced
+        // by the grammar_rule rule in lib/core/fmpl_parser.fmpl. Mirrors
+        // GrammarParser::parse (grammar/parser.rs) so both parsers build the
+        // same Grammar value.
+        "GrammarDef" if !children.is_empty() => {
+            let name = match &children[0] {
+                Value::String(s) => SmolStr::new(s.as_str()),
+                _ => return Err(Error::Runtime("Invalid GrammarDef name".to_string())),
+            };
+            let parent = match children.get(1) {
+                Some(Value::String(s)) if !s.is_empty() => Some(SmolStr::new(s.as_str())),
+                _ => None,
+            };
+            let mut grammar = match parent {
+                Some(p) => Grammar::with_parent(name, p),
+                None => Grammar::new(name),
+            };
+            if let Some(Value::List(rules)) = children.get(2) {
+                for rule_val in rules.iter() {
+                    if let Some((rtag, rc)) = rule_val.as_node()
+                        && rtag.as_str() == "Rule"
+                        && rc.len() >= 2
+                    {
+                        let rule_name = match &rc[0] {
+                            Value::String(s) => SmolStr::new(s.as_str()),
+                            _ => continue,
+                        };
+                        let pattern = value_to_grammar_pattern(&rc[1])?;
+                        let backtracking = matches!(rc.get(2), Some(Value::Bool(true)));
+                        grammar.add_rule(
+                            rule_name,
+                            crate::grammar::Rule {
+                                pattern,
+                                backtracking,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+            }
+            Ok(Expr::GrammarLiteral(grammar))
+        }
         "Object" if children.len() >= 2 => {
             let name = match &children[0] {
                 Value::String(s) => QualifiedName::simple(SmolStr::new(s.as_str())),
@@ -2019,6 +2062,180 @@ fn value_to_literal_pattern(value: &Value) -> Result<Pattern> {
         }
         _ => Err(Error::Runtime(format!("Unknown literal pattern type: {}", tag))),
     }
+}
+
+/// Convert a Value representing a PEG pattern to a grammar-runtime Pattern.
+/// Handles the AST nodes produced by the peg_* rules in lib/core/fmpl_parser.fmpl.
+/// Fully qualified paths: `ast::Pattern` (match patterns) is already in scope
+/// via `use super::*`, so the grammar-runtime `crate::pattern::Pattern` must
+/// stay qualified.
+fn value_to_grammar_pattern(value: &Value) -> Result<crate::pattern::Pattern> {
+    use crate::pattern::{CharPattern, Pattern as GrammarPattern, RepeatKind};
+
+    // A bare string in pattern position is a string literal.
+    if let Value::String(s) = value {
+        if s.len() == 1 {
+            return Ok(GrammarPattern::Char(CharPattern::Exact(s.chars().next().unwrap())));
+        }
+        return Ok(GrammarPattern::StringLiteral(SmolStr::new(s.as_str())));
+    }
+    let Some((tag, children)) = value.as_node() else {
+        return Err(Error::Runtime(format!("Expected pattern AST, got {:?}", value)));
+    };
+
+    match tag.as_str() {
+        "Any" => Ok(GrammarPattern::Any),
+        "StringLit" => {
+            let s = match children.first() {
+                Some(Value::String(s)) => s.clone(),
+                _ => return Err(Error::Runtime("Invalid StringLit".to_string())),
+            };
+            if s.len() == 1 {
+                Ok(GrammarPattern::Char(CharPattern::Exact(s.chars().next().unwrap())))
+            } else {
+                Ok(GrammarPattern::StringLiteral(SmolStr::new(s.as_str())))
+            }
+        }
+        "Class" => {
+            if let Some(Value::List(ranges)) = children.first() {
+                Ok(GrammarPattern::Char(CharPattern::Class(value_to_char_ranges(ranges)?)))
+            } else {
+                Err(Error::Runtime("Invalid Class".to_string()))
+            }
+        }
+        "NegatedClass" => {
+            if let Some(Value::List(ranges)) = children.first() {
+                Ok(GrammarPattern::Char(CharPattern::NegatedClass(value_to_char_ranges(ranges)?)))
+            } else {
+                Err(Error::Runtime("Invalid NegatedClass".to_string()))
+            }
+        }
+        "RuleRef" => {
+            if let Some(Value::String(name)) = children.first() {
+                Ok(GrammarPattern::ApplyRule(SmolStr::new(name.as_str())))
+            } else {
+                Err(Error::Runtime("Invalid RuleRef".to_string()))
+            }
+        }
+        "Super" => {
+            if let Some(Value::String(name)) = children.first() {
+                Ok(GrammarPattern::Super(SmolStr::new(name.as_str())))
+            } else {
+                Err(Error::Runtime("Invalid Super".to_string()))
+            }
+        }
+        "Lookahead" => match children.first() {
+            Some(inner) => Ok(GrammarPattern::Lookahead(Box::new(value_to_grammar_pattern(inner)?))),
+            None => Err(Error::Runtime("Invalid Lookahead".to_string())),
+        },
+        "Not" => match children.first() {
+            Some(inner) => Ok(GrammarPattern::Not(Box::new(value_to_grammar_pattern(inner)?))),
+            None => Err(Error::Runtime("Invalid Not".to_string())),
+        },
+        "Star" => match children.first() {
+            Some(inner) => Ok(GrammarPattern::Repeat {
+                pattern: Box::new(value_to_grammar_pattern(inner)?),
+                kind: RepeatKind::ZeroOrMore,
+            }),
+            None => Err(Error::Runtime("Invalid Star".to_string())),
+        },
+        "Plus" => match children.first() {
+            Some(inner) => Ok(GrammarPattern::Repeat {
+                pattern: Box::new(value_to_grammar_pattern(inner)?),
+                kind: RepeatKind::OneOrMore,
+            }),
+            None => Err(Error::Runtime("Invalid Plus".to_string())),
+        },
+        "Optional" => match children.first() {
+            Some(inner) => Ok(GrammarPattern::Optional(Box::new(value_to_grammar_pattern(inner)?))),
+            None => Err(Error::Runtime("Invalid Optional".to_string())),
+        },
+        "Bind" | "BindChoice" if children.len() >= 2 => {
+            let inner = value_to_grammar_pattern(&children[0])?;
+            let name = match &children[1] {
+                Value::Symbol(s) => SmolStr::new(s.as_str()),
+                Value::String(s) => SmolStr::new(s.as_str()),
+                _ => return Err(Error::Runtime("Invalid Bind name".to_string())),
+            };
+            Ok(GrammarPattern::Bind {
+                pattern: Box::new(inner),
+                name,
+                is_choice: tag.as_str() == "BindChoice",
+            })
+        }
+        "Guard" if children.len() >= 2 => {
+            let pattern = value_to_grammar_pattern(&children[0])?;
+            let predicate = value_to_expr(&children[1])?;
+            Ok(GrammarPattern::Guard {
+                pattern: Box::new(pattern),
+                predicate,
+            })
+        }
+        "Seq" => {
+            if let Some(Value::List(items)) = children.first() {
+                let patterns: Result<Vec<GrammarPattern>> =
+                    items.iter().map(value_to_grammar_pattern).collect();
+                Ok(GrammarPattern::Seq(patterns?))
+            } else {
+                Err(Error::Runtime("Invalid Seq".to_string()))
+            }
+        }
+        "Choice" => {
+            if let Some(Value::List(items)) = children.first() {
+                let patterns: Result<Vec<(GrammarPattern, bool)>> = items
+                    .iter()
+                    .map(|p| Ok((value_to_grammar_pattern(p)?, false)))
+                    .collect();
+                Ok(GrammarPattern::Choice(patterns?))
+            } else {
+                Err(Error::Runtime("Invalid Choice".to_string()))
+            }
+        }
+        "Action" if children.len() >= 2 => {
+            let pattern = value_to_grammar_pattern(&children[0])?;
+            let action = value_to_expr(&children[1])?;
+            Ok(GrammarPattern::Action {
+                pattern: Box::new(pattern),
+                action,
+            })
+        }
+        "Predicate" => match children.first() {
+            Some(expr_val) => Ok(GrammarPattern::Predicate(value_to_expr(expr_val)?)),
+            None => Err(Error::Runtime("Invalid Predicate".to_string())),
+        },
+        _ => Err(Error::Runtime(format!("Unknown grammar pattern type: {}", tag))),
+    }
+}
+
+/// Convert a list of [:Char, c] / [:Range, from, to] values (from the
+/// peg_char_range rule) to a CharRange vec.
+fn value_to_char_ranges(ranges: &[Value]) -> Result<Vec<crate::pattern::CharRange>> {
+    use crate::pattern::CharRange;
+    ranges
+        .iter()
+        .map(|r| {
+            let Some((tag, children)) = r.as_node() else {
+                return Err(Error::Runtime(format!("Expected Char or Range, got {:?}", r)));
+            };
+            let first_char = |v: Option<&Value>, what: &str| -> Result<char> {
+                match v {
+                    Some(Value::String(s)) => s
+                        .chars()
+                        .next()
+                        .ok_or_else(|| Error::Runtime(format!("Empty {}", what))),
+                    _ => Err(Error::Runtime(format!("Invalid {}", what))),
+                }
+            };
+            match tag.as_str() {
+                "Char" => Ok(CharRange::Char(first_char(children.first(), "Char")?)),
+                "Range" if children.len() >= 2 => Ok(CharRange::Range(
+                    first_char(children.first(), "Range start")?,
+                    first_char(children.get(1), "Range end")?,
+                )),
+                _ => Err(Error::Runtime(format!("Expected Char or Range, got {}", tag))),
+            }
+        })
+        .collect()
 }
 "#);
 

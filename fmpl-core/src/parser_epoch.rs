@@ -89,6 +89,12 @@
 //!   `Error::Parser` — runtime errors propagate, matching the interpreted
 //!   grammar runtime. Helper-signature + emitted-source changes, both bump
 //!   triggers.
+//! - 7 — self-hosting critical path, slice 1 (issue #4, 2026-07-21). Added the
+//!   `GrammarDef` arm to `value_to_expr` plus new `value_to_grammar_pattern` /
+//!   `value_to_char_ranges` functions in the generator postlude, so grammar
+//!   definitions parsed by the generated parser convert to
+//!   `Expr::GrammarLiteral` instead of failing with "Unknown AST node type:
+//!   GrammarDef". Postlude raw-string edit, a bump trigger.
 
 /// Parser-generator epoch. See module-level docs for the bump policy.
-pub const PARSER_EPOCH: u32 = 6;
+pub const PARSER_EPOCH: u32 = 7;
