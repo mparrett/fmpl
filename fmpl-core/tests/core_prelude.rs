@@ -137,7 +137,6 @@ fn test_fold_binary_multiple_ops() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_int_literal() {
     let mut vm = Vm::new();
     let result = eval(
@@ -159,7 +158,6 @@ fn test_fmpl_parser_int_literal() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_int_literal_single_digit() {
     let mut vm = Vm::new();
     let result = eval(
@@ -181,7 +179,6 @@ fn test_fmpl_parser_int_literal_single_digit() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_string_literal() {
     let mut vm = Vm::new();
     let result = eval(
@@ -203,7 +200,6 @@ fn test_fmpl_parser_string_literal() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_string_with_escape() {
     let mut vm = Vm::new();
     let result = eval(
@@ -226,7 +222,6 @@ fn test_fmpl_parser_string_with_escape() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_bool_true() {
     let mut vm = Vm::new();
     let result = eval(
@@ -248,7 +243,6 @@ fn test_fmpl_parser_bool_true() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_bool_false() {
     let mut vm = Vm::new();
     let result = eval(
@@ -270,7 +264,6 @@ fn test_fmpl_parser_bool_false() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_null() {
     let mut vm = Vm::new();
     let result = eval(
@@ -292,7 +285,6 @@ fn test_fmpl_parser_null() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_identifier() {
     let mut vm = Vm::new();
     let result = eval(
@@ -315,7 +307,6 @@ fn test_fmpl_parser_identifier() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_identifier_with_underscore() {
     let mut vm = Vm::new();
     let result = eval(
@@ -338,7 +329,6 @@ fn test_fmpl_parser_identifier_with_underscore() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_keyword_not_identifier() {
     let mut vm = Vm::new();
     // "true" should parse as Bool, not Var
@@ -362,7 +352,6 @@ fn test_fmpl_parser_keyword_not_identifier() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_addition() {
     let mut vm = Vm::new();
     let result = eval(
@@ -384,7 +373,6 @@ fn test_fmpl_parser_addition() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_subtraction() {
     let mut vm = Vm::new();
     let result = eval(
@@ -406,7 +394,6 @@ fn test_fmpl_parser_subtraction() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_multiplication() {
     let mut vm = Vm::new();
     let result = eval(
@@ -428,7 +415,6 @@ fn test_fmpl_parser_multiplication() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_division() {
     let mut vm = Vm::new();
     let result = eval(
@@ -450,7 +436,6 @@ fn test_fmpl_parser_division() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_modulo() {
     let mut vm = Vm::new();
     let result = eval(
@@ -472,7 +457,6 @@ fn test_fmpl_parser_modulo() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_precedence_mult_over_add() {
     let mut vm = Vm::new();
     // 1 + 2 * 3 should parse as 1 + (2 * 3), i.e., Binary(+, 1, Binary(*, 2, 3))
@@ -501,7 +485,6 @@ fn test_fmpl_parser_precedence_mult_over_add() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_left_associative() {
     let mut vm = Vm::new();
     // 1 - 2 - 3 should parse as (1 - 2) - 3, i.e., Binary(-, Binary(-, 1, 2), 3)
@@ -529,7 +512,6 @@ fn test_fmpl_parser_left_associative() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_simple_paren() {
     let mut vm = Vm::new();
     // (1) should parse as Int(1)
@@ -552,7 +534,6 @@ fn test_fmpl_parser_simple_paren() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_eq() {
     let mut vm = Vm::new();
     let result = eval(
@@ -574,7 +555,6 @@ fn test_fmpl_parser_eq() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_neq() {
     let mut vm = Vm::new();
     let result = eval(
@@ -596,7 +576,6 @@ fn test_fmpl_parser_neq() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_lt() {
     let mut vm = Vm::new();
     let result = eval(
@@ -618,7 +597,6 @@ fn test_fmpl_parser_lt() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_gt() {
     let mut vm = Vm::new();
     let result = eval(
@@ -640,7 +618,6 @@ fn test_fmpl_parser_gt() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_lte() {
     let mut vm = Vm::new();
     let result = eval(
@@ -662,7 +639,6 @@ fn test_fmpl_parser_lte() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_gte() {
     let mut vm = Vm::new();
     let result = eval(
@@ -684,7 +660,6 @@ fn test_fmpl_parser_gte() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_cmp_with_arithmetic() {
     let mut vm = Vm::new();
     // 1 + 2 < 3 * 4 should parse as Binary(<, Binary(+, 1, 2), Binary(*, 3, 4))
@@ -739,7 +714,6 @@ fn test_fmpl_parser_cmp_with_arithmetic() {
 // 4. Execute bytecode with code::eval -> result
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_full_pipeline_integer() {
     let mut vm = Vm::new();
     // Full pipeline: source -> fmpl_parser.code -> pattern match -> ir::compile -> code::eval
@@ -761,7 +735,6 @@ fn test_full_pipeline_integer() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_full_pipeline_addition() {
     let mut vm = Vm::new();
     // Simple flat expression: 1 + 2
@@ -786,7 +759,6 @@ fn test_full_pipeline_addition() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_full_pipeline_multiplication() {
     let mut vm = Vm::new();
     // Simple flat expression: 3 * 4
@@ -810,7 +782,6 @@ fn test_full_pipeline_multiplication() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_full_pipeline_comparison() {
     let mut vm = Vm::new();
     // Simple flat expression: 1 < 2
@@ -834,7 +805,6 @@ fn test_full_pipeline_comparison() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_full_pipeline_string() {
     let mut vm = Vm::new();
     let result = eval(
@@ -859,7 +829,6 @@ fn test_full_pipeline_string() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_and() {
     let mut vm = Vm::new();
     let result = eval(
@@ -881,7 +850,6 @@ fn test_fmpl_parser_and() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_or() {
     let mut vm = Vm::new();
     let result = eval(
@@ -903,7 +871,6 @@ fn test_fmpl_parser_or() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_logical_precedence() {
     let mut vm = Vm::new();
     // true || false && true should parse as true || (false && true)
@@ -932,7 +899,6 @@ fn test_fmpl_parser_logical_precedence() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_logical_with_comparison() {
     let mut vm = Vm::new();
     // 1 < 2 && 3 > 4 should parse with comparisons inside &&
@@ -968,7 +934,6 @@ fn test_fmpl_parser_logical_with_comparison() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_unary_minus() {
     let mut vm = Vm::new();
     let result = eval(
@@ -995,7 +960,6 @@ fn test_fmpl_parser_unary_minus() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_unary_not() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1022,7 +986,6 @@ fn test_fmpl_parser_unary_not() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_double_negation() {
     let mut vm = Vm::new();
     // --5 should parse as -(-5), i.e., Unary(-, Unary(-, Int(5)))
@@ -1050,7 +1013,6 @@ fn test_fmpl_parser_double_negation() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_unary_with_binary() {
     let mut vm = Vm::new();
     // -1 + 2 should parse as (-1) + 2, i.e., Binary(+, Unary(-, Int(1)), Int(2))
@@ -1082,7 +1044,6 @@ fn test_fmpl_parser_unary_with_binary() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_if_then_else() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1119,7 +1080,6 @@ fn test_fmpl_parser_if_then_else() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_if_with_comparison() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1145,7 +1105,6 @@ fn test_fmpl_parser_if_with_comparison() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_nested_if() {
     let mut vm = Vm::new();
     // Nested if: if true then (if false then 1 else 2) else 3
@@ -1177,7 +1136,6 @@ fn test_fmpl_parser_nested_if() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_let_simple() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1223,7 +1181,6 @@ fn test_fmpl_parser_let_simple() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_let_with_expr() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1264,7 +1221,6 @@ fn test_fmpl_parser_let_with_expr() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_nested_let() {
     let mut vm = Vm::new();
     // let (x = 1) let (y = 2) x + y
@@ -1370,7 +1326,6 @@ fn test_fmpl_parser_sp_with_comment() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_comment_at_end() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1392,7 +1347,6 @@ fn test_fmpl_parser_comment_at_end() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_comment_between_tokens() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1415,7 +1369,6 @@ fn test_fmpl_parser_comment_between_tokens() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_c_line_comment() {
     // C-style // comment
     let mut vm = Vm::new();
@@ -1438,7 +1391,6 @@ fn test_fmpl_parser_c_line_comment() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_block_comment() {
     // C-style /* ... */ block comment
     let mut vm = Vm::new();
@@ -1461,7 +1413,6 @@ fn test_fmpl_parser_block_comment() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_multiline_block_comment() {
     // Multi-line block comment
     let mut vm = Vm::new();
@@ -1490,7 +1441,6 @@ comment */ + 2" @ fmpl_parser.code
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_symbol_ident() {
     // Symbol with identifier name: :foo
     let mut vm = Vm::new();
@@ -1513,7 +1463,6 @@ fn test_fmpl_parser_symbol_ident() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_symbol_operator() {
     // Symbol with operator name: :+
     let mut vm = Vm::new();
@@ -1536,7 +1485,6 @@ fn test_fmpl_parser_symbol_operator() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_symbol_multi_char_op() {
     // Symbol with multi-char operator: :==
     let mut vm = Vm::new();
@@ -1563,7 +1511,6 @@ fn test_fmpl_parser_symbol_multi_char_op() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_list_empty() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1585,7 +1532,6 @@ fn test_fmpl_parser_list_empty() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_list_single() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1612,7 +1558,6 @@ fn test_fmpl_parser_list_single() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_list_multiple() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1642,7 +1587,6 @@ fn test_fmpl_parser_list_multiple() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_map_empty() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1664,7 +1608,6 @@ fn test_fmpl_parser_map_empty() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_map_colon_syntax() {
     // %{key: value} syntax
     let mut vm = Vm::new();
@@ -1691,7 +1634,6 @@ fn test_fmpl_parser_map_colon_syntax() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_map_arrow_syntax() {
     // %{key => value} syntax
     let mut vm = Vm::new();
@@ -1718,7 +1660,6 @@ fn test_fmpl_parser_map_arrow_syntax() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_map_multiple() {
     let mut vm = Vm::new();
     let result = eval(
@@ -1748,9 +1689,9 @@ fn test_fmpl_parser_map_multiple() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_tagged_empty() {
-    // Tagged value with no args: :Foo()
+    // Tagged shape with no args: [:Null] parses as a canonical list-form
+    // AST (DESIGN-002; the Tagged value variant was deleted in ITER-0004b).
     let mut vm = Vm::new();
     let result = eval(
         &mut vm,
@@ -1764,17 +1705,21 @@ fn test_fmpl_parser_tagged_empty() {
         ),
     )
     .unwrap();
-    if let Some((tag, children)) = result.as_node() {
-        assert_eq!(tag.as_str(), "Tagged");
-        assert_eq!(children[0], Value::String("Null".into()));
-        assert_eq!(children[1], Value::List(std::sync::Arc::new(vec![])));
-    }
+    let (tag, children) = result.as_node().expect("list-shaped node");
+    assert_eq!(tag.as_str(), "List");
+    let Value::List(items) = &children[0] else {
+        panic!("expected list of items, got {:?}", children[0]);
+    };
+    assert_eq!(items.len(), 1);
+    let (t0, c0) = items[0].as_node().expect("symbol node");
+    assert_eq!(t0.as_str(), "Symbol");
+    assert_eq!(c0[0], Value::String("Null".into()));
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_tagged_single_arg() {
-    // Tagged value with one arg: :Int(42)
+    // Tagged shape with one arg: [:Int, 42] parses as a canonical list-form
+    // AST (DESIGN-002): [:List, [[:Symbol, "Int"], [:Int, 42]]].
     let mut vm = Vm::new();
     let result = eval(
         &mut vm,
@@ -1788,21 +1733,24 @@ fn test_fmpl_parser_tagged_single_arg() {
         ),
     )
     .unwrap();
-    if let Some((tag, children)) = result.as_node() {
-        assert_eq!(tag.as_str(), "Tagged");
-        assert_eq!(children[0], Value::String("Int".into()));
-        if let Value::List(items) = &children[1] {
-            assert_eq!(items.len(), 1);
-        } else {
-            panic!("expected list of items, got {:?}", children[1]);
-        }
-    }
+    let (tag, children) = result.as_node().expect("list-shaped node");
+    assert_eq!(tag.as_str(), "List");
+    let Value::List(items) = &children[0] else {
+        panic!("expected list of items, got {:?}", children[0]);
+    };
+    assert_eq!(items.len(), 2);
+    let (t0, c0) = items[0].as_node().expect("symbol node");
+    assert_eq!(t0.as_str(), "Symbol");
+    assert_eq!(c0[0], Value::String("Int".into()));
+    let (t1, c1) = items[1].as_node().expect("int node");
+    assert_eq!(t1.as_str(), "Int");
+    assert_eq!(c1[0], Value::Int(42));
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_tagged_multiple_args() {
-    // Tagged value with multiple args: :Binary(:+, left, right)
+    // Tagged shape with multiple args: [:Binary, :+, 1, 2] parses as a
+    // canonical list-form AST (DESIGN-002) with four elements.
     let mut vm = Vm::new();
     let result = eval(
         &mut vm,
@@ -1816,15 +1764,15 @@ fn test_fmpl_parser_tagged_multiple_args() {
         ),
     )
     .unwrap();
-    if let Some((tag, children)) = result.as_node() {
-        assert_eq!(tag.as_str(), "Tagged");
-        assert_eq!(children[0], Value::String("Binary".into()));
-        if let Value::List(items) = &children[1] {
-            assert_eq!(items.len(), 3);
-        } else {
-            panic!("expected list of items, got {:?}", children[1]);
-        }
-    }
+    let (tag, children) = result.as_node().expect("list-shaped node");
+    assert_eq!(tag.as_str(), "List");
+    let Value::List(items) = &children[0] else {
+        panic!("expected list of items, got {:?}", children[0]);
+    };
+    assert_eq!(items.len(), 4);
+    let (t0, c0) = items[0].as_node().expect("symbol node");
+    assert_eq!(t0.as_str(), "Symbol");
+    assert_eq!(c0[0], Value::String("Binary".into()));
 }
 
 // ============================================================
@@ -1832,7 +1780,6 @@ fn test_fmpl_parser_tagged_multiple_args() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_index_simple() {
     // Simple indexing: x[0]
     let mut vm = Vm::new();
@@ -1860,7 +1807,6 @@ fn test_fmpl_parser_index_simple() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_index_chained() {
     // Chained indexing: x[0][1]
     let mut vm = Vm::new();
@@ -1888,7 +1834,6 @@ fn test_fmpl_parser_index_chained() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_index_expr() {
     // Index with expression: list[i + 1]
     let mut vm = Vm::new();
@@ -1916,7 +1861,6 @@ fn test_fmpl_parser_index_expr() {
 // ============================================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_short_lambda_single_param() {
     // Short lambda: \x x + 1
     let mut vm = Vm::new();
@@ -1944,7 +1888,6 @@ fn test_fmpl_parser_short_lambda_single_param() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_short_lambda_nested() {
     // Nested short lambdas: \x \y x + y
     let mut vm = Vm::new();
@@ -1978,7 +1921,6 @@ fn test_fmpl_parser_short_lambda_nested() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_full_lambda() {
     // Full lambda: lambda(x, y) x + y
     let mut vm = Vm::new();
@@ -2008,7 +1950,6 @@ fn test_fmpl_parser_full_lambda() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_full_lambda_empty_params() {
     // Full lambda with no params: lambda() 42
     let mut vm = Vm::new();
@@ -2040,7 +1981,6 @@ fn test_fmpl_parser_full_lambda_empty_params() {
 // ============================================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_call_no_args() {
     // Function call with no args: f()
     let mut vm = Vm::new();
@@ -2075,7 +2015,6 @@ fn test_fmpl_parser_call_no_args() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_call_single_arg() {
     // Function call with one arg: f(42)
     let mut vm = Vm::new();
@@ -2102,7 +2041,6 @@ fn test_fmpl_parser_call_single_arg() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_call_multiple_args() {
     // Function call with multiple args: f(1, 2, 3)
     let mut vm = Vm::new();
@@ -2129,7 +2067,6 @@ fn test_fmpl_parser_call_multiple_args() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_call_chained() {
     // Chained function calls: f(1)(2)
     let mut vm = Vm::new();
@@ -2158,7 +2095,6 @@ fn test_fmpl_parser_call_chained() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_call_with_index() {
     // Mixed postfix: arr[0](1)
     let mut vm = Vm::new();
@@ -2191,7 +2127,6 @@ fn test_fmpl_parser_call_with_index() {
 // ============================================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_prop_access() {
     // Property access: obj.name
     let mut vm = Vm::new();
@@ -2225,7 +2160,6 @@ fn test_fmpl_parser_prop_access() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_prop_chained() {
     // Chained property access: a.b.c
     let mut vm = Vm::new();
@@ -2258,7 +2192,6 @@ fn test_fmpl_parser_prop_chained() {
 // ============================================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_method_call_no_args() {
     // Method call with no args: obj.method()
     let mut vm = Vm::new();
@@ -2292,7 +2225,6 @@ fn test_fmpl_parser_method_call_no_args() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_method_call_with_args() {
     // Method call with args: obj.method(1, 2)
     let mut vm = Vm::new();
@@ -2318,7 +2250,6 @@ fn test_fmpl_parser_method_call_with_args() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_method_chain() {
     // Chained method calls: obj.a().b()
     let mut vm = Vm::new();
@@ -2351,7 +2282,6 @@ fn test_fmpl_parser_method_chain() {
 // ============================================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_qualified_name_two_parts() {
     // Qualified name: foo::bar
     let mut vm = Vm::new();
@@ -2384,7 +2314,6 @@ fn test_fmpl_parser_qualified_name_two_parts() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_qualified_name_three_parts() {
     // Qualified name: a::b::c
     let mut vm = Vm::new();
@@ -2411,7 +2340,6 @@ fn test_fmpl_parser_qualified_name_three_parts() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_simple_var_not_qualified() {
     // Simple variable should not be QualifiedName
     let mut vm = Vm::new();
@@ -2443,7 +2371,6 @@ fn test_fmpl_parser_simple_var_not_qualified() {
 // ============================================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_complex_arithmetic() {
     // Complex nested arithmetic: (1 + 2) * 3 - 4 / 2
     let mut vm = Vm::new();
@@ -2467,9 +2394,7 @@ fn test_fmpl_parser_complex_arithmetic() {
     }
 }
 
-// TODO: Stack overflow in grammar - needs optimization
 #[test]
-#[ignore = "stack overflow in grammar - needs optimization; fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_nested_function_calls() {
     // Nested function calls: f(g(x), h(y, z))
     let mut vm = Vm::new();
@@ -2494,7 +2419,6 @@ fn test_fmpl_parser_nested_function_calls() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_method_chain_with_args() {
     // Method chain with args: obj.foo(1).bar(2, 3).baz()
     let mut vm = Vm::new();
@@ -2523,7 +2447,6 @@ fn test_fmpl_parser_method_chain_with_args() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_lambda_with_body_expression() {
     // Lambda with complex body: \x \y x + y * 2
     let mut vm = Vm::new();
@@ -2553,7 +2476,6 @@ fn test_fmpl_parser_lambda_with_body_expression() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_if_with_complex_condition() {
     // If with complex condition: if x < 10 && y > 5 then a else b
     let mut vm = Vm::new();
@@ -2582,7 +2504,6 @@ fn test_fmpl_parser_if_with_complex_condition() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_let_with_lambda() {
     // Let with lambda value: let (f = \x x + 1) f(5)
     // Now produces :Let([:Binding(:f, :Lambda(...))], :Call(...))
@@ -2617,7 +2538,6 @@ fn test_fmpl_parser_let_with_lambda() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_list_of_lambdas() {
     // List containing lambdas: [\x x, \y y + 1]
     let mut vm = Vm::new();
@@ -2649,11 +2569,7 @@ fn test_fmpl_parser_list_of_lambdas() {
     }
 }
 
-// TODO: This test causes stack overflow due to deeply nested grammar recursion
-// when parsing maps with complex expression values and multiple entries.
-// The grammar needs optimization to handle this case.
 #[test]
-#[ignore = "stack overflow in grammar - needs optimization; fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_map_with_expressions() {
     // Map with expression values: %{a: 1 + 2, b: f(x)}
     let mut vm = Vm::new();
@@ -2678,7 +2594,6 @@ fn test_fmpl_parser_map_with_expressions() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_qualified_name_method_call() {
     // Qualified name with method call: foo::bar.method(1)
     let mut vm = Vm::new();
@@ -2704,7 +2619,6 @@ fn test_fmpl_parser_qualified_name_method_call() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_index_and_call_chain() {
     // Complex postfix chain: arr[0].foo()[1].bar
     let mut vm = Vm::new();
@@ -2729,7 +2643,6 @@ fn test_fmpl_parser_index_and_call_chain() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_comments_in_code() {
     // Code with various comment styles
     let mut vm = Vm::new();
@@ -2758,19 +2671,21 @@ fn test_fmpl_parser_comments_in_code() {
 // ============================================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_tree_grammar_explicit_recursion_simple() {
-    // Test that tree grammars use explicit rule references for recursion
-    // :Binary(:+, :Int(1), :Int(2)) should transform to :Add(:LoadInt(1), :LoadInt(2))
-    // Using expr:l syntax to apply the expr rule to children
+    // Test that tree grammars use explicit rule references for recursion:
+    // [:Binary, :+, [:Int, 1], [:Int, 2]] transforms to
+    // [:Add, [:LoadInt, 1], [:LoadInt, 2]]. Bare identifiers in list
+    // patterns are rule references (DESIGN-004), so binding uses any:n;
+    // the trailing ';' keeps the next line's '[' from parsing as an index
+    // (specs/parser-limitations.md issue 5).
     let mut vm = Vm::new();
     let result = eval(
         &mut vm,
         r#"
         let tree_transform = grammar tree_transform {
-            expr = [:Int, n] => [:LoadInt, n]
+            expr = [:Int, any:n] => [:LoadInt, n]
                  | [:Binary, :+, expr:l, expr:r] => [:Add, l, r]
-        }
+        };
         [:Binary, :+, [:Int, 1], [:Int, 2]] @ tree_transform.expr
     "#,
     )
@@ -2792,19 +2707,19 @@ fn test_tree_grammar_explicit_recursion_simple() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_tree_grammar_explicit_recursion_nested() {
-    // Test nested transformation: :Binary(:+, :Binary(:*, :Int(1), :Int(2)), :Int(3))
-    // Using expr:l syntax for recursive tree transformation
+    // Nested transformation: [:Binary, :+, [:Binary, :*, [:Int, 1],
+    // [:Int, 2]], [:Int, 3]] via recursive expr rule application.
+    // Same any:n / trailing-';' conventions as the _simple test above.
     let mut vm = Vm::new();
     let result = eval(
         &mut vm,
         r#"
         let tree_transform = grammar tree_transform {
-            expr = [:Int, n] => [:LoadInt, n]
+            expr = [:Int, any:n] => [:LoadInt, n]
                  | [:Binary, :+, expr:l, expr:r] => [:Add, l, r]
                  | [:Binary, :*, expr:l, expr:r] => [:Mul, l, r]
-        }
+        };
         [:Binary, :+, [:Binary, :*, [:Int, 1], [:Int, 2]], [:Int, 3]] @ tree_transform.expr
     "#,
     )

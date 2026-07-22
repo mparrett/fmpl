@@ -38,6 +38,15 @@ let fold_binary = lambda(first, rest)
 let prepend = lambda(item, list)
     reduce(\acc \x acc.push(x), [item], list)
 
+-- Number of elements in a list
+-- length([1, 2, 3]) => 3
+-- Grammar actions in fmpl_parser.fmpl call this; the generated parser gets a
+-- Rust helper of the same name (GRAMMAR_HELPERS in ir_to_rust.rs), so this
+-- definition is what makes the same actions work in the interpreted grammar
+-- runtime ("src" @ fmpl_parser.code).
+let length = lambda(list)
+    reduce(\acc \x acc + 1, 0, list)
+
 -- Fold index operations into nested :Index nodes
 -- fold_index(base, [i1, i2]) => [:Index, [:Index, base, i1], i2]
 let fold_index = lambda(base, indices)

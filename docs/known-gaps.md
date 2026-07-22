@@ -1,7 +1,7 @@
 # Known gaps
 
 FMPL is an experimental prototype, and the test suite encodes where the language
-is *going* as well as where it *is*. Roughly **180 tests are `#[ignore]`d** — not
+is *going* as well as where it *is*. Roughly **75 tests are `#[ignore]`d** — not
 because they're broken, but because they pin behavior for features that aren't
 finished yet. Every one now carries a machine-readable reason:
 
@@ -14,27 +14,22 @@ FMPL_SCENARIO_LIST_SKIPPED=1 cargo test -p fmpl-core scenario   # list skipped b
 This file groups those gaps by root cause so the count reads as intent, not
 neglect. Counts are approximate and drift as work lands.
 
-## 1. Metacircular parser not yet complete (~100)
+## 1. Metacircular parser (2)
 
-The largest bucket. FMPL is self-hosting by design (see
+Formerly the largest bucket (~120). FMPL is self-hosting by design (see
 `docs/design-principles.md` DESIGN-001): the canonical parser is generated from
-`lib/core/fmpl_parser.fmpl`, but that FMPL grammar doesn't yet cover the whole
-language. These tests are gated on finishing that work (roadmap ITER-0004c and
-the self-compile milestone).
+`lib/core/fmpl_parser.fmpl`.
 
-Milestone reached (issue #4, 2026-07-22): the generated parser now parses
-`lib/core/prelude.fmpl` and `lib/core/ast_to_ir.fmpl` end to end
-(tree/value patterns, multi-rule grammar bodies, newline-separated top-level
-statements, non-ASCII source, and full-input enforcement in
-`generated_parse`); `bootstrap_determinism.rs` has no ignored tests left.
+Issue #4 (2026-07-22) closed most of it: the generated parser parses
+`lib/core/prelude.fmpl` and `lib/core/ast_to_ir.fmpl` end to end (tree/value
+patterns, multi-rule grammar bodies, newline-separated top-level statements,
+non-ASCII source, and full-input enforcement in `generated_parse`), and the
+interpreted grammar runtime executes fmpl_parser.fmpl itself
+(`"src" @ fmpl_parser.code`) — `bootstrap_determinism.rs`, `core_prelude.rs`,
+and `parser_equivalence.rs` have no ignored tests left.
 
-- `fmpl-core/tests/core_prelude.rs` (95) — "fmpl_parser.fmpl grammar not yet
-  ready": these interpret fmpl_parser.fmpl in the *grammar runtime*
-  (`"true" @ fmpl_parser.code`), currently failing uniformly with
-  `Type { expected: "callable", got: "null" }` at apply time
 - `fmpl-core/tests/generated_parser_correctness.rs` (2) — `AtInlineBlock`
   conversion missing from the generated-parser postlude
-- `fmpl-core/tests/parser_equivalence.rs`, `fmpl_interpreter.rs` — related parser-parity gaps
 
 ## 2. Pattern-matching completeness (~50)
 
@@ -70,15 +65,8 @@ bootstrap compile path yet (still in legacy syntax; roadmap ITER-0004c).
 - `fmpl-web/tests/storylet_http.rs` — the `/play` storylet-rendering route is
   in progress; these assert rendered content not yet emitted.
 
-## 6. Intentionally not run by default (2)
-
-Not gaps — excluded from the default run for other reasons.
-
-- `fmpl-core/tests/bootstrap_determinism.rs` — slow / mutates process-global build
-  state; run explicitly with `-- --ignored`.
-
 ## How to help
 
 Pick a bucket, run its file with `-- --ignored`, and land the feature the tests
-describe. The metacircular-parser bucket (#1) is the critical path — most of the
-other gaps ease once the FMPL-generated parser is complete.
+describe. With the metacircular-parser bucket (#1) nearly closed, the
+pattern-matching bucket (#2) is the next-largest lever.

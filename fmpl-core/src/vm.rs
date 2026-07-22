@@ -4313,6 +4313,23 @@ impl Vm {
                 }
                 Ok(Value::String(SmolStr::new(result)))
             }
+            ("__builtin_string", "to_symbol") => {
+                // string.to_symbol(s) -> Symbol
+                // Backs the prelude's `symbol` helper; grammar actions in
+                // fmpl_parser.fmpl call symbol() when run in the interpreted
+                // grammar runtime (the generated parser uses a Rust helper).
+                //
+                // Usage:
+                //   string.to_symbol("foo") => :foo
+                //
+                match args.first() {
+                    Some(Value::String(s)) => Ok(Value::Symbol(s.clone())),
+                    Some(Value::Symbol(s)) => Ok(Value::Symbol(s.clone())),
+                    _ => Err(Error::Runtime(
+                        "string.to_symbol requires string argument".to_string(),
+                    )),
+                }
+            }
             ("__builtin_codegen", "grammar_to_ir") => {
                 // codegen.grammar_to_ir(grammar) -> Value::Tagged (parsing IR)
                 // Converts a Grammar to parsing IR for transpilation to Rust.
