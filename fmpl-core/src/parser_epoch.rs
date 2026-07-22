@@ -96,5 +96,11 @@
 //!   `Expr::GrammarLiteral` instead of failing with "Unknown AST node type:
 //!   GrammarDef". Postlude raw-string edit, a bump trigger.
 
+//! - 8 — self-hosting critical path, slice 3 (issue #4, 2026-07-22). Added
+//!   tree/value-pattern conversion arms (`SymbolLiteral` / `SymbolMatch` /
+//!   `MatchValue` / `ListMatch` / `MapMatch`) to `value_to_grammar_pattern`
+//!   in the generator postlude, paired with the new vp_* rules in
+//!   `lib/core/fmpl_parser.fmpl`. Postlude raw-string edit, a bump trigger.
+
 /// Parser-generator epoch. See module-level docs for the bump policy.
-pub const PARSER_EPOCH: u32 = 7;
+pub const PARSER_EPOCH: u32 = 8;

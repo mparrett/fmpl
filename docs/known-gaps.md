@@ -14,16 +14,24 @@ FMPL_SCENARIO_LIST_SKIPPED=1 cargo test -p fmpl-core scenario   # list skipped b
 This file groups those gaps by root cause so the count reads as intent, not
 neglect. Counts are approximate and drift as work lands.
 
-## 1. Metacircular parser not yet complete (~120)
+## 1. Metacircular parser not yet complete (~100)
 
 The largest bucket. FMPL is self-hosting by design (see
 `docs/design-principles.md` DESIGN-001): the canonical parser is generated from
 `lib/core/fmpl_parser.fmpl`, but that FMPL grammar doesn't yet cover the whole
-language, and the generated pipeline still produces incorrect ASTs for some
-constructs. These tests are gated on finishing that work (roadmap ITER-0004c and
+language. These tests are gated on finishing that work (roadmap ITER-0004c and
 the self-compile milestone).
 
-- `fmpl-core/tests/core_prelude.rs` (98) — "fmpl_parser.fmpl grammar not yet ready"
+Milestone reached (issue #4, 2026-07-22): the generated parser now parses
+`lib/core/prelude.fmpl` and `lib/core/ast_to_ir.fmpl` end to end
+(tree/value patterns, multi-rule grammar bodies, newline-separated top-level
+statements, non-ASCII source, and full-input enforcement in
+`generated_parse`); `bootstrap_determinism.rs` has no ignored tests left.
+
+- `fmpl-core/tests/core_prelude.rs` (95) — "fmpl_parser.fmpl grammar not yet
+  ready": these interpret fmpl_parser.fmpl in the *grammar runtime*
+  (`"true" @ fmpl_parser.code`), currently failing uniformly with
+  `Type { expected: "callable", got: "null" }` at apply time
 - `fmpl-core/tests/generated_parser_correctness.rs` (2) — `AtInlineBlock`
   conversion missing from the generated-parser postlude
 - `fmpl-core/tests/parser_equivalence.rs`, `fmpl_interpreter.rs` — related parser-parity gaps

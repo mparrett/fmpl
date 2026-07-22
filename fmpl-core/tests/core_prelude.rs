@@ -1301,7 +1301,6 @@ fn test_fmpl_parser_nested_let() {
 // ============================================================
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_sp_whitespace() {
     // Verify sp can parse just whitespace
     let mut vm = Vm::new();
@@ -1325,7 +1324,6 @@ fn test_fmpl_parser_sp_whitespace() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_sp_comment_only() {
     // Verify sp can parse just a comment (no leading whitespace)
     let mut vm = Vm::new();
@@ -1349,7 +1347,6 @@ fn test_fmpl_parser_sp_comment_only() {
 }
 
 #[test]
-#[ignore = "fmpl_parser.fmpl grammar not yet ready"]
 fn test_fmpl_parser_sp_with_comment() {
     // Verify sp can parse whitespace + comment
     let mut vm = Vm::new();

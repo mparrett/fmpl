@@ -878,15 +878,16 @@ impl IrToRust {
             // Parsing IR nodes - for parser generation from Grammar structures
             // =================================================================
 
-            // :ParseChar(char) - match a single character
+            // :ParseChar(char) - match a single character.
+            // Byte-length-aware: pos always sits on a char boundary, but the
+            // matched char may be multi-byte, so advance by its UTF-8 length.
             "ParseChar" => {
                 let c = self.expect_string(&children[0])?;
-                let _c_char = c.chars().next().unwrap_or('\0');
                 let escaped_for_comparison = escape_string_for_rust(c.as_ref());
                 let escaped_for_error = escape_string_for_error_message(c.as_ref());
                 Ok(format!(
-                    "if input.get(pos..pos+1) == Some(\"{}\") {{ Ok((Value::String(SmolStr::new(\"{}\")), pos + 1)) }} else {{ Err(Error::Parser {{ token: pos, message: \"expected '{}'\".to_string() }}) }}",
-                    escaped_for_comparison, escaped_for_comparison, escaped_for_error
+                    "if input.get(pos..).is_some_and(|s| s.starts_with(\"{}\")) {{ Ok((Value::String(SmolStr::new(\"{}\")), pos + {})) }} else {{ Err(Error::Parser {{ token: pos, message: \"expected '{}'\".to_string() }}) }}",
+                    escaped_for_comparison, escaped_for_comparison, c.len(), escaped_for_error
                 ))
             }
 
@@ -939,14 +940,14 @@ impl IrToRust {
                 };
 
                 Ok(format!(
-                    "if let Some(c) = input.get(pos..pos+1).and_then(|s| s.chars().next()) {{ if {} {{ Ok((Value::String(SmolStr::new(&input[pos..pos+c.len_utf8()])), pos + c.len_utf8())) }} else {{ Err(Error::Parser {{ token: pos, message: \"character class mismatch\".to_string() }}) }} }} else {{ Err(Error::Parser {{ token: pos, message: \"unexpected end of input\".to_string() }}) }}",
+                    "if let Some(c) = input.get(pos..).and_then(|s| s.chars().next()) {{ if {} {{ Ok((Value::String(SmolStr::new(&input[pos..pos+c.len_utf8()])), pos + c.len_utf8())) }} else {{ Err(Error::Parser {{ token: pos, message: \"character class mismatch\".to_string() }}) }} }} else {{ Err(Error::Parser {{ token: pos, message: \"unexpected end of input\".to_string() }}) }}",
                     match_expr
                 ))
             }
 
             // :ParseAny - match any single character
             "ParseAny" => {
-                Ok("if let Some(c) = input.get(pos..pos+1).and_then(|s| s.chars().next()) { Ok((Value::String(SmolStr::new(&input[pos..pos+c.len_utf8()])), pos + c.len_utf8())) } else { Err(Error::Parser { token: pos, message: \"unexpected end of input\".to_string() }) }".to_string())
+                Ok("if let Some(c) = input.get(pos..).and_then(|s| s.chars().next()) { Ok((Value::String(SmolStr::new(&input[pos..pos+c.len_utf8()])), pos + c.len_utf8())) } else { Err(Error::Parser { token: pos, message: \"unexpected end of input\".to_string() }) }".to_string())
             }
 
             // :ParseSeq([ir1, ir2, ...]) - sequence of parsers
@@ -1208,6 +1209,18 @@ macro_rules! trace_exit {
 /// Returns a Value::Tagged representation of the AST.
 pub fn generated_parse(source: &str) -> Result<Expr> {
     match parse_code(source, 0) {
+        // A parse that stops before end of input is a FAILED parse, not a
+        // success on a prefix: silently accepting it turns syntax errors into
+        // wrong ASTs (e.g. `[1] @ g.rule` parsing as just `[1]`). pos is a
+        // byte offset.
+        Ok((_, pos)) if pos < source.len() => Err(Error::Parser {
+            token: pos,
+            message: format!(
+                "unexpected trailing input at byte {}: {:?}",
+                pos,
+                source[pos..].chars().take(20).collect::<String>()
+            ),
+        }),
         Ok((value, _pos)) => value_to_expr(&value),
         Err(e) => Err(e),
     }
@@ -2203,6 +2216,53 @@ fn value_to_grammar_pattern(value: &Value) -> Result<crate::pattern::Pattern> {
             Some(expr_val) => Ok(GrammarPattern::Predicate(value_to_expr(expr_val)?)),
             None => Err(Error::Runtime("Invalid Predicate".to_string())),
         },
+        // Tree/value patterns (vp_* rules in fmpl_parser.fmpl): match
+        // structured list/map values, mirroring GrammarParser's
+        // parse_list_pattern / parse_value_pattern / parse_map_pattern.
+        "SymbolLiteral" | "SymbolMatch" => {
+            let name = match children.first() {
+                Some(Value::String(s)) => SmolStr::new(s.as_str()),
+                Some(Value::Symbol(s)) => SmolStr::new(s.as_str()),
+                _ => return Err(Error::Runtime(format!("Invalid {} name", tag))),
+            };
+            if tag.as_str() == "SymbolLiteral" {
+                Ok(GrammarPattern::SymbolLiteral(name))
+            } else {
+                Ok(GrammarPattern::SymbolMatch(name))
+            }
+        }
+        "MatchValue" if !children.is_empty() => {
+            Ok(GrammarPattern::MatchValue(children[0].clone()))
+        }
+        "ListMatch" => {
+            let elems = match children.first() {
+                Some(Value::List(items)) => items
+                    .iter()
+                    .map(value_to_grammar_pattern)
+                    .collect::<Result<Vec<_>>>()?,
+                _ => return Err(Error::Runtime("Invalid ListMatch elements".to_string())),
+            };
+            let rest = match children.get(1) {
+                None | Some(Value::Null) => None,
+                Some(r) => Some(Box::new(value_to_grammar_pattern(r)?)),
+            };
+            Ok(GrammarPattern::ListMatch(elems, rest))
+        }
+        "MapMatch" => {
+            let mut entries = Vec::new();
+            if let Some(Value::List(pairs)) = children.first() {
+                for pair in pairs.iter() {
+                    let Value::List(kv) = pair else {
+                        return Err(Error::Runtime("Invalid MapMatch entry".to_string()));
+                    };
+                    let (Some(Value::String(k)), Some(v)) = (kv.first(), kv.get(1)) else {
+                        return Err(Error::Runtime("Invalid MapMatch entry".to_string()));
+                    };
+                    entries.push((SmolStr::new(k.as_str()), value_to_grammar_pattern(v)?));
+                }
+            }
+            Ok(GrammarPattern::MapMatch(entries))
+        }
         _ => Err(Error::Runtime(format!("Unknown grammar pattern type: {}", tag))),
     }
 }

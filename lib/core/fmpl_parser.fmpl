@@ -235,8 +235,13 @@ let fmpl_parser = grammar fmpl_parser {
 
     -- Pipe operator: |> (lower precedence than or_expr)
     pipe_op = "|" ">" sp => symbol("|>")
-    -- @ operator: grammar apply or inline pattern block
-    at_grammar_suffix = "@" sp or_expr:grammar "." ident:rule sp => [:at_grammar, grammar, symbol(rule)]
+    -- @ operator: grammar apply or inline pattern block.
+    -- The grammar operand is a plain (possibly qualified) variable, NOT a
+    -- full or_expr: postfix property access would swallow the `.rule` part
+    -- (`g.expr` parsed as PropAccess leaves nothing for the rule). The legacy
+    -- parser accepts any postfix expression and splits the last PropAccess;
+    -- in practice grammars are referenced by name, so `var` covers the corpus.
+    at_grammar_suffix = "@" sp var:grammar "." ident:rule sp => [:at_grammar, grammar, symbol(rule)]
     at_inline_suffix = "@" sp "{" sp match_cases:cases "}" sp => [:at_inline, cases]
     -- Grammar extension: <: { rules }
     grammar_extend_suffix = "<" ":" sp "{" sp grammar_rules:rules "}" sp => [:extend, rules]
@@ -365,8 +370,83 @@ let fmpl_parser = grammar fmpl_parser {
     peg_rule_ref = ~keyword ident:name sp => [:RuleRef, name]
     peg_any = "." sp => [:Any]
 
-    -- PEG primary: string, char class, any, grouping, rule ref
-    peg_primary = peg_string | peg_char_class | peg_any
+    -- Tree/value patterns: match structured list/map VALUES inside grammar
+    -- rules (OMeta-style), e.g. `[:Int, any:n] => [:LoadInt, n]` in
+    -- lib/core/ast_to_ir.fmpl. Mirrors GrammarParser::{parse_list_pattern,
+    -- parse_value_pattern, parse_map_pattern} in fmpl-core/src/grammar/parser.rs.
+
+    -- Raw ident (no keyword exclusion): rule refs and binding names inside
+    -- value patterns may shadow keywords, matching the legacy parser.
+    vp_name = ident_start:first ident_rest*:rest => join(prepend(first, rest))
+
+    -- Primary value patterns. Repetition (* / +) binds tighter than the
+    -- :binding suffix: expr*:xs = Bind(xs, Star(RuleRef expr)).
+    vp_symbol = ":" sym_name:name sp => [:SymbolMatch, name]
+    vp_true = "true" ~ident_rest => [:MatchValue, true]
+    vp_false = "false" ~ident_rest => [:MatchValue, false]
+    vp_null = "null" ~ident_rest => [:MatchValue, null]
+    vp_float = digit_char+:i "." digit_char+:f ~ident_rest
+             => [:MatchValue, float.parse(join(prepend(i, prepend(".", [f]))))]
+    vp_neg_float = "-" digit_char+:i "." digit_char+:f ~ident_rest
+                 => [:MatchValue, float.parse(join(prepend("-", prepend(i, prepend(".", [f])))))]
+    vp_int = digit_val+:ds ~ident_rest => [:MatchValue, reduce(\acc \d acc * 10 + d, 0, ds)]
+    vp_neg_int = "-" digit_val+:ds ~ident_rest => [:MatchValue, 0 - reduce(\acc \d acc * 10 + d, 0, ds)]
+    vp_string = "\"" string_char*:cs "\"" => [:MatchValue, cs]
+    vp_char = "'" "\\" escape_char:c "'" => [:MatchValue, c]
+            | "'" .:c "'" => [:MatchValue, c]
+    vp_any = "_" ~ident_rest "*" => [:Star, [:Any]]
+           | "_" ~ident_rest "+" => [:Plus, [:Any]]
+           | "_" ~ident_rest => [:Any]
+    vp_ident_ref = vp_name:name "*" => [:Star, [:RuleRef, name]]
+                 | vp_name:name "+" => [:Plus, [:RuleRef, name]]
+                 | vp_name:name => [:RuleRef, name]
+    vp_prim = vp_symbol | vp_nested_list | vp_map | vp_string | vp_char
+            | vp_true | vp_false | vp_null | vp_any
+            | vp_neg_float | vp_neg_int | vp_float | vp_int
+            | vp_ident_ref
+
+    -- Optional :binding suffix (whitespace allowed before ':', as in legacy).
+    vp = vp_prim:p sp ":" vp_name:name sp => [:Bind, p, name]
+       | vp_prim:p sp => p
+
+    -- List pattern body (after '['): comma-separated elements, optional
+    -- `| rest` tail binding, trailing comma allowed. Unlike the legacy
+    -- parser we require commas between elements (space-separated elements
+    -- are unused in practice).
+    vp_list_rest_bind = "|" sp vp_name:name sp => [:Bind, [:Any], name]
+    vp_elem_rest = "," sp vp:e => e
+    vp_items = vp:first vp_elem_rest*:rest => prepend(first, rest)
+    vp_list_body = vp_items:items ","? sp vp_list_rest_bind:r => [:ListMatch, items, r]
+                 | vp_items:items "," sp => [:ListMatch, items, null]
+                 | vp_items:items => [:ListMatch, items, null]
+                 | vp_list_rest_bind:r => [:ListMatch, [], r]
+                 | => [:ListMatch, [], null]
+    -- Nested '[' inside a value pattern is always a list pattern (no char
+    -- classes in value position).
+    vp_nested_list = "[" sp vp_list_body:b "]" sp => b
+
+    -- Map pattern: %{key: pattern, ...}; keys are idents or :symbols.
+    vp_map_key = ":" vp_name:k => k | vp_name:k => k
+    vp_map_entry = vp_map_key:k sp ":" sp vp:v => [k, v]
+    vp_map_entry_rest = "," sp vp_map_entry:e => e
+    vp_map_body = vp_map_entry:first vp_map_entry_rest*:rest => prepend(first, rest)
+                | => []
+    vp_map = "%" "{" sp vp_map_body:entries "}" sp => [:MapMatch, entries]
+
+    -- Top-level '[' disambiguation, mirroring the legacy heuristic: a list
+    -- pattern needs either a structural marker right after '[' (']', '[',
+    -- '%', '_', ':', '|') or a first element followed by ',' or '|'; anything
+    -- else falls through to peg_char_class.
+    peg_listpat = "[" sp &[\]\[%_:|] vp_list_body:b "]" sp => b
+                | "[" sp &(vp [,|]) vp_list_body:b "]" sp => b
+
+    -- Top-level symbol literal and wildcard in rule bodies.
+    peg_symbol_lit = ":" sym_name:name sp => [:SymbolLiteral, name]
+    peg_wildcard = "_" ~ident_rest sp => [:Any]
+
+    -- PEG primary: string, list pattern, char class, any, grouping, rule ref
+    peg_primary = peg_string | peg_listpat | peg_char_class | peg_any
+                | peg_symbol_lit | vp_map | peg_wildcard
                 | "(" sp peg_choice:p ")" sp => p
                 | peg_rule_ref
 
@@ -426,9 +506,12 @@ let fmpl_parser = grammar fmpl_parser {
          | fold_expr | foldr_expr | map_expr | filter_expr
          | pipe_expr
 
-    -- Top-level code: semicolon-separated statements
+    -- Top-level code: statements separated by ';' or just whitespace
+    -- (prelude.fmpl and friends use newline-separated top-level lets).
+    -- Mirrors Parser::parse, which loops statements to EOF skipping
+    -- optional semicolons.
     stmt = expr
-    stmt_rest = ";" sp stmt:s => s
+    stmt_rest = ";" sp stmt:s => s | stmt:s => s
     stmts = stmt:first stmt_rest*:rest => prepend(first, rest)
     code = sp stmts:ss sp => if length(ss) == 1 then ss[0] else [:Do, ss]
 }

@@ -84,22 +84,28 @@ fn parser_generation_is_deterministic_across_runs() {
 }
 
 #[test]
-#[ignore = "generated parser can't yet parse ast_to_ir.fmpl ('negative lookahead matched') — metacircular parser gap, see docs/known-gaps.md"]
 fn ast_to_ir_loads_through_generated_parser() {
-    cd_workspace();
-    // SAFETY: this test is #[ignore]d and won't race in default test runs.
-    unsafe { std::env::set_var("FMPL_USE_GENERATED_PARSER", "1") };
+    // Drive the generated parser directly instead of setting
+    // FMPL_USE_GENERATED_PARSER: env vars are process-global and would race
+    // with the parallel pipeline tests whose io::load honors that flag.
+    let root = workspace_root();
     let mut vm = Vm::new();
-    let prelude = eval_via_native(&mut vm, r#"io::load("lib/core/prelude.fmpl")"#);
-    let ast_to_ir = eval_via_native(&mut vm, r#"io::load("lib/core/ast_to_ir.fmpl")"#);
-    unsafe { std::env::remove_var("FMPL_USE_GENERATED_PARSER") };
-
-    prelude.expect("prelude.fmpl must load with generated parser");
-    let result = ast_to_ir.expect("ast_to_ir.fmpl must load with generated parser");
+    let mut last = Value::Null;
+    for file in ["lib/core/prelude.fmpl", "lib/core/ast_to_ir.fmpl"] {
+        let source = std::fs::read_to_string(root.join(file)).expect("read source");
+        let ast = fmpl_core::parser::generated_parse(&source)
+            .unwrap_or_else(|e| panic!("{} must parse with generated parser: {:?}", file, e));
+        let code = fmpl_core::Compiler::new()
+            .compile(&ast)
+            .unwrap_or_else(|e| panic!("{} must compile: {:?}", file, e));
+        last = vm
+            .run(&code)
+            .unwrap_or_else(|e| panic!("{} must eval: {:?}", file, e));
+    }
     assert!(
-        matches!(result, Value::Grammar(_)),
+        matches!(last, Value::Grammar(_)),
         "ast_to_ir.fmpl returned {:?} (expected a grammar value)",
-        result
+        last
     );
 }
 

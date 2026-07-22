@@ -912,6 +912,104 @@ fn test_grammar_let_binding() {
     assert!(ast.is_ok(), "Failed to parse let grammar: {:?}", ast);
 }
 
+// ===== Tree/value patterns in grammar rules (#4 self-hosting milestone 1) =====
+// ast_to_ir.fmpl relies on OMeta-style list patterns like [:Int, any:n].
+// The generated parser must both parse them and build the same Grammar the
+// legacy parser builds (checked via Expr equality with Parser::with_source).
+
+/// Parse with both parsers and assert identical Expr ASTs.
+fn assert_parsers_agree(source: &str) {
+    let generated = generated_parse(source)
+        .unwrap_or_else(|e| panic!("generated parser failed on {:?}: {:?}", source, e));
+    let tokens = fmpl_core::Lexer::new(source)
+        .tokenize()
+        .unwrap_or_else(|e| panic!("lexer failed on {:?}: {:?}", source, e));
+    let legacy = fmpl_core::parser::Parser::with_source(&tokens, source)
+        .parse()
+        .unwrap_or_else(|e| panic!("legacy parser failed on {:?}: {:?}", source, e));
+    assert_eq!(
+        generated, legacy,
+        "parser disagreement for {:?}:\n  generated: {:?}\n  legacy: {:?}",
+        source, generated, legacy
+    );
+}
+
+#[test]
+fn test_grammar_tree_pattern_flat() {
+    assert_parsers_agree(r#"let g = grammar G { expr = [:Int, any:n] => [:LoadInt, n] }"#);
+}
+
+#[test]
+fn test_grammar_tree_pattern_symbol_ops() {
+    assert_parsers_agree(
+        r#"let g = grammar G { expr = [:Binary, :+, expr:l, expr:r] => [:Add, l, r] }"#,
+    );
+}
+
+#[test]
+fn test_grammar_tree_pattern_nested() {
+    assert_parsers_agree(
+        r#"let g = grammar G { expr = [:Let, [[:Binding, any:name, expr:value]], expr:body] => [:Let, name, value, body] }"#,
+    );
+}
+
+#[test]
+fn test_grammar_tree_pattern_repetition_trailing_comma() {
+    assert_parsers_agree(r#"let g = grammar G { exprs = [expr*:xs,] => xs }"#);
+}
+
+#[test]
+fn test_grammar_tree_pattern_wildcard_bind() {
+    assert_parsers_agree(r#"let g = grammar G { pair = [_:k, expr:v] => [:Pair, k, v] }"#);
+}
+
+#[test]
+fn test_grammar_tree_pattern_rest() {
+    assert_parsers_agree(r#"let g = grammar G { l = [any:h | t] => h }"#);
+}
+
+#[test]
+fn test_grammar_tree_pattern_literals() {
+    assert_parsers_agree(r#"let g = grammar G { z = [:Tag, 1, -2, "s", true, false, null] => 1 }"#);
+}
+
+#[test]
+fn test_grammar_char_class_stays_char_class() {
+    // The list-pattern trigger must not swallow genuine char classes.
+    assert_parsers_agree(r#"let g = grammar G { digit = [0-9] word = [abc]+ us = [a-zA-Z_]* }"#);
+}
+
+#[test]
+fn test_grammar_tree_pattern_multi_alternative() {
+    assert_parsers_agree(
+        r#"let g = grammar G {
+    expr = [:Int, any:n] => [:LoadInt, n]
+         | [:Bool, any:b] => [:LoadBool, b]
+         | [:Null] => [:LoadNull]
+}"#,
+    );
+}
+
+#[test]
+fn test_grammar_tree_pattern_runtime() {
+    // End-to-end: define a tree grammar with the generated parser and apply it.
+    let src = r#"let g = grammar G { expr = [:Int, any:n] => [:LoadInt, n] }"#;
+    let ast = generated_parse(src).expect("tree grammar must parse");
+    let code = Compiler::new().compile(&ast).unwrap();
+    let mut vm = Vm::new();
+    vm.run(&code).unwrap();
+
+    let apply = generated_parse(r#"[:Int, 42] @ g.expr"#).expect("apply must parse");
+    let code2 = Compiler::new().compile(&apply).unwrap();
+    let result = vm.run(&code2).unwrap();
+    assert_eq!(
+        result,
+        Value::List(
+            vec![Value::Symbol(SmolStr::new("LoadInt")), Value::Int(42)].into()
+        )
+    );
+}
+
 #[test]
 fn test_grammar_runtime() {
     // Define grammar and apply it
