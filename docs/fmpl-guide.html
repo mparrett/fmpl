@@ -463,6 +463,8 @@ cargo run -p fmpl-cli   # the REPL
 cargo run -p fmpl-web   # web UI on http://localhost:3000
 cargo run -p fmpl-tui   # terminal UI</code></pre>
 
+  <p class="note">There&rsquo;s also a <a href="repl.html" target="_blank" rel="noopener">full browser REPL</a> for blank-slate scratch sessions (opens in a new tab) — but the guided path continues right here: every block below runs in place.</p>
+
   <div class="prose">
     <p><strong>FMPL is expression-oriented</strong>: every expression produces a value, and statements don&rsquo;t exist. Literals evaluate to themselves:</p>
   </div>
@@ -1366,9 +1368,11 @@ for (const pre of document.querySelectorAll("pre.run")) {
   const link = document.createElement("a");
   link.className = "quiet";
   link.href = deepLinkFor(src);
+  link.target = "_blank";
+  link.rel = "noopener";
   link.textContent = "↗";
-  link.title = "open in the full REPL — shareable link";
-  link.setAttribute("aria-label", "Open this snippet in the full browser REPL");
+  link.title = "open in the full REPL — shareable link (new tab)";
+  link.setAttribute("aria-label", "Open this snippet in the full browser REPL (new tab)");
 
   bar.append(run, finish, reset, edit, verdict, link);
   pre.after(bar);
