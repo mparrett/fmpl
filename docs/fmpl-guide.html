@@ -1123,6 +1123,9 @@ async function heroBoot() {
   }
   // The hint line stays in the scrollback — it's a comment in the session,
   // not chrome to be cleared, so the first step doesn't shift the screen.
+  // The input placeholder does retire, though: once the session is going,
+  // an empty prompt should just be an empty prompt.
+  heroCmd.placeholder = "";
   return heroVm;
 }
 
@@ -1175,6 +1178,7 @@ heroResetBtn.addEventListener("click", () => {
   heroStep.hidden = false;
   heroResetBtn.hidden = true;
   heroVerdict.textContent = "";
+  heroCmd.placeholder = "…or type FMPL here";
 });
 
 heroTerm.addEventListener("click", (ev) => {
