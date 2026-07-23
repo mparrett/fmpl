@@ -50,3 +50,14 @@ rkyv = { version = "0.8", features = ["smol_str-0_3"] }
 # Async streaming
 tokio-stream = "0.1"
 async-trait = "0.1"
+
+# Size-tuned profile for the browser wasm build only (pages.yml). Safe with
+# panic="abort": VM errors are Results by design (no catch_unwind in-tree),
+# so unwinding machinery is pure weight here. ~2.1MB -> ~1.1MB raw.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
