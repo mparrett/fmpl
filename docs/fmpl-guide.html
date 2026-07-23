@@ -335,17 +335,29 @@
   #runall-badge { color: var(--muted); }
   #runall-badge.ok { color: var(--works); }
   #runall-badge.bad { color: var(--missing); }
-  #runall {
-    background: none;
-    border: 1px solid var(--line-strong);
-    border-radius: 3px;
-    color: var(--accent-ink);
-    font: inherit;
-    padding: 0.1rem 0.55rem;
-    cursor: pointer;
+  .blockbar .quiet {
+    color: var(--faint);
+    text-decoration: none;
+    font-size: 0.8rem;
   }
-  #runall:hover:not(:disabled) { border-color: var(--accent); }
-  #runall:disabled { color: var(--faint); cursor: wait; }
+  .blockbar .quiet:hover { color: var(--accent-ink); }
+
+  /* ---------- live hero ---------- */
+  #hero-term { margin-bottom: 0; }
+  #hero-bar { margin: 0.75rem 0 1rem; }
+  #hero-inrow { display: flex; gap: 0.5ch; align-items: baseline; }
+  #hero-cmd {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    font: inherit;
+    color: var(--term-ink);
+    caret-color: var(--term-amber);
+    padding: 0;
+    min-width: 8ch;
+  }
+  #hero-cmd::placeholder { color: var(--term-muted); opacity: 1; }
 
   /* ---------- field notes ---------- */
   .fieldnote {
@@ -408,23 +420,17 @@
     <span><b>Source</b> TUTORIAL.md + DEMO.md</span>
     <span><b>CI-verified</b> every snippet executed on push</span>
     <span><b>Companion</b> to the <a href="fmpl-tour.html">engineering tour</a></span>
-    <span><button id="runall" type="button">▸ run all blocks</button> <span id="runall-badge"></span></span>
   </div>
 
-  <div class="term" role="img" aria-label="An FMPL REPL session demonstrating strings, streams, and cursors">
-<span class="bar">$ just repl &nbsp;·&nbsp; FMPL v0.1.0</span><span class="p">fmpl&gt;</span> let greeting = "Hello, "
-<span class="o">=&gt; "Hello, "</span>
-<span class="p">fmpl&gt;</span> greeting + "FMPL!"
-<span class="o">=&gt; "Hello, FMPL!"</span>
-<span class="p">fmpl&gt;</span> let data = [10, 20, 30]
-<span class="o">=&gt; [10, 20, 30]</span>
-<span class="p">fmpl&gt;</span> let cursor = stream::observe(data)
-<span class="o">=&gt; &lt;cursor branch:main pos:0&gt;</span>
-<span class="p">fmpl&gt;</span> cursor::current(cursor::advance(cursor, 1))
-<span class="o">=&gt; 20</span>
-<span class="p">fmpl&gt;</span> .quit
-<span class="c">Bye!</span></div>
-  <p class="term-cap">A flavor of the REPL — or skip the transcript and <a href="repl.html">run FMPL in your browser</a>, no install. Every <code>fmpl</code> snippet on this page comes from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, which CI executes against the real interpreter on every push: the <code>-- Returns:</code> comments are asserted, not aspirational. Don&rsquo;t take CI&rsquo;s word for it — press <b>▸&nbsp;run</b> on any block (or <b>run all</b> above) and the same VM, compiled to WebAssembly, re-verifies the documented results right here. <b>edit</b> makes any block yours.</p>
+  <div class="term" id="hero-term">
+<span class="bar">$ fmpl &nbsp;·&nbsp; live session — this terminal is real</span><span id="hero-screen"><span class="c">-- press ▸ run to step through a session, or type below.</span>
+</span><span id="hero-inrow"><span class="p">fmpl&gt;</span> <input id="hero-cmd" autocomplete="off" spellcheck="false" aria-label="FMPL input" placeholder="…or type FMPL here"></span></div>
+  <div class="blockbar" id="hero-bar">
+    <button id="hero-step" type="button">▸ run</button>
+    <button id="hero-reset" type="button" hidden>reset</button>
+    <span class="verdict"></span>
+  </div>
+  <p class="term-cap">Everything on this page comes from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, which CI executes against the real interpreter on every push — the <code>-- Returns:</code> comments are asserted, not aspirational. The blocks below run too: press <b>▸&nbsp;run</b> to step through any of them, one statement at a time.</p>
 </header>
 
 <nav class="toc" aria-label="Contents">
@@ -1014,6 +1020,12 @@ let result = agent_turn("Search for latest Rust version", [])</code></pre>
   <div class="sec-head"><span class="sec-num">§13</span><h2>Status at a glance</h2></div>
   <div class="prose">
     <p>The short version of what&rsquo;s real today. The <a href="fmpl-tour.html#capabilities">tour&rsquo;s §4</a> carries the full verified capability list and <a href="fmpl-tour.html#gaps">§5 the gap ledger</a>; <code>docs/known-gaps.md</code> in the repo is the canonical inventory, grouped by root cause.</p>
+    <p>And don&rsquo;t take the page&rsquo;s word for any of it: <b>verify</b> re-runs every block above in a fresh VM, right here in your browser, and reports a verdict per block — without disturbing the text.</p>
+  </div>
+  <div class="blockbar" id="verify-bar">
+    <button id="verify" type="button">✓ verify this page</button>
+    <button id="resetall" type="button" hidden>reset all blocks</button>
+    <span id="runall-badge"></span>
   </div>
 
   <div class="two-col">
@@ -1044,24 +1056,130 @@ let result = agent_turn("Search for latest Rust version", [])</code></pre>
 </div>
 
 <script type="module">
-// Run-in-place: every pre.run block executes against the real VM (the same
-// wasm the browser REPL uses — fetched lazily, cached across pages) in a
-// fresh ReplVm per run, which is exactly the CI doctest harness's semantics.
-// Live results replace the documented `-- Returns:` claims, with a ✓/✗
-// verdict per statement. Deep links into the full REPL remain for sharing.
-import { runBlock, annotationValue } from "./fmpl-live.js";
+// Live page: the hero terminal is a real session, and every pre.run block
+// steps statement-by-statement against the same VM the browser REPL uses
+// (fetched lazily, cached across pages). Each block run gets a fresh
+// ReplVm — the CI doctest harness's semantics — and live results replace
+// the documented `-- Returns:` claims with ✓/✗. §13's "verify this page"
+// re-runs everything non-destructively. Deep links remain for sharing.
+import { createRunner, runBlock, annotationValue } from "./fmpl-live.js";
 
-let enginePromise = null;
+let engineMod = null, enginePromise = null;
 function engine() {
   enginePromise ??= (async () => {
     const mod = await import("./repl/fmpl_wasm.js");
     await mod.default();
+    engineMod = mod;
     return mod;
   })();
   return enginePromise;
 }
+const wrap = (vm) => ({ eval: (x) => vm.eval(x), is_complete: (x) => vm.is_complete(x) });
 
-const state = new Map(); // pre -> { src, cur, bar, editbox }
+// ---------------- hero: a real session ----------------
+const HERO_SESSION = [
+  'let greeting = "Hello, "',
+  'greeting + "FMPL!"',
+  'let data = [10, 20, 30]',
+  'let cursor = stream::observe(data)',
+  'cursor::current(cursor::advance(cursor, 1))',
+];
+const heroTerm = document.getElementById("hero-term");
+const heroScreen = document.getElementById("hero-screen");
+const heroCmd = document.getElementById("hero-cmd");
+const heroPromptEl = document.querySelector("#hero-inrow .p");
+const heroStep = document.getElementById("hero-step");
+const heroResetBtn = document.getElementById("hero-reset");
+const heroVerdict = document.querySelector("#hero-bar .verdict");
+let heroVm = null, heroIdx = 0, heroBuffer = "", heroBooted = false;
+
+function heroPrint(cls, text) {
+  const span = document.createElement("span");
+  span.className = cls;
+  span.textContent = text + "\n";
+  heroScreen.appendChild(span);
+  heroTerm.scrollTop = heroTerm.scrollHeight;
+}
+function heroEcho(line, cont) {
+  const row = document.createElement("span");
+  const p = document.createElement("span");
+  p.className = "p";
+  p.textContent = cont ? "....> " : "fmpl> ";
+  row.append(p, document.createTextNode(line + "\n"));
+  heroScreen.appendChild(row);
+  heroTerm.scrollTop = heroTerm.scrollHeight;
+}
+function heroOut(out) {
+  heroPrint(out.startsWith("Error:") ? "c" : "o", out);
+}
+async function heroBoot() {
+  if (!heroVm) {
+    heroVerdict.textContent = engineMod ? "" : "loading VM…";
+    const mod = await engine();
+    heroVm ??= new mod.ReplVm();
+    heroVerdict.textContent = "";
+  }
+  if (!heroBooted) { heroScreen.replaceChildren(); heroBooted = true; }
+  return heroVm;
+}
+
+heroStep.addEventListener("click", async () => {
+  heroStep.disabled = true;
+  try {
+    const vm = await heroBoot();
+    if (heroIdx < HERO_SESSION.length) {
+      const line = HERO_SESSION[heroIdx++];
+      heroEcho(line, false);
+      heroOut(vm.eval(line));
+    }
+    heroResetBtn.hidden = false;
+    if (heroIdx >= HERO_SESSION.length) {
+      heroStep.hidden = true;
+      heroVerdict.textContent = "✓ session stepped — the prompt is yours";
+      heroCmd.focus();
+    }
+  } finally {
+    heroStep.disabled = false;
+  }
+});
+
+heroCmd.addEventListener("keydown", async (ev) => {
+  if (ev.key !== "Enter") return;
+  const line = heroCmd.value;
+  heroCmd.value = "";
+  const vm = await heroBoot();
+  heroResetBtn.hidden = false;
+  const cont = heroBuffer.length > 0;
+  heroEcho(line, cont);
+  heroBuffer = cont ? heroBuffer + "\n" + line : line;
+  if (heroBuffer.trim() === "") { heroBuffer = ""; return; }
+  if (!vm.is_complete(heroBuffer) && line.trim() !== "") {
+    heroPromptEl.textContent = "....>";
+    return;
+  }
+  heroPromptEl.textContent = "fmpl>";
+  const src = heroBuffer;
+  heroBuffer = "";
+  heroOut(vm.eval(src));
+});
+
+heroResetBtn.addEventListener("click", () => {
+  if (heroVm) { heroVm.free(); heroVm = null; }
+  heroIdx = 0; heroBuffer = ""; heroBooted = false;
+  heroPromptEl.textContent = "fmpl>";
+  heroScreen.replaceChildren();
+  heroPrint("c", "-- press ▸ run to step through a session, or type below.");
+  heroStep.hidden = false;
+  heroResetBtn.hidden = true;
+  heroVerdict.textContent = "";
+});
+
+heroTerm.addEventListener("click", (ev) => {
+  if (ev.target.tagName !== "BUTTON" && ev.target.tagName !== "A") heroCmd.focus();
+});
+
+// ---------------- blocks: step-first ----------------
+const state = new Map(); // pre -> { src, cur, bar, els, editbox, vm, runner, events }
 
 function deepLinkFor(code) {
   const stripped = code.split("\n")
@@ -1095,54 +1213,99 @@ function renderTranscript(pre, source, events) {
   pre.querySelector("code").replaceChildren(frag);
 }
 
-async function runPre(pre) {
-  const s = state.get(pre);
-  const btn = s.bar.querySelector(".runbtn");
-  btn.disabled = true;
-  const prev = btn.textContent;
-  btn.textContent = "loading VM…";
-  try {
-    const mod = await engine();
-    if (s.editbox) {
-      s.cur = s.editbox.value;
-      closeEditor(pre);
-    }
-    const vm = new mod.ReplVm();
-    const events = runBlock(
-      { eval: (x) => vm.eval(x), is_complete: (x) => vm.is_complete(x) },
-      s.cur,
-    );
-    vm.free();
-    renderTranscript(pre, s.cur, events);
-    const checks = events.filter((e) => e.ok !== null);
-    const bad = events.filter((e) => e.ok === false || e.text.startsWith("Error:"));
-    const v = s.bar.querySelector(".verdict");
-    v.className = "verdict " + (bad.length ? "bad" : "ok");
-    v.textContent = bad.length
+function verdictFor(events) {
+  const checks = events.filter((e) => e.ok !== null);
+  const bad = events.filter((e) => e.ok === false || e.text.startsWith("Error:"));
+  return {
+    bad: bad.length,
+    text: bad.length
       ? `✗ ${bad.length} result${bad.length > 1 ? "s" : ""} differ`
       : checks.length
         ? `✓ ${checks.length}/${checks.length} documented results verified`
-        : "✓ ran clean";
-    s.bar.querySelector(".resetbtn").hidden = false;
-    return bad.length === 0;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = prev === "loading VM…" ? "▸ run" : prev;
+        : "✓ ran clean",
+  };
+}
+
+function setControls(s, mode) {
+  // mode: "pristine" | "stepping" | "done"
+  s.els.run.textContent = mode === "stepping" ? "▸ next" : mode === "done" ? "▸ run again" : "▸ run";
+  s.els.finish.hidden = mode !== "stepping";
+  s.els.reset.hidden = mode === "pristine";
+  s.els.edit.hidden = mode === "pristine";
+}
+
+function freeRun(s) {
+  if (s.vm) { s.vm.free(); s.vm = null; }
+  s.runner = null;
+}
+
+async function beginRun(pre) {
+  const s = state.get(pre);
+  if (!engineMod) {
+    s.els.run.disabled = true;
+    const prev = s.els.run.textContent;
+    s.els.run.textContent = "loading VM…";
+    try { await engine(); } finally {
+      s.els.run.textContent = prev;
+      s.els.run.disabled = false;
+    }
   }
+  if (s.editbox) { s.cur = s.editbox.value; closeEditor(pre); }
+  if (!s.runner) {
+    freeRun(s);
+    s.vm = new engineMod.ReplVm();
+    s.runner = createRunner(wrap(s.vm), s.cur);
+    s.events = [];
+  }
+  return s;
+}
+
+function afterStep(pre, s) {
+  renderTranscript(pre, s.cur, s.events);
+  if (s.runner.done) {
+    const v = verdictFor(s.events);
+    s.els.verdict.className = "verdict " + (v.bad ? "bad" : "ok");
+    s.els.verdict.textContent = v.text;
+    freeRun(s);
+    setControls(s, "done");
+    return v.bad === 0;
+  }
+  s.els.verdict.className = "verdict";
+  s.els.verdict.textContent = "";
+  setControls(s, "stepping");
+  return null;
+}
+
+async function stepPre(pre) {
+  const s = await beginRun(pre);
+  const e = s.runner.step();
+  if (e) s.events.push(e);
+  return afterStep(pre, s);
+}
+
+async function finishPre(pre) {
+  const s = await beginRun(pre);
+  for (let e = s.runner.step(); e !== null; e = s.runner.step()) s.events.push(e);
+  return afterStep(pre, s);
 }
 
 function resetPre(pre) {
   const s = state.get(pre);
   closeEditor(pre);
+  freeRun(s);
+  s.events = [];
   s.cur = s.src;
   pre.querySelector("code").textContent = s.src;
-  s.bar.querySelector(".verdict").textContent = "";
-  s.bar.querySelector(".resetbtn").hidden = true;
+  s.els.verdict.className = "verdict";
+  s.els.verdict.textContent = "";
+  setControls(s, "pristine");
 }
 
 function openEditor(pre) {
   const s = state.get(pre);
   if (s.editbox) return;
+  freeRun(s);
+  s.events = [];
   s.editbox = document.createElement("textarea");
   s.editbox.className = "editbox";
   s.editbox.value = s.cur;
@@ -1157,9 +1320,11 @@ function openEditor(pre) {
 function closeEditor(pre) {
   const s = state.get(pre);
   if (!s.editbox) return;
+  s.cur = s.editbox.value;
   s.editbox.remove();
   s.editbox = null;
   pre.style.display = "";
+  pre.querySelector("code").textContent = s.cur;
 }
 
 for (const pre of document.querySelectorAll("pre.run")) {
@@ -1167,54 +1332,79 @@ for (const pre of document.querySelectorAll("pre.run")) {
   const bar = document.createElement("div");
   bar.className = "blockbar";
 
-  const runbtn = document.createElement("button");
-  runbtn.className = "runbtn";
-  runbtn.type = "button";
-  runbtn.textContent = "▸ run";
-  runbtn.addEventListener("click", () => runPre(pre));
+  const run = document.createElement("button");
+  run.type = "button";
+  run.textContent = "▸ run";
+  run.addEventListener("click", () => stepPre(pre));
 
-  const editbtn = document.createElement("button");
-  editbtn.type = "button";
-  editbtn.textContent = "edit";
-  editbtn.addEventListener("click", () => {
+  const finish = document.createElement("button");
+  finish.type = "button";
+  finish.textContent = "≫ finish";
+  finish.hidden = true;
+  finish.addEventListener("click", () => finishPre(pre));
+
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.textContent = "reset";
+  reset.hidden = true;
+  reset.addEventListener("click", () => resetPre(pre));
+
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.textContent = "edit";
+  edit.hidden = true;
+  edit.addEventListener("click", () => {
     const s = state.get(pre);
     if (s.editbox) closeEditor(pre);
     else openEditor(pre);
   });
 
-  const resetbtn = document.createElement("button");
-  resetbtn.className = "resetbtn";
-  resetbtn.type = "button";
-  resetbtn.textContent = "reset";
-  resetbtn.hidden = true;
-  resetbtn.addEventListener("click", () => resetPre(pre));
-
   const verdict = document.createElement("span");
   verdict.className = "verdict";
 
   const link = document.createElement("a");
+  link.className = "quiet";
   link.href = deepLinkFor(src);
-  link.textContent = "open in REPL ↗";
+  link.textContent = "↗";
+  link.title = "open in the full REPL — shareable link";
+  link.setAttribute("aria-label", "Open this snippet in the full browser REPL");
 
-  bar.append(runbtn, editbtn, resetbtn, verdict, link);
+  bar.append(run, finish, reset, edit, verdict, link);
   pre.after(bar);
-  state.set(pre, { src, cur: src, bar, editbox: null });
+  state.set(pre, { src, cur: src, bar, editbox: null, vm: null, runner: null, events: [],
+                   els: { run, finish, reset, edit, verdict } });
 }
 
-// Page-level verification: run every block, fresh VM each, tally the result.
+// ---------------- §13: verify this page (non-destructive) ----------------
 const badge = document.getElementById("runall-badge");
-document.getElementById("runall").addEventListener("click", async (ev) => {
+const resetAllBtn = document.getElementById("resetall");
+document.getElementById("verify").addEventListener("click", async (ev) => {
   ev.target.disabled = true;
-  const pres = [...document.querySelectorAll("pre.run")];
-  let good = 0;
   badge.className = "";
-  for (let i = 0; i < pres.length; i++) {
-    badge.textContent = `running ${i + 1}/${pres.length}…`;
-    if (await runPre(pres[i])) good++;
+  try {
+    await engine();
+    const pres = [...document.querySelectorAll("pre.run")];
+    let good = 0;
+    for (let i = 0; i < pres.length; i++) {
+      badge.textContent = `verifying ${i + 1}/${pres.length}…`;
+      const s = state.get(pres[i]);
+      const vm = new engineMod.ReplVm();
+      // Verify the documented source, not user edits — the page's claims.
+      const v = verdictFor(runBlock(wrap(vm), s.src));
+      vm.free();
+      if (v.bad === 0) good++;
+      s.els.verdict.className = "verdict " + (v.bad ? "bad" : "ok");
+      s.els.verdict.textContent = v.bad ? v.text : "✓ verified";
+    }
+    badge.className = good === pres.length ? "ok" : "bad";
+    badge.textContent = `${good}/${pres.length} blocks verified in your browser`;
+    resetAllBtn.hidden = false;
+  } finally {
+    ev.target.disabled = false;
   }
-  badge.className = good === pres.length ? "ok" : "bad";
-  badge.textContent = `${good}/${pres.length} blocks verified in your browser`;
-  ev.target.disabled = false;
+});
+resetAllBtn.addEventListener("click", () => {
+  for (const pre of document.querySelectorAll("pre.run")) resetPre(pre);
 });
 </script>
 

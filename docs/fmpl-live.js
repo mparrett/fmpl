@@ -109,24 +109,34 @@ function valuesMatch(actual, expected) {
   return false;
 }
 
-// Run one documented block against `vm` ({ eval, is_complete }). Returns
-// events for rendering: { kind: "result", afterIdx, text, ok } where ok is
-// true/false when the statement had a documented value, null otherwise.
-// Annotation-only lines are skipped as code but claimed as expectations.
-export function runBlock(vm, source) {
+// Statement-by-statement runner over a documented block, against `vm`
+// ({ eval, is_complete }). step() executes the next statement and returns
+// an event { afterIdx, text, ok, expected, expectedIdx } — ok is true/false
+// when the statement had a documented value (`-- Returns:` conventions),
+// null otherwise; expectedIdx marks an annotation-only line a renderer may
+// replace with the live result. Returns null when the block is exhausted.
+export function createRunner(vm, source) {
   const rawLines = source.split("\n");
   const codeLines = rawLines.map((l) => (annotationValue(l) !== null ? "" : l));
   const units = normalizeUnits(codeLines.join("\n"));
+  let i = 0;
 
-  const events = [];
-  let buffer = "", bufferEnd = -1, bufferExpected = null;
+  function step() {
+    let buffer = "", bufferEnd = -1, bufferExpected = null;
+    while (i < units.length) {
+      const { text, endIdx } = units[i];
+      i++;
+      if (buffer === "" && text.trim() === "") continue;
+      buffer = buffer === "" ? text : buffer + "\n" + text;
+      bufferEnd = endIdx;
+      const t = trailingAnnotation(text);
+      if (t !== null) bufferExpected = t;
+      if (text.trim() === "" || vm.is_complete(buffer)) break;
+    }
+    if (buffer.trim() === "") return null;
 
-  const flush = () => {
-    if (buffer.trim() === "") { buffer = ""; return; }
     // An annotation-only line right after the statement is its expectation
     // (trailing annotations on the statement's own lines take precedence).
-    // expectedIdx marks that line so a renderer can replace the documented
-    // claim with the live result.
     let expected = bufferExpected, expectedIdx = null;
     if (expected === null) {
       for (let j = bufferEnd + 1; j < rawLines.length; j++) {
@@ -141,18 +151,19 @@ export function runBlock(vm, source) {
       const actual = out.replace(/^=>\s*/, "");
       ok = valuesMatch(actual, expected);
     }
-    events.push({ kind: "result", afterIdx: bufferEnd, text: out, ok, expected, expectedIdx });
-    buffer = ""; bufferExpected = null;
-  };
-
-  for (const { text, endIdx } of units) {
-    if (buffer === "" && text.trim() === "") continue;
-    buffer = buffer === "" ? text : buffer + "\n" + text;
-    bufferEnd = endIdx;
-    const t = trailingAnnotation(text);
-    if (t !== null) bufferExpected = t;
-    if (text.trim() === "" || vm.is_complete(buffer)) flush();
+    return { afterIdx: bufferEnd, text: out, ok, expected, expectedIdx };
   }
-  if (buffer !== "") flush();
+
+  return {
+    step,
+    get done() { return units.slice(i).every((u) => u.text.trim() === ""); },
+  };
+}
+
+// Run a whole documented block: drain a fresh runner, return all events.
+export function runBlock(vm, source) {
+  const runner = createRunner(vm, source);
+  const events = [];
+  for (let e = runner.step(); e !== null; e = runner.step()) events.push(e);
   return events;
 }
