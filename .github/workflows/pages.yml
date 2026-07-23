@@ -43,8 +43,8 @@ jobs:
           FMPL_BOOTSTRAP_PHASE=1 cargo build -p fmpl-bootstrap
           touch fmpl-core/build.rs
 
-      - name: Build fmpl-wasm (release)
-        run: cargo build -p fmpl-wasm --release --target wasm32-unknown-unknown
+      - name: Build fmpl-wasm (size-tuned wasm-release profile)
+        run: cargo build -p fmpl-wasm --profile wasm-release --target wasm32-unknown-unknown
 
       # Must match the exact wasm-bindgen version pinned in fmpl-wasm/Cargo.toml.
       - name: Install wasm-bindgen CLI
@@ -52,8 +52,16 @@ jobs:
 
       - name: Generate JS bindings into the site
         run: |
-          wasm-bindgen target/wasm32-unknown-unknown/release/fmpl_wasm.wasm \
+          wasm-bindgen target/wasm32-unknown-unknown/wasm-release/fmpl_wasm.wasm \
             --out-dir docs/repl --target web --no-typescript
+
+      # Rust emits bulk-memory ops by default; wasm-opt must be told.
+      - name: Shrink with wasm-opt
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q binaryen
+          wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+            --strip-producers docs/repl/fmpl_wasm_bg.wasm -o docs/repl/fmpl_wasm_bg.wasm
+          ls -l docs/repl/fmpl_wasm_bg.wasm
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
