@@ -38,3 +38,35 @@ pub fn repl_is_complete(source: &str) -> bool {
 pub fn repl_reset() {
     VM.with(|vm| *vm.borrow_mut() = Vm::new());
 }
+
+/// An independent VM instance, for pages that need more than the one global
+/// session — e.g. the language guide's run-in-place blocks, where each run
+/// gets a fresh VM (the doctest harness's semantics) while a console keeps
+/// its own long-lived session.
+#[wasm_bindgen]
+pub struct ReplVm {
+    vm: Vm,
+}
+
+#[wasm_bindgen]
+impl ReplVm {
+    #[wasm_bindgen(constructor)]
+    #[allow(clippy::new_without_default)] // wasm-bindgen constructors are `new` by contract
+    pub fn new() -> ReplVm {
+        ReplVm { vm: Vm::new() }
+    }
+
+    /// Evaluate source against this instance's VM. Same output contract as
+    /// [`repl_eval`]: `=> value` or `Error: ...`.
+    pub fn eval(&mut self, source: &str) -> String {
+        match eval(&mut self.vm, source) {
+            Ok(value) => format!("=> {value}"),
+            Err(e) => format!("Error: {e}"),
+        }
+    }
+
+    /// Same completeness check as [`repl_is_complete`].
+    pub fn is_complete(&self, source: &str) -> bool {
+        is_complete(source).unwrap_or(true)
+    }
+}
