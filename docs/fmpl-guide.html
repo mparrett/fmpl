@@ -1,0 +1,1421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FMPL: The Language Guide</title>
+<link rel="prefetch" href="repl/fmpl_wasm.js">
+<link rel="prefetch" href="repl/fmpl_wasm_bg.wasm">
+<link rel="prefetch" href="fmpl-live.js">
+<style>
+  :root {
+    --ground: #f7f5f0;
+    --surface: #fffefb;
+    --panel: #f0ede4;
+    --ink: #26241e;
+    --muted: #6c6a60;
+    --faint: #97948a;
+    --accent: #a5661a;
+    --accent-ink: #8a5413;
+    --works: #296e63;
+    --works-bg: #e3ede9;
+    --partial: #986013;
+    --partial-bg: #f2e8d5;
+    --missing: #a44a3d;
+    --missing-bg: #f2e2dd;
+    --line: #e2ded2;
+    --line-strong: #cfcaba;
+    --code-bg: #f0ede4;
+    --term-ground: #16181d;
+    --term-ink: #d8d4c8;
+    --term-amber: #e0a458;
+    --term-teal: #7db8ac;
+    --term-muted: #6e7076;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #16181d;
+      --surface: #1d2026;
+      --panel: #1a1d23;
+      --ink: #e3e0d7;
+      --muted: #9b988d;
+      --faint: #6e6c64;
+      --accent: #e0a458;
+      --accent-ink: #e6b06c;
+      --works: #7db8ac;
+      --works-bg: #1d2b28;
+      --partial: #d9a763;
+      --partial-bg: #2b2519;
+      --missing: #c7705f;
+      --missing-bg: #2d1f1c;
+      --line: #2c2f37;
+      --line-strong: #3d414b;
+      --code-bg: #1a1d23;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f7f5f0;
+    --surface: #fffefb;
+    --panel: #f0ede4;
+    --ink: #26241e;
+    --muted: #6c6a60;
+    --faint: #97948a;
+    --accent: #a5661a;
+    --accent-ink: #8a5413;
+    --works: #296e63;
+    --works-bg: #e3ede9;
+    --partial: #986013;
+    --partial-bg: #f2e8d5;
+    --missing: #a44a3d;
+    --missing-bg: #f2e2dd;
+    --line: #e2ded2;
+    --line-strong: #cfcaba;
+    --code-bg: #f0ede4;
+  }
+  :root[data-theme="dark"] {
+    --ground: #16181d;
+    --surface: #1d2026;
+    --panel: #1a1d23;
+    --ink: #e3e0d7;
+    --muted: #9b988d;
+    --faint: #6e6c64;
+    --accent: #e0a458;
+    --accent-ink: #e6b06c;
+    --works: #7db8ac;
+    --works-bg: #1d2b28;
+    --partial: #d9a763;
+    --partial-bg: #2b2519;
+    --missing: #c7705f;
+    --missing-bg: #2d1f1c;
+    --line: #2c2f37;
+    --line-strong: #3d414b;
+    --code-bg: #1a1d23;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.5rem; }
+  .prose { max-width: 44rem; }
+  .prose p { margin: 0 0 1.1em; }
+  a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0.08em 0.35em;
+    overflow-wrap: anywhere;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    margin: 1.25rem 0;
+    max-width: 48rem;
+  }
+  pre code { background: none; border: none; padding: 0; white-space: pre; font-size: inherit; }
+
+  /* ---------- masthead ---------- */
+  header.masthead { padding: 4.5rem 0 0; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 1.25rem;
+  }
+  h1 {
+    font-size: clamp(2.6rem, 6vw, 4rem);
+    line-height: 1.05;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 0 0 1rem;
+    text-wrap: balance;
+  }
+  h1 .of { font-style: italic; font-weight: 400; color: var(--muted); }
+  .dek {
+    font-size: 1.3rem;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 40rem;
+    margin: 0 0 1.75rem;
+    text-wrap: balance;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.75rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    border-top: 1px solid var(--line-strong);
+    border-bottom: 1px solid var(--line-strong);
+    padding: 0.7rem 0;
+    margin-bottom: 2.5rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .meta-row b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- terminal hero ---------- */
+  .term {
+    background: var(--term-ground);
+    border: 1px solid #2c2f37;
+    border-radius: 6px;
+    padding: 1.1rem 1.4rem 1.3rem;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.75;
+    color: var(--term-ink);
+    white-space: pre;
+    overflow-x: auto;
+    margin: 0 0 1rem;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.25), 0 12px 40px -18px rgba(224,164,88,0.25);
+  }
+  .term .bar { color: var(--term-muted); display: block; margin-bottom: 0.6rem; user-select: none; }
+  .term .p { color: var(--term-amber); }
+  .term .o { color: var(--term-teal); }
+  .term .c { color: var(--term-muted); }
+  .term-cap {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    color: var(--faint);
+    margin: 0 0 1.25rem;
+  }
+
+  /* ---------- sections ---------- */
+  section { margin: 0 0 4.5rem; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    border-top: 2px solid var(--ink);
+    padding-top: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    color: var(--accent-ink);
+    white-space: nowrap;
+  }
+  h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 2.2rem 0 0.6rem;
+  }
+  h3 code { font-size: 0.85em; }
+
+  /* ---------- toc ---------- */
+  nav.toc { margin: 0 0 4.5rem; }
+  nav.toc ol {
+    list-style: none;
+    margin: 0; padding: 0;
+    columns: 2;
+    column-gap: 3rem;
+    max-width: 44rem;
+  }
+  nav.toc li { margin: 0 0 0.35rem; break-inside: avoid; }
+  nav.toc a {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--ink);
+    padding: 0.15rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  nav.toc a:hover { color: var(--accent-ink); }
+  nav.toc .n { font-family: var(--mono); font-size: 0.7rem; color: var(--accent-ink); }
+  @media (max-width: 40rem) { nav.toc ol { columns: 1; } }
+
+  /* ---------- notes & labels ---------- */
+  .note {
+    font-size: 0.9rem;
+    color: var(--muted);
+    border-left: 3px solid var(--line-strong);
+    padding: 0.1rem 0 0.1rem 1rem;
+    margin: 1.1rem 0;
+    max-width: 43rem;
+  }
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
+    white-space: nowrap;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .chip.works { color: var(--works); background: var(--works-bg); }
+  .chip.partial { color: var(--partial); background: var(--partial-bg); }
+  .chip.missing { color: var(--missing); background: var(--missing-bg); }
+  .codelabel {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    margin: 1.25rem 0 -1rem;
+  }
+  .codelabel + pre { margin-top: 1.25rem; }
+  /* ---------- run-in-place ---------- */
+  .blockbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.1rem;
+    align-items: baseline;
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.05em;
+    margin: -0.85rem 0 1.25rem;
+    max-width: 48rem;
+  }
+  .blockbar button {
+    background: none;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    color: var(--accent-ink);
+    font: inherit;
+    padding: 0.15rem 0.6rem;
+    cursor: pointer;
+  }
+  .blockbar button:hover:not(:disabled) { border-color: var(--accent); }
+  .blockbar button:disabled { color: var(--faint); cursor: wait; }
+  .blockbar .verdict { color: var(--muted); }
+  .blockbar .verdict.ok { color: var(--works); }
+  .blockbar .verdict.bad { color: var(--missing); }
+  pre .lv-out { color: var(--accent-ink); }
+  pre .lv-ok { color: var(--works); }
+  pre .lv-bad { color: var(--missing); }
+  textarea.editbox {
+    display: block;
+    width: 100%;
+    max-width: 48rem;
+    background: var(--code-bg);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    margin: 1.25rem 0;
+    color: var(--ink);
+    resize: vertical;
+  }
+  #runall-badge { color: var(--muted); }
+  #runall-badge.ok { color: var(--works); }
+  #runall-badge.bad { color: var(--missing); }
+  .blockbar .quiet {
+    color: var(--faint);
+    text-decoration: none;
+    font-size: 0.8rem;
+  }
+  .blockbar .quiet:hover { color: var(--accent-ink); }
+
+  /* ---------- live hero ---------- */
+  #hero-term { margin-bottom: 0; }
+  #hero-bar { margin: 0.75rem 0 3.5rem; }
+  #hero-inrow { display: flex; gap: 0.5ch; align-items: baseline; }
+  #hero-cmd {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    font: inherit;
+    color: var(--term-ink);
+    caret-color: var(--term-amber);
+    padding: 0;
+    min-width: 8ch;
+  }
+  #hero-cmd::placeholder { color: var(--term-muted); opacity: 1; }
+
+  /* ---------- field notes ---------- */
+  .fieldnote {
+    border-left: 3px solid var(--accent);
+    background: var(--panel);
+    padding: 1rem 1.4rem;
+    margin: 1.75rem 0;
+    max-width: 44rem;
+  }
+  .fieldnote .fn-label {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+  .fieldnote p { margin: 0 0 0.75em; font-size: 0.95rem; }
+  .fieldnote p:last-child { margin-bottom: 0; }
+
+  /* ---------- capability list ---------- */
+  .caps { list-style: none; margin: 1.25rem 0; padding: 0; max-width: 48rem; }
+  .caps li {
+    display: flex;
+    gap: 0.9rem;
+    align-items: baseline;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.95rem;
+  }
+  .caps .chip { flex-shrink: 0; min-width: 4.4rem; text-align: center; }
+  .caps li .what { flex: 1; }
+  .caps li .what code { white-space: nowrap; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0 2.5rem; align-items: start; }
+  @media (max-width: 52rem) { .two-col { grid-template-columns: 1fr; } }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 2px solid var(--ink);
+    padding: 1.25rem 0 4rem;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 2rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Language guide &middot; github.com/mparrett/fmpl</p>
+  <h1>FMPL<span class="of">, the language guide</span></h1>
+  <p class="dek">Norman Nunley&rsquo;s tutorial for experienced programmers, rendered for the web — expressions, pattern matching, grammars, objects, and the metaprogramming pipeline.</p>
+  <div class="meta-row">
+    <span><b>Source</b> TUTORIAL.md + DEMO.md</span>
+    <span><b>CI-verified</b> every snippet executed on push</span>
+    <span><b>Companion</b> to the <a href="fmpl-tour.html">engineering tour</a></span>
+  </div>
+
+  <p class="term-cap">Everything on this page comes from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, which CI executes against the real interpreter on every push — the <code>-- Returns:</code> comments are asserted, not aspirational. And it all runs here too, starting with this terminal: press <b>▸&nbsp;run</b> to step through a session.</p>
+  <div class="term" id="hero-term">
+<span class="bar">$ fmpl &nbsp;·&nbsp; live session — this terminal is real</span><span id="hero-screen"><span class="c">-- press ▸ run to step through a session, or type below.</span>
+</span><span id="hero-inrow"><span class="p">fmpl&gt;</span> <input id="hero-cmd" autocomplete="off" spellcheck="false" aria-label="FMPL input" placeholder="…or type FMPL here"></span></div>
+  <div class="blockbar" id="hero-bar">
+    <button id="hero-step" type="button">▸ run</button>
+    <button id="hero-reset" type="button" hidden>reset</button>
+    <span class="verdict"></span>
+  </div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#quick-start"><span class="n">§1</span> Quick start</a></li>
+    <li><a href="#basics"><span class="n">§2</span> Language basics</a></li>
+    <li><a href="#data"><span class="n">§3</span> Data structures</a></li>
+    <li><a href="#patterns"><span class="n">§4</span> Pattern matching with <code>@</code></a></li>
+    <li><a href="#grammars"><span class="n">§5</span> Grammars and parsing</a></li>
+    <li><a href="#control"><span class="n">§6</span> Control flow</a></li>
+    <li><a href="#functions"><span class="n">§7</span> Functions and lambdas</a></li>
+    <li><a href="#objects"><span class="n">§8</span> Objects and methods</a></li>
+    <li><a href="#metaprogramming"><span class="n">§9</span> Metaprogramming</a></li>
+    <li><a href="#streams"><span class="n">§10</span> Streams and cursors</a></li>
+    <li><a href="#practical"><span class="n">§11</span> Practical examples</a></li>
+    <li><a href="#agents"><span class="n">§12</span> Agents and the road ahead</a></li>
+    <li><a href="#status"><span class="n">§13</span> Status at a glance</a></li>
+  </ol>
+</nav>
+
+<section id="quick-start">
+  <div class="sec-head"><span class="sec-num">§1</span><h2>Quick start</h2></div>
+  <div class="prose">
+    <p>The fastest path is this page: the terminal above is live, and every block below steps through the same VM — nothing to install. When you want the full toolchain on your machine:</p>
+  </div>
+
+<pre><code>git clone https://github.com/mparrett/fmpl.git &amp;&amp; cd fmpl
+just build              # bootstrap the FMPL-generated parser, then build
+cargo run -p fmpl-cli   # the REPL
+cargo run -p fmpl-web   # web UI on http://localhost:3000
+cargo run -p fmpl-tui   # terminal UI</code></pre>
+
+  <p class="note">There&rsquo;s also a <a href="repl.html" target="_blank" rel="noopener">full browser REPL</a> for blank-slate scratch sessions (opens in a new tab) — but the guided path continues right here: every block below runs in place.</p>
+
+  <div class="prose">
+    <p><strong>FMPL is expression-oriented</strong>: every expression produces a value, and statements don&rsquo;t exist. Literals evaluate to themselves:</p>
+  </div>
+
+<pre class="run"><code>"Hello, World!"   -- String literals evaluate to themselves
+42                -- Numbers evaluate to themselves
+true              -- Booleans evaluate to themselves</code></pre>
+
+  <div class="prose">
+    <p>One thing to internalize before anything else: <strong>FMPL is purely functional with immutable bindings</strong>. Once bound, a name cannot be reassigned. Loops are recursion; accumulation is <code>fold</code>. Most surprises for newcomers trace back to this.</p>
+  </div>
+</section>
+
+<section id="basics">
+  <div class="sec-head"><span class="sec-num">§2</span><h2>Language basics</h2></div>
+
+  <div class="prose"><h3>Primitive types</h3></div>
+<pre class="run"><code>-- Numbers
+42
+3.14
+-10
+
+-- Strings
+"Hello, World!"
+"Line 1\nLine 2\tTabbed"   -- Escape sequences: \n \t \r \\ \" \' \0
+
+-- Booleans
+true
+false
+
+-- Null
+null</code></pre>
+
+  <div class="prose"><h3>Comments</h3></div>
+<pre><code>-- Single-line comments start with double dash
+
+/*
+   Multi-line comments
+   are supported
+*/</code></pre>
+
+  <div class="prose"><h3>Arithmetic and logic</h3></div>
+<pre class="run"><code>-- Arithmetic operators
+1 + 2          -- 3
+10 - 4         -- 6
+3 * 4          -- 12
+15 / 3         -- 5
+
+-- Comparison operators
+1 == 1         -- true
+1 != 2         -- true
+5 &lt; 10         -- true
+5 &lt;= 5         -- true
+10 &gt; 5         -- true
+10 &gt;= 10       -- true
+
+-- Logical operators
+true &amp;&amp; false  -- false
+true || false  -- true
+!true          -- false</code></pre>
+
+  <p class="note">Arithmetic is checked — overflow is a clean error, not a panic. Exponentiation (<code>**</code>) is planned but not yet implemented. String concatenation uses <code>+</code> and requires both operands to be strings: a mixed <code>"n = " + 42</code> is a type mismatch and evaluates to <code>null</code>.</p>
+</section>
+
+<section id="data">
+  <div class="sec-head"><span class="sec-num">§3</span><h2>Data structures</h2></div>
+
+  <div class="prose"><h3>Lists</h3></div>
+<pre class="run"><code>-- List literals (`;` separates consecutive expressions — a `[` opening a
+-- new line would otherwise be read as indexing the previous expression)
+[1, 2, 3];
+["apple", "banana", "cherry"];
+[1, "mixed", true];
+
+-- Empty list
+[]
+
+-- Indexing, length, and (immutable) append
+let numbers = [1, 2, 3]
+numbers[0]       -- =&gt; 1
+numbers.len()    -- =&gt; 3
+numbers.push(4)  -- =&gt; [1, 2, 3, 4]  (a new list; `numbers` is unchanged)</code></pre>
+
+  <p class="note">Lists are immutable. The higher-order methods work — <code>[1, 2, 3].map(\x x * 2)</code> returns <code>[2, 4, 6]</code>, and <code>.fold()</code> is available. For element access beyond indexing, use pattern matching with the <code>@</code> operator or recursive functions.</p>
+
+  <div class="prose"><h3>Maps</h3></div>
+<pre class="run"><code>-- Map literal
+%{name: "Alice", age: 30, city: "NYC"}
+
+-- Empty map
+%{}
+
+-- Map access
+let person = %{name: "Bob", age: 25}
+person.name              -- "Bob"
+person.age               -- 25</code></pre>
+
+  <div class="prose"><h3>Objects</h3>
+    <p>FMPL is <strong>prototype-based</strong>, not class-based. Objects are created with <code>object</code> expressions — more in <a href="#objects">§8</a>:</p>
+  </div>
+<pre class="run"><code>-- Basic object (must be named)
+object counter {
+  count: 0
+  increment(): self.count + 1
+  value(): self.count
+}</code></pre>
+
+  <p class="note">Objects must be named in the current implementation. The receiver inside methods is <code>self</code> — there is no <code>this</code>. Anonymous object literals and constructors (<code>^name</code>) are planned features.</p>
+</section>
+
+<section id="patterns">
+  <div class="sec-head"><span class="sec-num">§4</span><h2>Pattern matching with <code>@</code></h2></div>
+  <div class="prose">
+    <p>The <code>@</code> operator is FMPL&rsquo;s swiss-army knife — <em>apply the thing on the right to the value on the left</em>. It covers three jobs with one mechanism: applying grammars to parse text, matching patterns against values, and transforming data via pattern-directed rules.</p>
+    <h3>Matching text</h3>
+  </div>
+<pre class="run"><code>-- Match strings against regex-style patterns
+"hello" @ {
+  [a-z]+ =&gt; "word"
+}
+-- Returns: "word" (matches [a-z]+)
+
+"12345" @ {
+  [0-9]+ =&gt; "number"
+}
+-- Returns: "number"</code></pre>
+
+  <div class="prose">
+    <h3>Matching maps</h3>
+    <p>Map patterns extract values via bindings. Arms are separated with <code>;</code>, and the OMeta-style binding syntax is <code>_:name</code>:</p>
+  </div>
+<pre class="run"><code>-- Extract values using bindings, with a wildcard fallback arm
+let response = %{status: 200, body: "ok"}
+
+response @ { %{status: _:code, body: _:msg} =&gt; msg; _ =&gt; "other" }
+-- Returns: "ok"
+
+-- Nested map patterns work too
+%{outer: %{inner: "value"}} @ { %{outer: %{inner: _:i}} =&gt; i }
+-- Returns: "value"</code></pre>
+
+  <div class="prose">
+    <p>To match on a specific <em>value</em>, bind it and guard with <code>when</code> (or its alias <code>if</code>):</p>
+  </div>
+<pre class="run"><code>%{status: 200, body: "ok"} @ {
+  %{status: _:s} when s == 200 =&gt; "success";
+  %{status: _:s} =&gt; "failed"
+}
+-- Returns: "success"
+
+%{code: 404} @ { %{code: _:c} when c == 404 =&gt; "not_found"; _ =&gt; "found" }
+-- Returns: "not_found"</code></pre>
+
+  <p class="note">Literal values directly inside map patterns (<code>%{status: 200} =&gt; ...</code>) are not yet supported — the compiler rejects them. Bind and guard, as above.</p>
+
+  <div class="prose"><h3>Matching lists</h3></div>
+<pre class="run"><code>-- Match a list and extract elements
+[1, 2, 3] @ { [ _:x, _:y, _:z ] =&gt; [x, y, z] }
+-- Returns: [1, 2, 3]
+
+-- Length must match: this arm does not match a 3-element list
+[1, 2, 3] @ { [ _:x, _:y ] =&gt; "two"; _ =&gt; "not two" }
+-- Returns: "not two"
+
+-- Empty list pattern
+[] @ { [] =&gt; "empty" }
+-- Returns: "empty"</code></pre>
+
+  <p class="note">Rest patterns (<code>[first | rest]</code>) are planned but not yet implemented. In the REPL, write <code>@ { ... }</code> match blocks on a single line with <code>;</code> between arms — multi-line <code>@ {</code> blocks are routed to the grammar engine. Multi-line works fine with the <code>match</code> keyword form.</p>
+
+<pre class="run"><code>match 5 { n if n &gt; 3 =&gt; "big"; _ =&gt; "small" }
+-- Returns: "big"</code></pre>
+
+  <div class="prose">
+    <p>And when you don&rsquo;t need a pattern at all, plain field access works:</p>
+  </div>
+<pre class="run"><code>let response = %{
+  tool: "curl.get",
+  args: %{url: "https://example.com"}
+}
+
+response.tool
+-- Returns: "curl.get"
+
+response.args.url
+-- Returns: "https://example.com"</code></pre>
+</section>
+
+<section id="grammars">
+  <div class="sec-head"><span class="sec-num">§5</span><h2>Grammars and parsing</h2></div>
+  <div class="prose">
+    <p>FMPL includes an <strong>OMeta-style PEG grammar system</strong> for parsing and transformation. Grammar rules match input and run semantic actions; capture matched text with a <code>:binding</code> suffix on a pattern element:</p>
+  </div>
+<pre class="run"><code>-- Define a grammar: capture the digits, return them from the action
+let g = grammar { num = [0-9]+:d =&gt; d }
+
+"42" @ g.num
+-- Returns: "42"
+
+-- Actions are arbitrary expressions
+let shout = grammar { word = [a-z]+:w =&gt; w + "!" }
+"hello" @ shout.word
+-- Returns: "hello!"</code></pre>
+
+  <div class="prose">
+    <p>A full JSON parser written this way ships with the repo — see <code>lib/json.fmpl</code>. The metacircular FMPL parser itself (<code>lib/core/fmpl_parser.fmpl</code>) is the largest grammar in the tree: the language&rsquo;s canonical parser is written in the language (the <a href="fmpl-tour.html#bootstrap">tour&rsquo;s §3</a> tells that story).</p>
+    <p>Built-in base grammar rules are available under <code>base::parser</code>:</p>
+  </div>
+<pre class="run"><code>-- Apply built-in base grammar rules to input
+"12345" @ base::parser.integer   -- Returns: "12345"
+"hello" @ base::parser.word      -- Returns: "hello"</code></pre>
+
+  <p class="note">Grammar inheritance (<code>&lt;:</code> with <code>&lt;super.rule&gt;</code> overrides) is a designed feature that is deliberately deferred (DESIGN-005). Compose grammars by referencing shared rules for now.</p>
+</section>
+
+<section id="control">
+  <div class="sec-head"><span class="sec-num">§6</span><h2>Control flow</h2></div>
+
+  <div class="prose"><h3>Conditionals</h3>
+    <p>FMPL uses <code>then</code>/<code>else</code> keywords, not braces — and <code>if</code> is an expression:</p>
+  </div>
+<pre class="run"><code>-- if-then-else
+if 15 &gt; 10 then "big" else "small"
+-- Returns: "big"
+
+-- Nested with expressions
+if 150 &gt; 100 then
+  "huge"
+else if 15 &gt; 10 then
+  "big"
+else
+  "small"
+-- Returns: "huge"
+
+-- With let bindings
+let (value = 42)
+  if value &gt; 10 then "big" else "small"
+-- Returns: "big"</code></pre>
+
+  <div class="prose"><h3>Loops are recursion</h3>
+    <p>There are no mutable variables, so there are no loop counters. Iteration is recursion:</p>
+  </div>
+<pre class="run"><code>-- Sum numbers recursively (lambda bound at top level)
+let sum_range = \start, end if start &gt; end then 0 else start + sum_range(start + 1, end)
+
+sum_range(1, 10)
+-- Returns: 55
+
+-- Factorial via recursion
+let factorial = \n if n &lt;= 1 then 1 else n * factorial(n - 1)
+
+factorial(5)
+-- Returns: 120</code></pre>
+
+  <p class="note">Recursion works through top-level (statement-style) <code>let</code> bindings — the lambda body resolves the name at call time. Scoped <code>let (f = ...)</code> expression bindings cannot see themselves recursively yet (a known limitation; see <code>docs/known-gaps.md</code>).</p>
+
+  <div class="prose">
+    <p>The corollary, from the demo&rsquo;s &ldquo;known limitations&rdquo; file: a <code>for</code> body cannot mutate an outer binding — <code>sum = sum + x</code> inside a loop creates a <em>new</em> <code>sum</code> in the inner scope and the outer one is unchanged. The idiomatic shape is <code>map</code> + <code>fold</code>:</p>
+  </div>
+<pre class="run"><code>let numbers = [1, 2, 3, 4, 5]
+let doubled = numbers.map(\x x * 2)
+doubled.fold(0, \acc, x acc + x)  -- =&gt; 30</code></pre>
+
+  <div class="prose"><h3>Let-bindings</h3></div>
+<pre class="run"><code>-- let-in expression (scoped binding)
+let (x = 42) x * 2
+-- Returns: 84
+
+-- Multiple bindings
+let (x = 10, y = 20) x + y
+-- Returns: 30
+
+-- Statement-style let (binds to current scope)
+let x = 42
+let y = x * 2
+y + 10
+-- Returns: 94</code></pre>
+</section>
+
+<section id="functions">
+  <div class="sec-head"><span class="sec-num">§7</span><h2>Functions and lambdas</h2></div>
+  <div class="prose">
+    <p>Functions are lambdas bound to names with <code>let</code>:</p>
+  </div>
+<pre class="run"><code>-- Bind a lambda to a name
+let add = \a, b a + b
+add(1, 2)           -- 3
+
+-- The lambda keyword form is equivalent
+let inc = lambda (n) n + 1
+inc(41)             -- 42</code></pre>
+
+  <p class="note">The <code>name(args): body</code> definition syntax only exists <em>inside</em> <code>object</code> blocks (as method definitions) — it is not a top-level function form. Functions must be defined before they&rsquo;re called.</p>
+
+  <div class="prose"><h3>Lambda forms</h3></div>
+<pre class="run"><code>-- Lambda syntax: single param, multi-param (comma-separated), curried
+\x x + 1
+\x, y x + y
+\x \y x + y
+
+-- Apply lambda immediately
+(\x x * 2)(5)       -- 10
+
+-- Store and call later
+let doubler = \x x * 2
+doubler(7)          -- 14
+
+-- Curried application
+let addc = \x \y x + y
+addc(3)(4)          -- 7</code></pre>
+
+  <div class="prose"><h3>Higher-order functions</h3></div>
+<pre class="run"><code>-- Functions can take other functions as arguments
+let apply_twice = \f, x f(f(x))
+let add_one = \x x + 1
+
+apply_twice(add_one, 5);
+-- Returns: 7
+
+-- Built-in higher-order list methods
+[1, 2, 3].map(\x x * 2)
+-- Returns: [2, 4, 6]</code></pre>
+</section>
+
+<section id="objects">
+  <div class="sec-head"><span class="sec-num">§8</span><h2>Objects and methods</h2></div>
+  <div class="prose">
+    <p>Prototype objects carry properties and methods; methods are called through the object&rsquo;s name:</p>
+  </div>
+<pre class="run"><code>-- Define object
+object counter {
+  count: 0
+  increment(): self.count + 1
+  value(): self.count
+}
+
+-- Access methods via the object name
+counter.value()       -- 0
+counter.increment()   -- 1</code></pre>
+
+  <div class="prose">
+    <p>Inside a method body, a small set of context variables is always available:</p>
+    <ul>
+      <li><code>self</code> — the receiver of the method call</li>
+      <li><code>parent</code> — the parent object, for prototype-chain lookup</li>
+      <li><code>caller</code> — the object that called this method</li>
+      <li><code>user</code> — the current user context</li>
+      <li><code>args</code> — the list of all arguments passed to the method</li>
+    </ul>
+  </div>
+<pre class="run"><code>object greeter {
+  name: "world"
+  show(): "Hello, " + self.name
+}
+
+greeter.show()
+-- Returns: "Hello, world"</code></pre>
+
+  <p class="note">The receiver is <code>self</code>, as in Python or Smalltalk — there is no <code>this</code>, and using <code>this</code> silently breaks the enclosing object definition.</p>
+</section>
+
+<section id="metaprogramming">
+  <div class="sec-head"><span class="sec-num">§9</span><h2>Metaprogramming</h2></div>
+  <div class="prose">
+    <p>FMPL supports <strong>first-class AST and IR values</strong> — you can write compilers, DSLs, and code generators entirely in FMPL. This is the language&rsquo;s thesis feature: the real bootstrap pipeline is built from exactly the pieces below.</p>
+    <h3>Tagged values</h3>
+    <p>Algebraic data types are written as lists whose first element is a symbol — the single canonical list form (DESIGN-002):</p>
+  </div>
+<pre class="run"><code>-- Create tagged values
+[:Int, 42];
+[:Binary, :+, [:Int, 1], [:Int, 2]];
+[:User, "alice", %{active: true}]
+
+-- Pattern match on tagged values (bare identifiers bind in tagged patterns)
+let value = [:Binary, :+, [:Int, 1], [:Int, 2]]
+value @ {
+  [:Binary, :+, a, b] =&gt; "addition";
+  [:Binary, :-, a, b] =&gt; "subtraction";
+  [:Int, n] =&gt; "just a number"
+}
+-- Returns: "addition"</code></pre>
+
+  <p class="note">Operator symbols like <code>:+</code>, <code>:-</code>, <code>:*</code> are ordinary symbols and can appear in tagged values and patterns. The legacy constructor syntax <code>:Int(42)</code> is rejected with a hint: use <code>[:Int, 42]</code> instead.</p>
+
+  <div class="prose"><h3>Source &rarr; AST &rarr; IR &rarr; bytecode &rarr; value</h3>
+    <p><code>ast::parse</code> turns source text into a tagged AST; <code>ir::compile</code> turns IR into executable bytecode; <code>code::eval</code> runs it:</p>
+  </div>
+<pre class="run"><code>let ast = ast::parse("1 + 2")
+-- Returns: [:Binary, :+, [:Int, 1], [:Int, 2]]
+
+let ast2 = ast::parse("if true then 1 else 2")
+-- Returns: [:If, [:Bool, true], [:Int, 1], [:Int, 2]]
+
+let code = ir::compile([:Add, [:LoadInt, 1], [:LoadInt, 2]])
+code::eval(code)
+-- Returns: 3</code></pre>
+
+  <div class="prose">
+    <p>Put the three together and a compiler is a pattern match:</p>
+  </div>
+<pre class="run"><code>-- Parse source, transform AST to IR, compile, execute
+let ast = ast::parse("1 + 2")
+
+let ir = ast @ {
+  [:Binary, :+, [:Int, a], [:Int, b]] =&gt; [:Add, [:LoadInt, a], [:LoadInt, b]];
+  [:Binary, :-, [:Int, a], [:Int, b]] =&gt; [:Sub, [:LoadInt, a], [:LoadInt, b]];
+  [:Binary, :*, [:Int, a], [:Int, b]] =&gt; [:Mul, [:LoadInt, a], [:LoadInt, b]];
+  [:Binary, :/, [:Int, a], [:Int, b]] =&gt; [:Div, [:LoadInt, a], [:LoadInt, b]]
+}
+
+let code = ir::compile(ir)
+code::eval(code)
+-- Returns: 3</code></pre>
+
+  <div class="prose">
+    <p>This is the shape of the real thing: <code>lib/core/ast_to_ir.fmpl</code> transforms full ASTs to IR the same way, and <code>ast::parse</code> itself is backed by the FMPL-written parser in <code>lib/core/fmpl_parser.fmpl</code> (DESIGN-001, the metacircular bootstrap). Supported IR nodes: <code>LoadNull</code>, <code>LoadBool</code>, <code>LoadInt</code>, <code>LoadFloat</code>, <code>LoadString</code>, <code>LoadVar</code>, <code>Var</code>, <code>Add</code>, <code>Sub</code>, <code>Mul</code>, <code>Div</code>, <code>Mod</code>, <code>Neg</code>, <code>Not</code>, <code>Eq</code>, <code>NotEq</code>, <code>Lt</code>, <code>Gt</code>, <code>LtEq</code>, <code>GtEq</code>, <code>Let</code>, <code>Seq</code>, <code>If</code>, <code>Return</code>, <code>MakeList</code>, <code>MakeTagged</code>.</p>
+  </div>
+</section>
+
+<section id="streams">
+  <div class="sec-head"><span class="sec-num">§10</span><h2>Streams and cursors</h2></div>
+  <div class="prose">
+    <p>Streaming is FMPL&rsquo;s first-class concern, and the observable surface today is the cursor API: observe a value as a stream, then move a cursor over it. Cursors are immutable — advancing one returns a <em>new</em> cursor:</p>
+  </div>
+<pre class="run"><code>let data = [10, 20, 30]
+let cursor = stream::observe(data)
+
+-- Get current position
+cursor::position(cursor)  -- =&gt; 0 (Int)
+
+-- Advance cursor
+let advanced = cursor::advance(cursor, 1)
+cursor::current(advanced)  -- =&gt; 20
+
+-- Rewind cursor
+let rewound = cursor::rewind(advanced, 1)
+cursor::current(rewound)  -- =&gt; 10</code></pre>
+
+  <div class="prose">
+    <p>Multiple cursors over the same stream are independent (copy-on-write):</p>
+  </div>
+<pre class="run"><code>let data = [10, 20, 30]
+let cursor1 = stream::observe(data)
+let cursor2 = stream::observe(data)
+
+cursor::position(cursor1)  -- =&gt; 0
+cursor::position(cursor2)  -- =&gt; 0 (independent cursor)
+
+let advanced = cursor::advance(cursor1, 1)
+cursor::position(advanced)   -- =&gt; 1
+cursor::position(cursor2)   -- =&gt; 0 (unchanged)</code></pre>
+
+  <div class="prose">
+    <p>This is the substrate the grammar engine parses over — the same cursor discipline backs backtracking and streaming input. The async operators that will surface it in the language (<code>&lt;-</code>, <code>spawn</code>, <code>|&gt;</code>) have syntax in the parser today with the runtime in progress.</p>
+  </div>
+</section>
+
+<section id="practical">
+  <div class="sec-head"><span class="sec-num">§11</span><h2>Practical examples</h2></div>
+
+  <div class="prose"><h3>JSON parsing and validation</h3></div>
+<pre class="run"><code>-- Parse JSON string
+let json_str = "{\"name\": \"Alice\", \"age\": 30}"
+
+-- Use json::parse builtin
+let parsed = json::parse(json_str)
+-- Returns: %{age: 30, name: "Alice"}
+
+-- Validate structure
+parsed @ {
+  %{name: _:n, age: _:a} when a &gt;= 18 =&gt; "Adult: " + n;
+  %{name: _:n, age: _:a} =&gt; "Minor: " + n;
+  _ =&gt; "Invalid structure"
+}
+-- Returns: "Adult: Alice"</code></pre>
+
+  <div class="prose"><h3>HTTP requests</h3></div>
+  <p class="codelabel">requires network — not run by CI</p>
+<pre><code>-- Make HTTP GET request using the curl builtin
+let response = curl.get("https://api.example.com/data")
+
+-- Parse JSON response
+let data = json::parse(response)
+
+-- Extract specific fields
+data @ {
+  %{status: _:s, results: _:r} when s == "ok" =&gt; r;
+  %{error: _:e} =&gt; "Error: " + e;
+  _ =&gt; "Unknown response"
+}</code></pre>
+
+  <div class="prose"><h3>A simple agent loop</h3>
+    <p>The pattern-matching machinery is exactly what tool-call dispatch wants:</p>
+  </div>
+  <p class="codelabel">requires network — not run by CI</p>
+<pre><code>-- Dispatch tool calls by binding the tool name and guarding on it
+let handle_tool_call = \tc tc @ {
+  %{tool: _:t, args: _:a} when t == "curl.get" =&gt; curl.get(a.url);
+  %{tool: _:t, args: _:a} when t == "curl.post" =&gt; curl.post(a.url, a.body);
+  %{text: _:txt} =&gt; txt;
+  _ =&gt; "Error: Unrecognized response"
+}
+
+-- Simulate LLM response
+let llm_output = "{\"tool\": \"curl.get\", \"args\": {\"url\": \"https://example.com\"}}"
+let parsed = json::parse(llm_output)
+
+-- Handle the tool call (performs the HTTP request)
+handle_tool_call(parsed)</code></pre>
+</section>
+
+<section id="agents">
+  <div class="sec-head"><span class="sec-num">§12</span><h2>Agents and the road ahead</h2></div>
+  <div class="prose">
+    <p>FMPL is designed for <strong>agentic AI workflows</strong> — closing the loop between LLMs, tools, and human oversight. Real LLM clients ship in the standard library: <code>lib/anthropic.fmpl</code> (Claude API, requires <code>ANTHROPIC_API_KEY</code>) and <code>lib/ollama.fmpl</code> (local models), with shared plumbing in <code>lib/llm-common.fmpl</code>.</p>
+    <p>The single-turn shape is the agent loop from §11; a multi-turn loop is the same thing, recursive (<code>llm_complete</code> and <code>execute_tool</code> stand in for your LLM client and tool registry):</p>
+  </div>
+  <p class="codelabel"><span class="chip partial">design sketch</span> &nbsp;not yet runnable</p>
+<pre><code>let agent_turn = \input, history
+  llm_complete(%{history: history, input: input}) @ {
+    %{tool: _:t, args: _:a} =&gt; agent_turn(execute_tool(t, a), history);
+    %{answer: _:ans} =&gt; ans;
+    _ =&gt; "Error: Unexpected LLM output"
+  }
+
+let result = agent_turn("Search for latest Rust version", [])</code></pre>
+
+  <div class="prose">
+    <p>The project&rsquo;s north star goes further: <strong>express agent control flow as grammars</strong>. Grammar rules define behavior declaratively, backtracking gives retry-on-failure for free, and rules are inspectable data rather than opaque code. Not yet a working feature — this sketch shows the intended shape:</p>
+  </div>
+  <p class="codelabel"><span class="chip partial">design sketch</span> &nbsp;not yet runnable</p>
+<pre><code>grammar ToolAgent &lt;: base::tree {
+  -- Main loop: process messages
+  turn = message:m =&gt; {
+    let ctx = %{history: get_history()}
+    ::llm_complete(m, ctx) |&gt; tool_output
+  }
+
+  -- Handle LLM output stream
+  tool_output =
+    | %{tool: t, args: a} =&gt; {
+        let result = ::execute_tool(t, a)
+        turn(result)  -- recurse with result
+      }
+    | %{done: r} =&gt; r  -- terminate
+    | %{text: t} =&gt; t  -- stream text
+}</code></pre>
+
+  <div class="prose">
+    <p>The same goes for durable suspension: the persistence engine (Fjall-backed) exists in-core, and language-level <code>checkpoint</code> / <code>resume_from</code> builtins are designed but not yet exposed — the intended payoff is pause-and-resume workflows, human-in-the-loop approvals, and crash recovery for long-running agents.</p>
+  </div>
+</section>
+
+<section id="status">
+  <div class="sec-head"><span class="sec-num">§13</span><h2>Status at a glance</h2></div>
+  <div class="prose">
+    <p>The short version of what&rsquo;s real today. The <a href="fmpl-tour.html#capabilities">tour&rsquo;s §4</a> carries the full verified capability list and <a href="fmpl-tour.html#gaps">§5 the gap ledger</a>; <code>docs/known-gaps.md</code> in the repo is the canonical inventory, grouped by root cause.</p>
+    <p>And don&rsquo;t take the page&rsquo;s word for any of it: <b>verify</b> re-runs every block above in a fresh VM, right here in your browser, and reports a verdict per block — without disturbing the text.</p>
+  </div>
+  <div class="blockbar" id="verify-bar">
+    <button id="verify" type="button">✓ verify this page</button>
+    <button id="resetall" type="button" hidden>reset all blocks</button>
+    <span id="runall-badge"></span>
+  </div>
+
+  <div class="two-col">
+    <ul class="caps">
+      <li><span class="chip works">works</span><span class="what">Everything demonstrated above — every snippet is CI-executed against the interpreter</span></li>
+      <li><span class="chip works">works</span><span class="what">Checked arithmetic, pattern matching, grammars, objects, lambdas, recursion</span></li>
+      <li><span class="chip works">works</span><span class="what">Metaprogramming pipeline (<code>ast::parse</code> / <code>ir::compile</code> / <code>code::eval</code>)</span></li>
+      <li><span class="chip works">works</span><span class="what"><code>json::parse</code>, <code>curl.get/post</code>, stream cursors, type predicates</span></li>
+    </ul>
+    <ul class="caps">
+      <li><span class="chip partial">partial</span><span class="what">Async operators (<code>&lt;-</code>, <code>spawn</code>, <code>|&gt;</code>) — syntax in, runtime in progress</span></li>
+      <li><span class="chip partial">partial</span><span class="what">Object constructors (<code>^name</code>) — designed, implementation evolving</span></li>
+      <li><span class="chip missing">missing</span><span class="what"><code>**</code>, string interpolation, rest patterns, literal map-pattern values, recursive scoped <code>let</code></span></li>
+      <li><span class="chip missing">missing</span><span class="what">Grammar inheritance (<code>&lt;:</code>), tuple space, capability policies, durable approvals</span></li>
+    </ul>
+  </div>
+
+  <div class="prose">
+    <p>To go deeper: <a href="https://github.com/mparrett/fmpl/blob/main/TUTORIAL.md">TUTORIAL.md</a> and <a href="https://github.com/mparrett/fmpl/blob/main/DEMO.md">DEMO.md</a> are this page&rsquo;s sources of truth; <a href="https://github.com/mparrett/fmpl/tree/main/specs">specs/</a> holds the implementation specs (VM, grammars, objects, persistence), and the <a href="fmpl-tour.html">engineering tour</a> covers the architecture those specs describe.</p>
+  </div>
+</section>
+
+<footer>
+  <span>FMPL &middot; MIT &middot; github.com/mparrett/fmpl (fork of nnunley/fmpl)</span>
+  <span>Original tutorial by Norman Nunley, Jr. &middot; rendered from TUTORIAL.md + DEMO.md, CI-verified</span>
+</footer>
+
+</div>
+
+<script type="module">
+// Live page: the hero terminal is a real session, and every pre.run block
+// steps statement-by-statement against the same VM the browser REPL uses
+// (fetched lazily, cached across pages). Each block run gets a fresh
+// ReplVm — the CI doctest harness's semantics — and live results replace
+// the documented `-- Returns:` claims with ✓/✗. §13's "verify this page"
+// re-runs everything non-destructively. Deep links remain for sharing.
+import { createRunner, runBlock, annotationValue } from "./fmpl-live.js";
+
+let engineMod = null, enginePromise = null;
+function engine() {
+  enginePromise ??= (async () => {
+    const mod = await import("./repl/fmpl_wasm.js");
+    await mod.default();
+    engineMod = mod;
+    return mod;
+  })();
+  return enginePromise;
+}
+const wrap = (vm) => ({ eval: (x) => vm.eval(x), is_complete: (x) => vm.is_complete(x) });
+
+// ---------------- hero: a real session ----------------
+const HERO_SESSION = [
+  'let greeting = "Hello, "',
+  'greeting + "FMPL!"',
+  'let data = [10, 20, 30]',
+  'let cursor = stream::observe(data)',
+  'cursor::current(cursor::advance(cursor, 1))',
+];
+const heroTerm = document.getElementById("hero-term");
+const heroScreen = document.getElementById("hero-screen");
+const heroCmd = document.getElementById("hero-cmd");
+const heroPromptEl = document.querySelector("#hero-inrow .p");
+const heroStep = document.getElementById("hero-step");
+const heroResetBtn = document.getElementById("hero-reset");
+const heroVerdict = document.querySelector("#hero-bar .verdict");
+let heroVm = null, heroIdx = 0, heroBuffer = "";
+
+function heroPrint(cls, text) {
+  const span = document.createElement("span");
+  span.className = cls;
+  span.textContent = text + "\n";
+  heroScreen.appendChild(span);
+  heroTerm.scrollTop = heroTerm.scrollHeight;
+}
+function heroEcho(line, cont) {
+  const row = document.createElement("span");
+  const p = document.createElement("span");
+  p.className = "p";
+  p.textContent = cont ? "....> " : "fmpl> ";
+  row.append(p, document.createTextNode(line + "\n"));
+  heroScreen.appendChild(row);
+  heroTerm.scrollTop = heroTerm.scrollHeight;
+}
+function heroOut(out) {
+  heroPrint(out.startsWith("Error:") ? "c" : "o", out);
+}
+async function heroBoot() {
+  if (!heroVm) {
+    heroVerdict.textContent = engineMod ? "" : "loading VM…";
+    const mod = await engine();
+    heroVm ??= new mod.ReplVm();
+    heroVerdict.textContent = "";
+  }
+  // The hint line stays in the scrollback — it's a comment in the session,
+  // not chrome to be cleared, so the first step doesn't shift the screen.
+  // The input placeholder does retire, though: once the session is going,
+  // an empty prompt should just be an empty prompt.
+  heroCmd.placeholder = "";
+  return heroVm;
+}
+
+heroStep.addEventListener("click", async () => {
+  heroStep.disabled = true;
+  try {
+    const vm = await heroBoot();
+    if (heroIdx < HERO_SESSION.length) {
+      const line = HERO_SESSION[heroIdx++];
+      heroEcho(line, false);
+      heroOut(vm.eval(line));
+    }
+    heroResetBtn.hidden = false;
+    if (heroIdx >= HERO_SESSION.length) {
+      heroStep.hidden = true;
+      heroVerdict.textContent = "✓ session stepped — the prompt is yours";
+      heroCmd.focus();
+    }
+  } finally {
+    heroStep.disabled = false;
+  }
+});
+
+heroCmd.addEventListener("keydown", async (ev) => {
+  if (ev.key !== "Enter") return;
+  const line = heroCmd.value;
+  heroCmd.value = "";
+  const vm = await heroBoot();
+  heroResetBtn.hidden = false;
+  const cont = heroBuffer.length > 0;
+  heroEcho(line, cont);
+  heroBuffer = cont ? heroBuffer + "\n" + line : line;
+  if (heroBuffer.trim() === "") { heroBuffer = ""; return; }
+  if (!vm.is_complete(heroBuffer) && line.trim() !== "") {
+    heroPromptEl.textContent = "....>";
+    return;
+  }
+  heroPromptEl.textContent = "fmpl>";
+  const src = heroBuffer;
+  heroBuffer = "";
+  heroOut(vm.eval(src));
+});
+
+heroResetBtn.addEventListener("click", () => {
+  if (heroVm) { heroVm.free(); heroVm = null; }
+  heroIdx = 0; heroBuffer = "";
+  heroPromptEl.textContent = "fmpl>";
+  heroScreen.replaceChildren();
+  heroPrint("c", "-- press ▸ run to step through a session, or type below.");
+  heroStep.hidden = false;
+  heroResetBtn.hidden = true;
+  heroVerdict.textContent = "";
+  heroCmd.placeholder = "…or type FMPL here";
+});
+
+heroTerm.addEventListener("click", (ev) => {
+  if (ev.target.tagName !== "BUTTON" && ev.target.tagName !== "A") heroCmd.focus();
+});
+
+// ---------------- blocks: step-first ----------------
+const state = new Map(); // pre -> { src, cur, bar, els, editbox, vm, runner, events }
+
+function deepLinkFor(code) {
+  const stripped = code.split("\n")
+    .filter((l) => annotationValue(l) === null)
+    .join("\n").trim();
+  return "repl.html#code=" + encodeURIComponent(stripped);
+}
+
+function renderTranscript(pre, source, events) {
+  const lines = source.split("\n");
+  const replaced = new Set(events.map((e) => e.expectedIdx).filter((i) => i !== null));
+  const frag = document.createDocumentFragment();
+  lines.forEach((line, i) => {
+    if (!replaced.has(i)) frag.append(document.createTextNode(line + "\n"));
+    for (const e of events) {
+      if (e.afterIdx !== i) continue;
+      const span = document.createElement("span");
+      if (e.ok === true) {
+        span.className = "lv-ok";
+        span.textContent = `${e.text}  ✓\n`;
+      } else if (e.ok === false) {
+        span.className = "lv-bad";
+        span.textContent = `${e.text}  ✗ documented: ${e.expected}\n`;
+      } else {
+        span.className = e.text.startsWith("Error:") ? "lv-bad" : "lv-out";
+        span.textContent = `${e.text}\n`;
+      }
+      frag.append(span);
+    }
+  });
+  pre.querySelector("code").replaceChildren(frag);
+}
+
+function verdictFor(events) {
+  const checks = events.filter((e) => e.ok !== null);
+  const bad = events.filter((e) => e.ok === false || e.text.startsWith("Error:"));
+  return {
+    bad: bad.length,
+    text: bad.length
+      ? `✗ ${bad.length} result${bad.length > 1 ? "s" : ""} differ`
+      : checks.length
+        ? `✓ ${checks.length}/${checks.length} documented results verified`
+        : "✓ ran clean",
+  };
+}
+
+function setControls(s, mode) {
+  // mode: "pristine" | "stepping" | "done"
+  s.els.run.textContent = mode === "stepping" ? "▸ next" : mode === "done" ? "▸ run again" : "▸ run";
+  s.els.finish.hidden = mode !== "stepping";
+  s.els.reset.hidden = mode === "pristine";
+  s.els.edit.hidden = mode === "pristine";
+}
+
+function freeRun(s) {
+  if (s.vm) { s.vm.free(); s.vm = null; }
+  s.runner = null;
+}
+
+async function beginRun(pre) {
+  const s = state.get(pre);
+  if (!engineMod) {
+    s.els.run.disabled = true;
+    const prev = s.els.run.textContent;
+    s.els.run.textContent = "loading VM…";
+    try { await engine(); } finally {
+      s.els.run.textContent = prev;
+      s.els.run.disabled = false;
+    }
+  }
+  if (s.editbox) { s.cur = s.editbox.value; closeEditor(pre); }
+  if (!s.runner) {
+    freeRun(s);
+    s.vm = new engineMod.ReplVm();
+    s.runner = createRunner(wrap(s.vm), s.cur);
+    s.events = [];
+  }
+  return s;
+}
+
+function afterStep(pre, s) {
+  renderTranscript(pre, s.cur, s.events);
+  if (s.runner.done) {
+    const v = verdictFor(s.events);
+    s.els.verdict.className = "verdict " + (v.bad ? "bad" : "ok");
+    s.els.verdict.textContent = v.text;
+    freeRun(s);
+    setControls(s, "done");
+    return v.bad === 0;
+  }
+  s.els.verdict.className = "verdict";
+  s.els.verdict.textContent = "";
+  setControls(s, "stepping");
+  return null;
+}
+
+async function stepPre(pre) {
+  const s = await beginRun(pre);
+  const e = s.runner.step();
+  if (e) s.events.push(e);
+  return afterStep(pre, s);
+}
+
+async function finishPre(pre) {
+  const s = await beginRun(pre);
+  for (let e = s.runner.step(); e !== null; e = s.runner.step()) s.events.push(e);
+  return afterStep(pre, s);
+}
+
+function resetPre(pre) {
+  const s = state.get(pre);
+  closeEditor(pre);
+  freeRun(s);
+  s.events = [];
+  s.cur = s.src;
+  pre.querySelector("code").textContent = s.src;
+  s.els.verdict.className = "verdict";
+  s.els.verdict.textContent = "";
+  setControls(s, "pristine");
+}
+
+function openEditor(pre) {
+  const s = state.get(pre);
+  if (s.editbox) return;
+  freeRun(s);
+  s.events = [];
+  s.editbox = document.createElement("textarea");
+  s.editbox.className = "editbox";
+  s.editbox.value = s.cur;
+  s.editbox.rows = s.cur.split("\n").length + 1;
+  s.editbox.setAttribute("aria-label", "Edit FMPL snippet");
+  s.editbox.spellcheck = false;
+  pre.style.display = "none";
+  pre.after(s.editbox);
+  s.editbox.focus();
+}
+
+function closeEditor(pre) {
+  const s = state.get(pre);
+  if (!s.editbox) return;
+  s.cur = s.editbox.value;
+  s.editbox.remove();
+  s.editbox = null;
+  pre.style.display = "";
+  pre.querySelector("code").textContent = s.cur;
+}
+
+for (const pre of document.querySelectorAll("pre.run")) {
+  const src = pre.textContent.replace(/\n$/, "");
+  const bar = document.createElement("div");
+  bar.className = "blockbar";
+
+  const run = document.createElement("button");
+  run.type = "button";
+  run.textContent = "▸ run";
+  run.addEventListener("click", () => stepPre(pre));
+
+  const finish = document.createElement("button");
+  finish.type = "button";
+  finish.textContent = "≫ finish";
+  finish.hidden = true;
+  finish.addEventListener("click", () => finishPre(pre));
+
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.textContent = "reset";
+  reset.hidden = true;
+  reset.addEventListener("click", () => resetPre(pre));
+
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.textContent = "edit";
+  edit.hidden = true;
+  edit.addEventListener("click", () => {
+    const s = state.get(pre);
+    if (s.editbox) closeEditor(pre);
+    else openEditor(pre);
+  });
+
+  const verdict = document.createElement("span");
+  verdict.className = "verdict";
+
+  const link = document.createElement("a");
+  link.className = "quiet";
+  link.href = deepLinkFor(src);
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.textContent = "↗";
+  link.title = "open in the full REPL — shareable link (new tab)";
+  link.setAttribute("aria-label", "Open this snippet in the full browser REPL (new tab)");
+
+  bar.append(run, finish, reset, edit, verdict, link);
+  pre.after(bar);
+  state.set(pre, { src, cur: src, bar, editbox: null, vm: null, runner: null, events: [],
+                   els: { run, finish, reset, edit, verdict } });
+}
+
+// ---------------- §13: verify this page (non-destructive) ----------------
+const badge = document.getElementById("runall-badge");
+const resetAllBtn = document.getElementById("resetall");
+document.getElementById("verify").addEventListener("click", async (ev) => {
+  ev.target.disabled = true;
+  badge.className = "";
+  try {
+    await engine();
+    const pres = [...document.querySelectorAll("pre.run")];
+    let good = 0;
+    for (let i = 0; i < pres.length; i++) {
+      badge.textContent = `verifying ${i + 1}/${pres.length}…`;
+      const s = state.get(pres[i]);
+      const vm = new engineMod.ReplVm();
+      // Verify the documented source, not user edits — the page's claims.
+      const v = verdictFor(runBlock(wrap(vm), s.src));
+      vm.free();
+      if (v.bad === 0) good++;
+      s.els.verdict.className = "verdict " + (v.bad ? "bad" : "ok");
+      s.els.verdict.textContent = v.bad ? v.text : "✓ verified";
+    }
+    badge.className = good === pres.length ? "ok" : "bad";
+    badge.textContent = `${good}/${pres.length} blocks verified in your browser`;
+    resetAllBtn.hidden = false;
+  } finally {
+    ev.target.disabled = false;
+  }
+});
+resetAllBtn.addEventListener("click", () => {
+  for (const pre of document.querySelectorAll("pre.run")) resetPre(pre);
+});
+</script>
+
+</body>
+</html>
