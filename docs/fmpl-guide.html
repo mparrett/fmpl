@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FMPL: The Language Guide</title>
+<link rel="prefetch" href="repl/fmpl_wasm.js">
+<link rel="prefetch" href="repl/fmpl_wasm_bg.wasm">
+<link rel="prefetch" href="fmpl-live.js">
 <style>
   :root {
     --ground: #f7f5f0;
@@ -285,13 +288,64 @@
     margin: 1.25rem 0 -1rem;
   }
   .codelabel + pre { margin-top: 1.25rem; }
-  .runlink {
+  /* ---------- run-in-place ---------- */
+  .blockbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.1rem;
+    align-items: baseline;
     font-family: var(--mono);
     font-size: 0.6875rem;
     letter-spacing: 0.05em;
-    display: inline-block;
     margin: -0.85rem 0 1.25rem;
+    max-width: 48rem;
   }
+  .blockbar button {
+    background: none;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    color: var(--accent-ink);
+    font: inherit;
+    padding: 0.15rem 0.6rem;
+    cursor: pointer;
+  }
+  .blockbar button:hover:not(:disabled) { border-color: var(--accent); }
+  .blockbar button:disabled { color: var(--faint); cursor: wait; }
+  .blockbar .verdict { color: var(--muted); }
+  .blockbar .verdict.ok { color: var(--works); }
+  .blockbar .verdict.bad { color: var(--missing); }
+  pre .lv-out { color: var(--accent-ink); }
+  pre .lv-ok { color: var(--works); }
+  pre .lv-bad { color: var(--missing); }
+  textarea.editbox {
+    display: block;
+    width: 100%;
+    max-width: 48rem;
+    background: var(--code-bg);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    margin: 1.25rem 0;
+    color: var(--ink);
+    resize: vertical;
+  }
+  #runall-badge { color: var(--muted); }
+  #runall-badge.ok { color: var(--works); }
+  #runall-badge.bad { color: var(--missing); }
+  #runall {
+    background: none;
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    color: var(--accent-ink);
+    font: inherit;
+    padding: 0.1rem 0.55rem;
+    cursor: pointer;
+  }
+  #runall:hover:not(:disabled) { border-color: var(--accent); }
+  #runall:disabled { color: var(--faint); cursor: wait; }
 
   /* ---------- field notes ---------- */
   .fieldnote {
@@ -354,6 +408,7 @@
     <span><b>Source</b> TUTORIAL.md + DEMO.md</span>
     <span><b>CI-verified</b> every snippet executed on push</span>
     <span><b>Companion</b> to the <a href="fmpl-tour.html">engineering tour</a></span>
+    <span><button id="runall" type="button">▸ run all blocks</button> <span id="runall-badge"></span></span>
   </div>
 
   <div class="term" role="img" aria-label="An FMPL REPL session demonstrating strings, streams, and cursors">
@@ -369,7 +424,7 @@
 <span class="o">=&gt; 20</span>
 <span class="p">fmpl&gt;</span> .quit
 <span class="c">Bye!</span></div>
-  <p class="term-cap">A flavor of the REPL — or skip the transcript and <a href="repl.html">run FMPL in your browser</a>, no install. Every <code>fmpl</code> snippet on this page comes from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, which CI executes against the real interpreter on every push: the <code>-- Returns:</code> comments are asserted, not aspirational.</p>
+  <p class="term-cap">A flavor of the REPL — or skip the transcript and <a href="repl.html">run FMPL in your browser</a>, no install. Every <code>fmpl</code> snippet on this page comes from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, which CI executes against the real interpreter on every push: the <code>-- Returns:</code> comments are asserted, not aspirational. Don&rsquo;t take CI&rsquo;s word for it — press <b>▸&nbsp;run</b> on any block (or <b>run all</b> above) and the same VM, compiled to WebAssembly, re-verifies the documented results right here. <b>edit</b> makes any block yours.</p>
 </header>
 
 <nav class="toc" aria-label="Contents">
@@ -988,21 +1043,179 @@ let result = agent_turn("Search for latest Rust version", [])</code></pre>
 
 </div>
 
-<script>
-// Every pre.run block gets a deep link into the browser REPL. The link
-// carries the block's own text (annotation-only lines dropped — the live
-// REPL prints the real results in their place), so there is no second,
-// hand-maintained copy of any snippet.
-for (const pre of document.querySelectorAll("pre.run")) {
-  const code = pre.textContent.split("\n")
-    .filter((l) => !/^\s*(--|\/\/)\s*(Returns:|=>)/.test(l))
-    .join("\n").trim();
-  const a = document.createElement("a");
-  a.className = "runlink";
-  a.href = "repl.html#code=" + encodeURIComponent(code);
-  a.textContent = "run it in the browser REPL ↗";
-  pre.after(a);
+<script type="module">
+// Run-in-place: every pre.run block executes against the real VM (the same
+// wasm the browser REPL uses — fetched lazily, cached across pages) in a
+// fresh ReplVm per run, which is exactly the CI doctest harness's semantics.
+// Live results replace the documented `-- Returns:` claims, with a ✓/✗
+// verdict per statement. Deep links into the full REPL remain for sharing.
+import { runBlock, annotationValue } from "./fmpl-live.js";
+
+let enginePromise = null;
+function engine() {
+  enginePromise ??= (async () => {
+    const mod = await import("./repl/fmpl_wasm.js");
+    await mod.default();
+    return mod;
+  })();
+  return enginePromise;
 }
+
+const state = new Map(); // pre -> { src, cur, bar, editbox }
+
+function deepLinkFor(code) {
+  const stripped = code.split("\n")
+    .filter((l) => annotationValue(l) === null)
+    .join("\n").trim();
+  return "repl.html#code=" + encodeURIComponent(stripped);
+}
+
+function renderTranscript(pre, source, events) {
+  const lines = source.split("\n");
+  const replaced = new Set(events.map((e) => e.expectedIdx).filter((i) => i !== null));
+  const frag = document.createDocumentFragment();
+  lines.forEach((line, i) => {
+    if (!replaced.has(i)) frag.append(document.createTextNode(line + "\n"));
+    for (const e of events) {
+      if (e.afterIdx !== i) continue;
+      const span = document.createElement("span");
+      if (e.ok === true) {
+        span.className = "lv-ok";
+        span.textContent = `${e.text}  ✓\n`;
+      } else if (e.ok === false) {
+        span.className = "lv-bad";
+        span.textContent = `${e.text}  ✗ documented: ${e.expected}\n`;
+      } else {
+        span.className = e.text.startsWith("Error:") ? "lv-bad" : "lv-out";
+        span.textContent = `${e.text}\n`;
+      }
+      frag.append(span);
+    }
+  });
+  pre.querySelector("code").replaceChildren(frag);
+}
+
+async function runPre(pre) {
+  const s = state.get(pre);
+  const btn = s.bar.querySelector(".runbtn");
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = "loading VM…";
+  try {
+    const mod = await engine();
+    if (s.editbox) {
+      s.cur = s.editbox.value;
+      closeEditor(pre);
+    }
+    const vm = new mod.ReplVm();
+    const events = runBlock(
+      { eval: (x) => vm.eval(x), is_complete: (x) => vm.is_complete(x) },
+      s.cur,
+    );
+    vm.free();
+    renderTranscript(pre, s.cur, events);
+    const checks = events.filter((e) => e.ok !== null);
+    const bad = events.filter((e) => e.ok === false || e.text.startsWith("Error:"));
+    const v = s.bar.querySelector(".verdict");
+    v.className = "verdict " + (bad.length ? "bad" : "ok");
+    v.textContent = bad.length
+      ? `✗ ${bad.length} result${bad.length > 1 ? "s" : ""} differ`
+      : checks.length
+        ? `✓ ${checks.length}/${checks.length} documented results verified`
+        : "✓ ran clean";
+    s.bar.querySelector(".resetbtn").hidden = false;
+    return bad.length === 0;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev === "loading VM…" ? "▸ run" : prev;
+  }
+}
+
+function resetPre(pre) {
+  const s = state.get(pre);
+  closeEditor(pre);
+  s.cur = s.src;
+  pre.querySelector("code").textContent = s.src;
+  s.bar.querySelector(".verdict").textContent = "";
+  s.bar.querySelector(".resetbtn").hidden = true;
+}
+
+function openEditor(pre) {
+  const s = state.get(pre);
+  if (s.editbox) return;
+  s.editbox = document.createElement("textarea");
+  s.editbox.className = "editbox";
+  s.editbox.value = s.cur;
+  s.editbox.rows = s.cur.split("\n").length + 1;
+  s.editbox.setAttribute("aria-label", "Edit FMPL snippet");
+  s.editbox.spellcheck = false;
+  pre.style.display = "none";
+  pre.after(s.editbox);
+  s.editbox.focus();
+}
+
+function closeEditor(pre) {
+  const s = state.get(pre);
+  if (!s.editbox) return;
+  s.editbox.remove();
+  s.editbox = null;
+  pre.style.display = "";
+}
+
+for (const pre of document.querySelectorAll("pre.run")) {
+  const src = pre.textContent.replace(/\n$/, "");
+  const bar = document.createElement("div");
+  bar.className = "blockbar";
+
+  const runbtn = document.createElement("button");
+  runbtn.className = "runbtn";
+  runbtn.type = "button";
+  runbtn.textContent = "▸ run";
+  runbtn.addEventListener("click", () => runPre(pre));
+
+  const editbtn = document.createElement("button");
+  editbtn.type = "button";
+  editbtn.textContent = "edit";
+  editbtn.addEventListener("click", () => {
+    const s = state.get(pre);
+    if (s.editbox) closeEditor(pre);
+    else openEditor(pre);
+  });
+
+  const resetbtn = document.createElement("button");
+  resetbtn.className = "resetbtn";
+  resetbtn.type = "button";
+  resetbtn.textContent = "reset";
+  resetbtn.hidden = true;
+  resetbtn.addEventListener("click", () => resetPre(pre));
+
+  const verdict = document.createElement("span");
+  verdict.className = "verdict";
+
+  const link = document.createElement("a");
+  link.href = deepLinkFor(src);
+  link.textContent = "open in REPL ↗";
+
+  bar.append(runbtn, editbtn, resetbtn, verdict, link);
+  pre.after(bar);
+  state.set(pre, { src, cur: src, bar, editbox: null });
+}
+
+// Page-level verification: run every block, fresh VM each, tally the result.
+const badge = document.getElementById("runall-badge");
+document.getElementById("runall").addEventListener("click", async (ev) => {
+  ev.target.disabled = true;
+  const pres = [...document.querySelectorAll("pre.run")];
+  let good = 0;
+  badge.className = "";
+  for (let i = 0; i < pres.length; i++) {
+    badge.textContent = `running ${i + 1}/${pres.length}…`;
+    if (await runPre(pres[i])) good++;
+  }
+  badge.className = good === pres.length ? "ok" : "bad";
+  badge.textContent = `${good}/${pres.length} blocks verified in your browser`;
+  ev.target.disabled = false;
+});
 </script>
 
 </body>

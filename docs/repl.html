@@ -122,6 +122,7 @@
 </div>
 <script type="module">
 import init, { repl_eval, repl_is_complete, repl_reset } from "./repl/fmpl_wasm.js";
+import { normalizeUnits } from "./fmpl-live.js";
 
 const screen = document.getElementById("screen");
 const input = document.getElementById("cmd");
@@ -253,66 +254,14 @@ for (const ex of EXAMPLES) {
 // Deep links: #code=<URI-encoded source> is fed through the normal submit
 // path after the VM loads — multi-line snippets buffer exactly as if typed.
 // Safe to auto-run: the wasm build has no network or file builtins.
-
-// Net `{`/`}` delta of a line, ignoring string literals and -- comments.
-function braceDelta(line) {
-  let d = 0, inStr = false, esc = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (c === "\\") esc = true;
-      else if (c === '"') inStr = false;
-    } else if (c === '"') inStr = true;
-    else if (c === "-" && line[i + 1] === "-") break;
-    else if (c === "{") d++;
-    else if (c === "}") d--;
-  }
-  return d;
-}
-
-// Multi-line `@ { ... }` match blocks are a REPL gotcha: typed line-by-line
-// they route to the grammar engine. The documented idiom is one line with
-// `;` between arms — the arms already carry the `;`, so join them.
-function joinMatchBlocks(lines) {
-  const out = [];
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    if (/@\s*\{\s*$/.test(line.trim())) {
-      let depth = braceDelta(line);
-      while (depth > 0 && i + 1 < lines.length) {
-        i++;
-        line += " " + lines[i].trim();
-        depth += braceDelta(lines[i]);
-      }
-    }
-    out.push(line);
-  }
-  return out;
-}
-
-// Multi-line if/then/else has the same line-at-a-time trouble: the branch
-// evaluates early and the trailing `else` dangles. Join the chain.
-function joinIfChains(lines) {
-  const out = [];
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    while (i + 1 < lines.length &&
-           (/\b(then|else)\s*$/.test(line.trim()) || /^\s*else\b/.test(lines[i + 1]))) {
-      i++;
-      line += " " + lines[i].trim();
-    }
-    out.push(line);
-  }
-  return out;
-}
-
+// Line normalization (multi-line @{...} and if/else joining) is shared with
+// the guide's run-in-place blocks — see fmpl-live.js.
 function runFromHash() {
   const m = location.hash.match(/^#code=(.*)$/);
   if (!m) return;
   let code = "";
   try { code = decodeURIComponent(m[1]); } catch { return; }
-  for (const line of joinIfChains(joinMatchBlocks(code.split("\n")))) {
+  for (const { text: line } of normalizeUnits(code)) {
     if (line.trim() !== "") { history.push(line); histIdx = history.length; }
     submit(line);
   }
