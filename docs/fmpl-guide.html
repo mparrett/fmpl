@@ -198,7 +198,7 @@
     font-family: var(--mono);
     font-size: 0.6875rem;
     color: var(--faint);
-    margin: 0 0 3.5rem;
+    margin: 0 0 1.25rem;
   }
 
   /* ---------- sections ---------- */
@@ -344,7 +344,7 @@
 
   /* ---------- live hero ---------- */
   #hero-term { margin-bottom: 0; }
-  #hero-bar { margin: 0.75rem 0 1rem; }
+  #hero-bar { margin: 0.75rem 0 3.5rem; }
   #hero-inrow { display: flex; gap: 0.5ch; align-items: baseline; }
   #hero-cmd {
     flex: 1;
@@ -422,6 +422,7 @@
     <span><b>Companion</b> to the <a href="fmpl-tour.html">engineering tour</a></span>
   </div>
 
+  <p class="term-cap">Everything on this page comes from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, which CI executes against the real interpreter on every push — the <code>-- Returns:</code> comments are asserted, not aspirational. And it all runs here too, starting with this terminal: press <b>▸&nbsp;run</b> to step through a session.</p>
   <div class="term" id="hero-term">
 <span class="bar">$ fmpl &nbsp;·&nbsp; live session — this terminal is real</span><span id="hero-screen"><span class="c">-- press ▸ run to step through a session, or type below.</span>
 </span><span id="hero-inrow"><span class="p">fmpl&gt;</span> <input id="hero-cmd" autocomplete="off" spellcheck="false" aria-label="FMPL input" placeholder="…or type FMPL here"></span></div>
@@ -430,7 +431,6 @@
     <button id="hero-reset" type="button" hidden>reset</button>
     <span class="verdict"></span>
   </div>
-  <p class="term-cap">Everything on this page comes from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, which CI executes against the real interpreter on every push — the <code>-- Returns:</code> comments are asserted, not aspirational. The blocks below run too: press <b>▸&nbsp;run</b> to step through any of them, one statement at a time.</p>
 </header>
 
 <nav class="toc" aria-label="Contents">
@@ -454,7 +454,7 @@
 <section id="quick-start">
   <div class="sec-head"><span class="sec-num">§1</span><h2>Quick start</h2></div>
   <div class="prose">
-    <p>The fastest path is the <a href="repl.html">browser REPL</a> — the real VM compiled to WebAssembly, nothing to install. For the full toolchain:</p>
+    <p>The fastest path is this page: the terminal above is live, and every block below steps through the same VM — nothing to install. When you want the full toolchain on your machine:</p>
   </div>
 
 <pre><code>git clone https://github.com/mparrett/fmpl.git &amp;&amp; cd fmpl
