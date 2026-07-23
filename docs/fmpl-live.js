@@ -27,6 +27,7 @@ export function braceDelta(line) {
 export function joinMatchBlocks(lines) {
   const out = [];
   for (let i = 0; i < lines.length; i++) {
+    const startIdx = i;
     let line = lines[i];
     if (/@\s*\{\s*$/.test(line.trim())) {
       let depth = braceDelta(line);
@@ -36,7 +37,7 @@ export function joinMatchBlocks(lines) {
         depth += braceDelta(lines[i]);
       }
     }
-    out.push({ text: line, endIdx: i });
+    out.push({ text: line, startIdx, endIdx: i });
   }
   return out;
 }
@@ -46,14 +47,14 @@ export function joinMatchBlocks(lines) {
 export function joinIfChains(units) {
   const out = [];
   for (let i = 0; i < units.length; i++) {
-    let { text, endIdx } = units[i];
+    let { text, startIdx, endIdx } = units[i];
     while (i + 1 < units.length &&
            (/\b(then|else)\s*$/.test(text.trim()) || /^\s*else\b/.test(units[i + 1].text))) {
       i++;
       text += " " + units[i].text.trim();
       endIdx = units[i].endIdx;
     }
-    out.push({ text, endIdx });
+    out.push({ text, startIdx, endIdx });
   }
   return out;
 }
@@ -97,6 +98,62 @@ export function trailingAnnotation(line) {
   return annotationValue(line.slice(i));
 }
 
+// Where a trailing annotation begins, for renderers that transform it in
+// place: { at, value } or null when the line has no trailing annotation.
+export function trailingAnnotationSplit(line) {
+  const i = commentStart(line);
+  if (i < 0) return null;
+  const v = annotationValue(line.slice(i));
+  return v === null ? null : { at: i, value: v };
+}
+
+// First line at/after fromIdx that starts the next statement group — skips
+// blanks and annotation-only lines. Returns null when nothing remains.
+// Used to place the cursor without involving the VM.
+export function findNextStatement(lines, fromIdx) {
+  for (let i = fromIdx; i < lines.length; i++) {
+    if (lines[i].trim() === "") continue;
+    if (annotationValue(lines[i]) !== null) continue;
+    return i;
+  }
+  return null;
+}
+
+// True while src ends inside an unterminated /* */ block comment. The VM's
+// is_complete says "complete" for a lone `/*` (lex error counts as complete
+// so evaluation surfaces the error), so runners must track this themselves
+// to avoid splitting a block comment across statements.
+export function hasOpenBlockComment(src) {
+  let inStr = false, esc = false, inLine = false, inBlock = false;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (inBlock) {
+      if (c === "*" && src[i + 1] === "/") { inBlock = false; i++; }
+    } else if (inLine) {
+      if (c === "\n") inLine = false;
+    } else if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === "-" && src[i + 1] === "-") inLine = true;
+    else if (c === "/" && src[i + 1] === "*") { inBlock = true; i++; }
+  }
+  return inBlock;
+}
+
+// A statement that is only comments (line and/or block). The CLI REPL
+// produces no output for these; runners treat them as silent steps rather
+// than evaluating them (a lone `--` comment is an eval error in the VM).
+export function isCommentOnly(src) {
+  const noBlocks = src.replace(/\/\*[\s\S]*?\*\//g, "");
+  const noLines = noBlocks.split("\n").map((l) => {
+    const i = commentStart(l);
+    return i < 0 ? l : l.slice(0, i);
+  }).join("\n");
+  return noLines.trim() === "";
+}
+
 // Top-level-order-insensitive compare for `%{...}` display forms — Value::Map
 // is a HashMap, so key order is nondeterministic (same rule as the harness).
 function valuesMatch(actual, expected) {
@@ -122,18 +179,26 @@ export function createRunner(vm, source) {
   let i = 0;
 
   function step() {
-    let buffer = "", bufferEnd = -1, bufferExpected = null;
+    let buffer = "", bufferStart = -1, bufferEnd = -1, bufferExpected = null;
     while (i < units.length) {
-      const { text, endIdx } = units[i];
+      const { text, startIdx, endIdx } = units[i];
       i++;
       if (buffer === "" && text.trim() === "") continue;
+      if (buffer === "") bufferStart = startIdx;
       buffer = buffer === "" ? text : buffer + "\n" + text;
       bufferEnd = endIdx;
       const t = trailingAnnotation(text);
       if (t !== null) bufferExpected = t;
-      if (text.trim() === "" || vm.is_complete(buffer)) break;
+      if (!hasOpenBlockComment(buffer) &&
+          (text.trim() === "" || vm.is_complete(buffer))) break;
     }
     if (buffer.trim() === "") return null;
+
+    // Comment-only statements advance the cursor without output.
+    if (isCommentOnly(buffer)) {
+      return { startIdx: bufferStart, afterIdx: bufferEnd, text: "", ok: null,
+               expected: null, expectedIdx: null, silent: true };
+    }
 
     // An annotation-only line right after the statement is its expectation
     // (trailing annotations on the statement's own lines take precedence).
@@ -151,7 +216,7 @@ export function createRunner(vm, source) {
       const actual = out.replace(/^=>\s*/, "");
       ok = valuesMatch(actual, expected);
     }
-    return { afterIdx: bufferEnd, text: out, ok, expected, expectedIdx };
+    return { startIdx: bufferStart, afterIdx: bufferEnd, text: out, ok, expected, expectedIdx };
   }
 
   return {
