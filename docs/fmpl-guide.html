@@ -285,6 +285,13 @@
     margin: 1.25rem 0 -1rem;
   }
   .codelabel + pre { margin-top: 1.25rem; }
+  .runlink {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.05em;
+    display: inline-block;
+    margin: -0.85rem 0 1.25rem;
+  }
 
   /* ---------- field notes ---------- */
   .fieldnote {
@@ -399,7 +406,7 @@ cargo run -p fmpl-tui   # terminal UI</code></pre>
     <p><strong>FMPL is expression-oriented</strong>: every expression produces a value, and statements don&rsquo;t exist. Literals evaluate to themselves:</p>
   </div>
 
-<pre><code>"Hello, World!"   -- String literals evaluate to themselves
+<pre class="run"><code>"Hello, World!"   -- String literals evaluate to themselves
 42                -- Numbers evaluate to themselves
 true              -- Booleans evaluate to themselves</code></pre>
 
@@ -412,7 +419,7 @@ true              -- Booleans evaluate to themselves</code></pre>
   <div class="sec-head"><span class="sec-num">§2</span><h2>Language basics</h2></div>
 
   <div class="prose"><h3>Primitive types</h3></div>
-<pre><code>-- Numbers
+<pre class="run"><code>-- Numbers
 42
 3.14
 -10
@@ -437,7 +444,7 @@ null</code></pre>
 */</code></pre>
 
   <div class="prose"><h3>Arithmetic and logic</h3></div>
-<pre><code>-- Arithmetic operators
+<pre class="run"><code>-- Arithmetic operators
 1 + 2          -- 3
 10 - 4         -- 6
 3 * 4          -- 12
@@ -463,7 +470,7 @@ true || false  -- true
   <div class="sec-head"><span class="sec-num">§3</span><h2>Data structures</h2></div>
 
   <div class="prose"><h3>Lists</h3></div>
-<pre><code>-- List literals (`;` separates consecutive expressions — a `[` opening a
+<pre class="run"><code>-- List literals (`;` separates consecutive expressions — a `[` opening a
 -- new line would otherwise be read as indexing the previous expression)
 [1, 2, 3];
 ["apple", "banana", "cherry"];
@@ -481,7 +488,7 @@ numbers.push(4)  -- =&gt; [1, 2, 3, 4]  (a new list; `numbers` is unchanged)</co
   <p class="note">Lists are immutable. The higher-order methods work — <code>[1, 2, 3].map(\x x * 2)</code> returns <code>[2, 4, 6]</code>, and <code>.fold()</code> is available. For element access beyond indexing, use pattern matching with the <code>@</code> operator or recursive functions.</p>
 
   <div class="prose"><h3>Maps</h3></div>
-<pre><code>-- Map literal
+<pre class="run"><code>-- Map literal
 %{name: "Alice", age: 30, city: "NYC"}
 
 -- Empty map
@@ -495,7 +502,7 @@ person.age               -- 25</code></pre>
   <div class="prose"><h3>Objects</h3>
     <p>FMPL is <strong>prototype-based</strong>, not class-based. Objects are created with <code>object</code> expressions — more in <a href="#objects">§8</a>:</p>
   </div>
-<pre><code>-- Basic object (must be named)
+<pre class="run"><code>-- Basic object (must be named)
 object counter {
   count: 0
   increment(): self.count + 1
@@ -511,7 +518,7 @@ object counter {
     <p>The <code>@</code> operator is FMPL&rsquo;s swiss-army knife — <em>apply the thing on the right to the value on the left</em>. It covers three jobs with one mechanism: applying grammars to parse text, matching patterns against values, and transforming data via pattern-directed rules.</p>
     <h3>Matching text</h3>
   </div>
-<pre><code>-- Match strings against regex-style patterns
+<pre class="run"><code>-- Match strings against regex-style patterns
 "hello" @ {
   [a-z]+ =&gt; "word"
 }
@@ -526,7 +533,7 @@ object counter {
     <h3>Matching maps</h3>
     <p>Map patterns extract values via bindings. Arms are separated with <code>;</code>, and the OMeta-style binding syntax is <code>_:name</code>:</p>
   </div>
-<pre><code>-- Extract values using bindings, with a wildcard fallback arm
+<pre class="run"><code>-- Extract values using bindings, with a wildcard fallback arm
 let response = %{status: 200, body: "ok"}
 
 response @ { %{status: _:code, body: _:msg} =&gt; msg; _ =&gt; "other" }
@@ -539,7 +546,7 @@ response @ { %{status: _:code, body: _:msg} =&gt; msg; _ =&gt; "other" }
   <div class="prose">
     <p>To match on a specific <em>value</em>, bind it and guard with <code>when</code> (or its alias <code>if</code>):</p>
   </div>
-<pre><code>%{status: 200, body: "ok"} @ {
+<pre class="run"><code>%{status: 200, body: "ok"} @ {
   %{status: _:s} when s == 200 =&gt; "success";
   %{status: _:s} =&gt; "failed"
 }
@@ -551,7 +558,7 @@ response @ { %{status: _:code, body: _:msg} =&gt; msg; _ =&gt; "other" }
   <p class="note">Literal values directly inside map patterns (<code>%{status: 200} =&gt; ...</code>) are not yet supported — the compiler rejects them. Bind and guard, as above.</p>
 
   <div class="prose"><h3>Matching lists</h3></div>
-<pre><code>-- Match a list and extract elements
+<pre class="run"><code>-- Match a list and extract elements
 [1, 2, 3] @ { [ _:x, _:y, _:z ] =&gt; [x, y, z] }
 -- Returns: [1, 2, 3]
 
@@ -565,13 +572,13 @@ response @ { %{status: _:code, body: _:msg} =&gt; msg; _ =&gt; "other" }
 
   <p class="note">Rest patterns (<code>[first | rest]</code>) are planned but not yet implemented. In the REPL, write <code>@ { ... }</code> match blocks on a single line with <code>;</code> between arms — multi-line <code>@ {</code> blocks are routed to the grammar engine. Multi-line works fine with the <code>match</code> keyword form.</p>
 
-<pre><code>match 5 { n if n &gt; 3 =&gt; "big"; _ =&gt; "small" }
+<pre class="run"><code>match 5 { n if n &gt; 3 =&gt; "big"; _ =&gt; "small" }
 -- Returns: "big"</code></pre>
 
   <div class="prose">
     <p>And when you don&rsquo;t need a pattern at all, plain field access works:</p>
   </div>
-<pre><code>let response = %{
+<pre class="run"><code>let response = %{
   tool: "curl.get",
   args: %{url: "https://example.com"}
 }
@@ -588,7 +595,7 @@ response.args.url
   <div class="prose">
     <p>FMPL includes an <strong>OMeta-style PEG grammar system</strong> for parsing and transformation. Grammar rules match input and run semantic actions; capture matched text with a <code>:binding</code> suffix on a pattern element:</p>
   </div>
-<pre><code>-- Define a grammar: capture the digits, return them from the action
+<pre class="run"><code>-- Define a grammar: capture the digits, return them from the action
 let g = grammar { num = [0-9]+:d =&gt; d }
 
 "42" @ g.num
@@ -603,7 +610,7 @@ let shout = grammar { word = [a-z]+:w =&gt; w + "!" }
     <p>A full JSON parser written this way ships with the repo — see <code>lib/json.fmpl</code>. The metacircular FMPL parser itself (<code>lib/core/fmpl_parser.fmpl</code>) is the largest grammar in the tree: the language&rsquo;s canonical parser is written in the language (the <a href="fmpl-tour.html#bootstrap">tour&rsquo;s §3</a> tells that story).</p>
     <p>Built-in base grammar rules are available under <code>base::parser</code>:</p>
   </div>
-<pre><code>-- Apply built-in base grammar rules to input
+<pre class="run"><code>-- Apply built-in base grammar rules to input
 "12345" @ base::parser.integer   -- Returns: "12345"
 "hello" @ base::parser.word      -- Returns: "hello"</code></pre>
 
@@ -616,7 +623,7 @@ let shout = grammar { word = [a-z]+:w =&gt; w + "!" }
   <div class="prose"><h3>Conditionals</h3>
     <p>FMPL uses <code>then</code>/<code>else</code> keywords, not braces — and <code>if</code> is an expression:</p>
   </div>
-<pre><code>-- if-then-else
+<pre class="run"><code>-- if-then-else
 if 15 &gt; 10 then "big" else "small"
 -- Returns: "big"
 
@@ -637,7 +644,7 @@ let (value = 42)
   <div class="prose"><h3>Loops are recursion</h3>
     <p>There are no mutable variables, so there are no loop counters. Iteration is recursion:</p>
   </div>
-<pre><code>-- Sum numbers recursively (lambda bound at top level)
+<pre class="run"><code>-- Sum numbers recursively (lambda bound at top level)
 let sum_range = \start, end if start &gt; end then 0 else start + sum_range(start + 1, end)
 
 sum_range(1, 10)
@@ -654,12 +661,12 @@ factorial(5)
   <div class="prose">
     <p>The corollary, from the demo&rsquo;s &ldquo;known limitations&rdquo; file: a <code>for</code> body cannot mutate an outer binding — <code>sum = sum + x</code> inside a loop creates a <em>new</em> <code>sum</code> in the inner scope and the outer one is unchanged. The idiomatic shape is <code>map</code> + <code>fold</code>:</p>
   </div>
-<pre><code>let numbers = [1, 2, 3, 4, 5]
+<pre class="run"><code>let numbers = [1, 2, 3, 4, 5]
 let doubled = numbers.map(\x x * 2)
 doubled.fold(0, \acc, x acc + x)  -- =&gt; 30</code></pre>
 
   <div class="prose"><h3>Let-bindings</h3></div>
-<pre><code>-- let-in expression (scoped binding)
+<pre class="run"><code>-- let-in expression (scoped binding)
 let (x = 42) x * 2
 -- Returns: 84
 
@@ -679,7 +686,7 @@ y + 10
   <div class="prose">
     <p>Functions are lambdas bound to names with <code>let</code>:</p>
   </div>
-<pre><code>-- Bind a lambda to a name
+<pre class="run"><code>-- Bind a lambda to a name
 let add = \a, b a + b
 add(1, 2)           -- 3
 
@@ -690,7 +697,7 @@ inc(41)             -- 42</code></pre>
   <p class="note">The <code>name(args): body</code> definition syntax only exists <em>inside</em> <code>object</code> blocks (as method definitions) — it is not a top-level function form. Functions must be defined before they&rsquo;re called.</p>
 
   <div class="prose"><h3>Lambda forms</h3></div>
-<pre><code>-- Lambda syntax: single param, multi-param (comma-separated), curried
+<pre class="run"><code>-- Lambda syntax: single param, multi-param (comma-separated), curried
 \x x + 1
 \x, y x + y
 \x \y x + y
@@ -707,7 +714,7 @@ let addc = \x \y x + y
 addc(3)(4)          -- 7</code></pre>
 
   <div class="prose"><h3>Higher-order functions</h3></div>
-<pre><code>-- Functions can take other functions as arguments
+<pre class="run"><code>-- Functions can take other functions as arguments
 let apply_twice = \f, x f(f(x))
 let add_one = \x x + 1
 
@@ -724,7 +731,7 @@ apply_twice(add_one, 5);
   <div class="prose">
     <p>Prototype objects carry properties and methods; methods are called through the object&rsquo;s name:</p>
   </div>
-<pre><code>-- Define object
+<pre class="run"><code>-- Define object
 object counter {
   count: 0
   increment(): self.count + 1
@@ -745,7 +752,7 @@ counter.increment()   -- 1</code></pre>
       <li><code>args</code> — the list of all arguments passed to the method</li>
     </ul>
   </div>
-<pre><code>object greeter {
+<pre class="run"><code>object greeter {
   name: "world"
   show(): "Hello, " + self.name
 }
@@ -763,7 +770,7 @@ greeter.show()
     <h3>Tagged values</h3>
     <p>Algebraic data types are written as lists whose first element is a symbol — the single canonical list form (DESIGN-002):</p>
   </div>
-<pre><code>-- Create tagged values
+<pre class="run"><code>-- Create tagged values
 [:Int, 42];
 [:Binary, :+, [:Int, 1], [:Int, 2]];
 [:User, "alice", %{active: true}]
@@ -782,7 +789,7 @@ value @ {
   <div class="prose"><h3>Source &rarr; AST &rarr; IR &rarr; bytecode &rarr; value</h3>
     <p><code>ast::parse</code> turns source text into a tagged AST; <code>ir::compile</code> turns IR into executable bytecode; <code>code::eval</code> runs it:</p>
   </div>
-<pre><code>let ast = ast::parse("1 + 2")
+<pre class="run"><code>let ast = ast::parse("1 + 2")
 -- Returns: [:Binary, :+, [:Int, 1], [:Int, 2]]
 
 let ast2 = ast::parse("if true then 1 else 2")
@@ -795,7 +802,7 @@ code::eval(code)
   <div class="prose">
     <p>Put the three together and a compiler is a pattern match:</p>
   </div>
-<pre><code>-- Parse source, transform AST to IR, compile, execute
+<pre class="run"><code>-- Parse source, transform AST to IR, compile, execute
 let ast = ast::parse("1 + 2")
 
 let ir = ast @ {
@@ -819,7 +826,7 @@ code::eval(code)
   <div class="prose">
     <p>Streaming is FMPL&rsquo;s first-class concern, and the observable surface today is the cursor API: observe a value as a stream, then move a cursor over it. Cursors are immutable — advancing one returns a <em>new</em> cursor:</p>
   </div>
-<pre><code>let data = [10, 20, 30]
+<pre class="run"><code>let data = [10, 20, 30]
 let cursor = stream::observe(data)
 
 -- Get current position
@@ -836,7 +843,7 @@ cursor::current(rewound)  -- =&gt; 10</code></pre>
   <div class="prose">
     <p>Multiple cursors over the same stream are independent (copy-on-write):</p>
   </div>
-<pre><code>let data = [10, 20, 30]
+<pre class="run"><code>let data = [10, 20, 30]
 let cursor1 = stream::observe(data)
 let cursor2 = stream::observe(data)
 
@@ -856,7 +863,7 @@ cursor::position(cursor2)   -- =&gt; 0 (unchanged)</code></pre>
   <div class="sec-head"><span class="sec-num">§11</span><h2>Practical examples</h2></div>
 
   <div class="prose"><h3>JSON parsing and validation</h3></div>
-<pre><code>-- Parse JSON string
+<pre class="run"><code>-- Parse JSON string
 let json_str = "{\"name\": \"Alice\", \"age\": 30}"
 
 -- Use json::parse builtin
@@ -980,6 +987,23 @@ let result = agent_turn("Search for latest Rust version", [])</code></pre>
 </footer>
 
 </div>
+
+<script>
+// Every pre.run block gets a deep link into the browser REPL. The link
+// carries the block's own text (annotation-only lines dropped — the live
+// REPL prints the real results in their place), so there is no second,
+// hand-maintained copy of any snippet.
+for (const pre of document.querySelectorAll("pre.run")) {
+  const code = pre.textContent.split("\n")
+    .filter((l) => !/^\s*(--|\/\/)\s*(Returns:|=>)/.test(l))
+    .join("\n").trim();
+  const a = document.createElement("a");
+  a.className = "runlink";
+  a.href = "repl.html#code=" + encodeURIComponent(code);
+  a.textContent = "run it in the browser REPL ↗";
+  pre.after(a);
+}
+</script>
 
 </body>
 </html>
