@@ -44,3 +44,6 @@ test_*
 # Keep test source files
 !tests/
 docs/repl/
+
+# SDD subagent scratch (ledger, reports)
+.superpowers/
