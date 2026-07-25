@@ -421,9 +421,8 @@ PICK_TASK → TRIAGE ─┤        ↑          │
   </div>
 
   <div class="fieldnote">
-    <span class="fn-label">Field note &middot; whose process this is</span>
-    <p>Not all of this was authored for FMPL, and the distinction matters. The memory system arrived as an <em>installed</em> stack: <code>.agent/install.json</code> records <code>agentic_stack_version 0.15.0</code>, written into the project on 2026-05-09, with adapters for both Claude Code and Codex. Its skills are generic — <code>deploy-checklist</code>, <code>tldraw</code>, <code>data-flywheel</code> — and it describes itself as a portable brain any harness can mount. The loop driver is the same story: <code>ralph.sh</code> and the gate hooks live in a <code>ralph-loop/</code> directory shared across the author&rsquo;s projects, symlinked in rather than committed. And <code>docs/superpowers/</code> takes its name and its EPIC/STORY/AC/SCENARIO shape from an existing methodology, not from this repo.</p>
-    <p>What is unambiguously FMPL&rsquo;s: <code>PROMPT.md</code>, which is written against this codebase&rsquo;s cargo workspace, <code>jj</code> usage, and crate layout; the roadmap and the requirement documents; the behavior corpus; the iteration log, including the corrections in it; and the decision to run all of it against a language implementation for five months. Adopted tooling, aimed. The page below quotes both without pretending the line isn&rsquo;t there.</p>
+    <span class="fn-label">Field note &middot; adopted and aimed</span>
+    <p>Some of this is off-the-shelf and some is written for FMPL. The memory system arrived as an installed stack (<code>agentic_stack_version 0.15.0</code>, 2026-05-09, with adapters for both Claude Code and Codex); the loop driver lives in a <code>ralph-loop/</code> directory shared across the author&rsquo;s projects; <code>docs/superpowers/</code> takes its name from an existing methodology. <code>PROMPT.md</code>, the roadmap, the requirement documents, and the iteration log are this project&rsquo;s own. Nunley assembled all of it and aimed it at a language implementation for five months, which is the part that produced the artifact.</p>
   </div>
 
   <div class="fieldnote">
@@ -552,7 +551,7 @@ SCENARIO-0031 through SCENARIO-0037: marked BLOCKED:ITER-0002</code></pre>
 <section id="memory">
   <div class="sec-head"><span class="sec-num">§7</span><h2>Memory, and its honest yield</h2></div>
   <div class="prose">
-    <p>The most ambitious piece of the harness is the memory system — and the piece that is least this project&rsquo;s own, installed as a versioned stack on 2026-05-09, two days into the documented sprint. Hooks capture episodic entries as the agent works. A &ldquo;dream cycle&rdquo; runs unattended: cluster the episodes, extract structured patterns, stage them as candidates with lifecycle metadata, apply a heuristic prefilter that drops obvious junk, decay old entries, and write a review queue for the next session. Its docstring is explicit about the boundaries it will not cross:</p>
+    <p>The most ambitious piece of the harness is the memory system, installed as a versioned stack on 2026-05-09, two days into the documented sprint. Hooks capture episodic entries as the agent works. A &ldquo;dream cycle&rdquo; runs unattended: cluster the episodes, extract structured patterns, stage them as candidates with lifecycle metadata, apply a heuristic prefilter that drops obvious junk, decay old entries, and write a review queue for the next session. Its docstring is explicit about the boundaries it will not cross:</p>
     <blockquote>
       <p>Never: subjective validation (host agent reviews via CLI tools) &middot; promotion to <code>LESSONS.md</code> (<code>graduate.py</code> does that) &middot; git commit (unattended repo writes are dangerous on a host hook).</p>
     </blockquote>
