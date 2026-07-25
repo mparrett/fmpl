@@ -385,7 +385,7 @@ PICK_TASK → TRIAGE ─┤        ↑          │
 <section id="why">
   <div class="sec-head"><span class="sec-num">§1</span><h2>Why this page exists</h2></div>
   <div class="prose">
-    <p>Most published writing about autonomous coding agents describes either the prompt or the output. This is the middle: what a loop looks like when someone has been running it long enough to know where it lies to itself. Norman Nunley ran one against FMPL for five months, and the machinery he built to keep it honest is more interesting than most of what gets written about the practice.</p>
+    <p>Most published writing about autonomous coding agents describes either the prompt or the output. This is the middle: what a loop looks like when someone has been running it long enough to know where it lies to itself. Norman Nunley ran one against FMPL for five months, and the arrangement he assembled to keep it honest is more interesting than most of what gets written about the practice.</p>
     <p>It reached us as a pile of files to triage, because that is how a process layer arrives when you fork someone&rsquo;s solo project — legible to its participants, opaque from outside. Sidelining it to an archive branch was the right call for a repo with different tooling, and it made the layer invisible rather than merely unfamiliar. This page opens it back up.</p>
     <p>Everything here is quoted from primary sources on <code>archive/agent-harness</code>: the prompt the loop ran under, the hooks that gated it, the requirement documents, the iteration log, the memory store. All of it predates the cleanup this fork performed — the state of the project as its author left it, not as we rearranged it.</p>
   </div>
@@ -418,6 +418,12 @@ PICK_TASK → TRIAGE ─┤        ↑          │
       <div class="desc"><b>The enforcement</b>
       <span>A <code>PreToolUse</code> gate that blocks tool calls not permitted in the current state, and a <code>PostToolUse</code> transition hook that advances it.</span></div>
     </div>
+  </div>
+
+  <div class="fieldnote">
+    <span class="fn-label">Field note &middot; whose process this is</span>
+    <p>Not all of this was authored for FMPL, and the distinction matters. The memory system arrived as an <em>installed</em> stack: <code>.agent/install.json</code> records <code>agentic_stack_version 0.15.0</code>, written into the project on 2026-05-09, with adapters for both Claude Code and Codex. Its skills are generic — <code>deploy-checklist</code>, <code>tldraw</code>, <code>data-flywheel</code> — and it describes itself as a portable brain any harness can mount. The loop driver is the same story: <code>ralph.sh</code> and the gate hooks live in a <code>ralph-loop/</code> directory shared across the author&rsquo;s projects, symlinked in rather than committed. And <code>docs/superpowers/</code> takes its name and its EPIC/STORY/AC/SCENARIO shape from an existing methodology, not from this repo.</p>
+    <p>What is unambiguously FMPL&rsquo;s: <code>PROMPT.md</code>, which is written against this codebase&rsquo;s cargo workspace, <code>jj</code> usage, and crate layout; the roadmap and the requirement documents; the behavior corpus; the iteration log, including the corrections in it; and the decision to run all of it against a language implementation for five months. Adopted tooling, aimed. The page below quotes both without pretending the line isn&rsquo;t there.</p>
   </div>
 
   <div class="fieldnote">
@@ -546,12 +552,12 @@ SCENARIO-0031 through SCENARIO-0037: marked BLOCKED:ITER-0002</code></pre>
 <section id="memory">
   <div class="sec-head"><span class="sec-num">§7</span><h2>Memory, and its honest yield</h2></div>
   <div class="prose">
-    <p>The most ambitious piece of the harness is the memory system, and it is the piece where the honest report is mixed. Hooks capture episodic entries as the agent works. A &ldquo;dream cycle&rdquo; runs unattended: cluster the episodes, extract structured patterns, stage them as candidates with lifecycle metadata, apply a heuristic prefilter that drops obvious junk, decay old entries, and write a review queue for the next session. Its docstring is explicit about the boundaries it will not cross:</p>
+    <p>The most ambitious piece of the harness is the memory system — and the piece that is least this project&rsquo;s own, installed as a versioned stack on 2026-05-09, two days into the documented sprint. Hooks capture episodic entries as the agent works. A &ldquo;dream cycle&rdquo; runs unattended: cluster the episodes, extract structured patterns, stage them as candidates with lifecycle metadata, apply a heuristic prefilter that drops obvious junk, decay old entries, and write a review queue for the next session. Its docstring is explicit about the boundaries it will not cross:</p>
     <blockquote>
       <p>Never: subjective validation (host agent reviews via CLI tools) &middot; promotion to <code>LESSONS.md</code> (<code>graduate.py</code> does that) &middot; git commit (unattended repo writes are dangerous on a host hook).</p>
     </blockquote>
     <p>A mechanical process stages; a reasoning process judges; neither writes to the repository unattended. That separation is the right one, and it is drawn in code rather than in a README.</p>
-    <p>The yield is smaller than the machinery. At the archive tip: 1,648 episodic entries, 23 candidates awaiting review, 2 graduated, 9 rejected, and 4 lessons in the semantic store. Read the queue and the reason is plain — the top-priority candidates are mostly failure telemetry (&ldquo;this skill has failed 10 times in 14 days, flag for rewrite&rdquo;), which is useful operational signal and not the durable engineering lesson the pipeline was built to distill. One graduated lesson is genuinely good, about enumerating rename targets after a compiler-checked deletion rather than before. The ratio of infrastructure to insight is roughly 107 files to 4 lessons.</p>
+    <p>The yield is smaller than the machinery, though the clock is a fair defense: the stack had four days between installation and the archive tip. In that window it accumulated 1,648 episodic entries, 23 candidates awaiting review, 2 graduated, 9 rejected, and 4 lessons in the semantic store. Read the queue and the reason is plain — the top-priority candidates are mostly failure telemetry (&ldquo;this skill has failed 10 times in 14 days, flag for rewrite&rdquo;), which is useful operational signal and not the durable engineering lesson the pipeline was built to distill. One graduated lesson is genuinely good, about enumerating rename targets after a compiler-checked deletion rather than before. The ratio of infrastructure to insight is roughly 107 files to 4 lessons.</p>
     <p>Two things follow. The first is a caution for anyone reading this as a template: the review queue graduates <em>lessons</em>, not code. It is not a code review mechanism, and reading it as one would put the reviewer in the wrong place entirely — PAR is where code gets adjudicated. The second is chronological. The pre-agentic archive inside <code>.agent/</code> is dated January 2026 and records a 100-iteration, three-hour loop run against the terminal UI, tasks checked off and 222 tests passing. The commit history agrees: 131 commits in January against 48 in May. The memory stack is a late addition to a loop that had already been running for months.</p>
   </div>
 </section>
@@ -569,7 +575,7 @@ SCENARIO-0031 through SCENARIO-0037: marked BLOCKED:ITER-0002</code></pre>
     <div class="ledger-row"><div class="count">88</div><div class="desc">behavior scenarios, promoted to &ldquo;sentinel&rdquo; only when a real execution command proves them</div></div>
     <div class="ledger-row"><div class="count">22</div><div class="desc">logged iterations over six days, one carrying a written reconciliation of its own false completion claim</div></div>
     <div class="ledger-row"><div class="count">3 rounds, 26 findings</div><div class="desc">PAR scope review on ITER-0004c alone — which then failed and killed the transformer that iteration had built</div></div>
-    <div class="ledger-row"><div class="count">1,648 &rarr; 4</div><div class="desc">episodic entries to graduated lessons; 23 candidates still queued, 9 rejected</div></div>
+    <div class="ledger-row"><div class="count">1,648 &rarr; 4</div><div class="desc">episodic entries to graduated lessons in the memory stack&rsquo;s four days on the project; 23 candidates still queued, 9 rejected</div></div>
     <div class="ledger-row"><div class="count">253 commits</div><div class="desc">2025-12-21 to 2026-05-12, of which January alone accounts for 131 — the loop long predates the process stack documenting it</div></div>
   </div>
 </section>
