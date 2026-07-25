@@ -231,7 +231,7 @@ fn parity_ast_canonical_list_form() {
 /// (logos fails to produce an i64 token); the canonical parser's digit-fold
 /// action (`acc * 10 + d`) hits checked arithmetic, and the generated
 /// grammar machinery propagates that as `Error::Runtime` instead of
-/// unwrapping (the pre-epoch-6 codegen panicked here — rehab Tier 4 #16).
+/// unwrapping (the pre-epoch-6 codegen panicked here — revival Tier 4 #16).
 #[test]
 fn parity_rejects_i64_overflowing_int_literal() {
     let source = "99999999999999999999999";

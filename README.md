@@ -30,9 +30,10 @@ that grammar (see [`fmpl.ebnf`](fmpl.ebnf)) seeded this project. The syntax is
 only lightly similar to the 1992 language, and everything beyond the grammar —
 the streaming model, first-class PEG grammars, the indexed-RPN VM, capability
 security, the metacircular bootstrap — is new design. The MUD lineage is
-first-hand: Nunley also co-wrote cool++, a C++ rewrite of Stephen White's
-CoolMUD (White created MOO, from which LambdaMOO was forked). See
-[`project.md`](project.md) for the full north star.
+first-hand: Nunley was one of the developers on cool++/coldmud; ColdStore — a
+C++ persistent object store and VM toolkit from that era — is the better
+reference for what he was doing then. See [`project.md`](project.md) for the
+full north star.
 
 ## A taste
 
@@ -110,7 +111,7 @@ Source → Lexer (logos) → Parser → AST → Compiler → Indexed RPN bytecod
 
 - [Engineering tour](https://mparrett.github.io/fmpl/fmpl-tour.html) — one-page overview: architecture, what works, what doesn't
 - [Browser REPL](https://mparrett.github.io/fmpl/repl.html) — fmpl-core as WebAssembly, live on GitHub Pages
-- Field logs — engineering retrospectives: [revitalizing the agent-written codebase](https://mparrett.github.io/fmpl/fmpl-rehab-log.html) and [closing the metacircular-parser gap](https://mparrett.github.io/fmpl/fmpl-field-log.html)
+- Field logs — engineering retrospectives: [Opening the Door](https://mparrett.github.io/fmpl/fmpl-revival-log.html) (revitalizing the agent-written codebase) and [Closing the Loop](https://mparrett.github.io/fmpl/fmpl-field-log.html) (closing the metacircular-parser gap)
 - [`project.md`](project.md) — north star, principles, design lineage
 - [`docs/design-principles.md`](docs/design-principles.md) — durable design invariants
 - [`AGENTS.md`](AGENTS.md) — workflow rules and gotchas for agents and humans
