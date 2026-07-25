@@ -1,10 +1,10 @@
 # Known gaps
 
-> **Ground truth for work remaining.** This ledger is registered in
-> [`specs/README.md`](../specs/README.md) as the authoritative source of "what's
-> undone" for FMPL, paired with [`specs/ROADMAP.md`](../specs/ROADMAP.md) (the
-> arc). The autonomous loop and contributors pick work from here; keep it current
-> as gaps close.
+> **Ground truth for work remaining.** The actionable checkbox form of this
+> analysis lives at [`specs/gaps.md`](../specs/gaps.md) — pick and check off work
+> there. This document is the prose root-cause narrative behind that tracker,
+> paired with [`specs/ROADMAP.md`](../specs/ROADMAP.md) (the arc), and registered
+> in [`specs/README.md`](../specs/README.md).
 
 FMPL is an experimental prototype, and the test suite encodes where the language
 is *going* as well as where it *is*. Roughly **75 tests are `#[ignore]`d** — not

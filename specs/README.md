@@ -5,12 +5,13 @@ Design documentation for FMPL, a streaming-first DSL for building AI agents with
 > **Documentation Standards**: See [docs/STANDARDS.md](../docs/STANDARDS.md) for standard structure and formatting guidelines for design documents, implementation plans, and specifications.
 
 > **Ground truth for work going forward** — the autonomous loop and contributors
-> pick work from these two, which the rest of `specs/` elaborates:
+> pick work from these, which the rest of `specs/` elaborates:
 > - [ROADMAP.md](./ROADMAP.md) — where FMPL is and what's next (the arc).
-> - [known-gaps.md](../docs/known-gaps.md) — the **authoritative gap ledger**:
->   every `#[ignore]`d test grouped by root cause, i.e. the concrete work
->   remaining. This is the source of truth for "what's undone"; pick work off it
->   and keep it current as gaps close.
+> - [gaps.md](./gaps.md) — the **actionable gap tracker**: the work remaining as a
+>   checkbox todolist, one item per closeable gap. Pick work here and check items
+>   off as their `#[ignore]`d tests pass.
+> - [known-gaps.md](../docs/known-gaps.md) — the prose analysis behind the tracker
+>   (root-cause narrative for the gaps).
 
 ## Crate Structure
 
