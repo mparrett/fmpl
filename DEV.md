@@ -23,7 +23,7 @@ and [`project.md`](project.md).
 
 ## Workspace layout
 
-Six workspace crates (`benches/` exists but is excluded from the workspace —
+Seven workspace crates (`benches/` exists but is excluded from the workspace —
 it depends on the external `execution_tape` crate; see the root `Cargo.toml`
 comments):
 
@@ -40,6 +40,7 @@ comments):
 - `fmpl-web/` — Axum server with HTMX frontend, per-user sessions, approval queue, storylet system
 - `fmpl-tui/` — Ratatui TUI with DAG-based conversation management (Ctrl+L for chat mode)
 - `fmpl-bootstrap/` — Minimal interpreter for build-time parser generation (avoids circular deps)
+- `fmpl-wasm/` — wasm-bindgen bindings for the browser REPL
 
 **FMPL standard library** (`lib/`):
 
@@ -85,8 +86,8 @@ comments):
 
 ## Documentation map
 
-- `docs/known-gaps.md` — current limitations, grouped by root cause (the ~185
-  `#[ignore]`d tests each carry a reason pointing here)
+- `docs/known-gaps.md` — current limitations, grouped by root cause (74
+  `#[ignore]`d tests; the integration-suite ones carry a reason pointing here)
 - `docs/design-principles.md` — durable invariants (DESIGN-001…005)
 - `docs/STANDARDS.md` — documentation standards for design docs, plans, specs
 - `specs/README.md` — spec index and crate overview

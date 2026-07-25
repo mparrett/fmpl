@@ -80,7 +80,7 @@
 //!   from `pat_symbol` consuming `:Pair` and the trailing `(` being unexpected.
 //!   The change is a postlude raw-string edit, which the bump policy lists as
 //!   a trigger.
-//! - 6 — rehab follow-up (2026-07-20). Error propagation through generated
+//! - 6 — revival follow-up (2026-07-20). Error propagation through generated
 //!   grammar actions: arithmetic/comparison ops in grammar mode emit `?`
 //!   instead of `.unwrap()` (an i64-overflowing literal is now a clean
 //!   `Error::Runtime`, not a panic), `fold` in GRAMMAR_HELPERS became

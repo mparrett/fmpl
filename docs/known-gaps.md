@@ -1,9 +1,9 @@
 # Known gaps
 
 FMPL is an experimental prototype, and the test suite encodes where the language
-is *going* as well as where it *is*. Roughly **75 tests are `#[ignore]`d** — not
+is *going* as well as where it *is*. **74 tests are `#[ignore]`d** — not
 because they're broken, but because they pin behavior for features that aren't
-finished yet. Every one carries a machine-readable reason:
+finished yet. The integration-suite ignores carry a machine-readable reason:
 
 ```sh
 cargo test --workspace                       # ignored tests print their reason
@@ -31,7 +31,7 @@ fmpl_parser.fmpl itself (`"src" @ fmpl_parser.code`).
 self-hosting work is tracked by the roadmap (self-compile milestone), not by
 ignored tests.
 
-## 2. Pattern-matching completeness (~50)
+## 2. Pattern-matching completeness (54)
 
 Pieces of the pattern/grammar system that aren't wired end-to-end: pattern
 unification, list-as-stream tree matching, and compilation of specific pattern

@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Layer Underneath: FMPL&rsquo;s Agent Process</title>
+<style>
+  :root {
+    --ground: #f7f5f0;
+    --surface: #fffefb;
+    --panel: #f0ede4;
+    --ink: #26241e;
+    --muted: #6c6a60;
+    --faint: #97948a;
+    --accent: #a5661a;
+    --accent-ink: #8a5413;
+    --works: #296e63;
+    --works-bg: #e3ede9;
+    --partial: #986013;
+    --partial-bg: #f2e8d5;
+    --missing: #a44a3d;
+    --missing-bg: #f2e2dd;
+    --line: #e2ded2;
+    --line-strong: #cfcaba;
+    --code-bg: #f0ede4;
+    --term-ground: #16181d;
+    --term-ink: #d8d4c8;
+    --term-amber: #e0a458;
+    --term-teal: #7db8ac;
+    --term-red: #c7705f;
+    --term-muted: #6e7076;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #16181d;
+      --surface: #1d2026;
+      --panel: #1a1d23;
+      --ink: #e3e0d7;
+      --muted: #9b988d;
+      --faint: #6e6c64;
+      --accent: #e0a458;
+      --accent-ink: #e6b06c;
+      --works: #7db8ac;
+      --works-bg: #1d2b28;
+      --partial: #d9a763;
+      --partial-bg: #2b2519;
+      --missing: #c7705f;
+      --missing-bg: #2d1f1c;
+      --line: #2c2f37;
+      --line-strong: #3d414b;
+      --code-bg: #1a1d23;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f7f5f0;
+    --surface: #fffefb;
+    --panel: #f0ede4;
+    --ink: #26241e;
+    --muted: #6c6a60;
+    --faint: #97948a;
+    --accent: #a5661a;
+    --accent-ink: #8a5413;
+    --works: #296e63;
+    --works-bg: #e3ede9;
+    --partial: #986013;
+    --partial-bg: #f2e8d5;
+    --missing: #a44a3d;
+    --missing-bg: #f2e2dd;
+    --line: #e2ded2;
+    --line-strong: #cfcaba;
+    --code-bg: #f0ede4;
+  }
+  :root[data-theme="dark"] {
+    --ground: #16181d;
+    --surface: #1d2026;
+    --panel: #1a1d23;
+    --ink: #e3e0d7;
+    --muted: #9b988d;
+    --faint: #6e6c64;
+    --accent: #e0a458;
+    --accent-ink: #e6b06c;
+    --works: #7db8ac;
+    --works-bg: #1d2b28;
+    --partial: #d9a763;
+    --partial-bg: #2b2519;
+    --missing: #c7705f;
+    --missing-bg: #2d1f1c;
+    --line: #2c2f37;
+    --line-strong: #3d414b;
+    --code-bg: #1a1d23;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 1.0625rem;
+    line-height: 1.65;
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.5rem; }
+  .prose { max-width: 44rem; }
+  .prose p { margin: 0 0 1.1em; }
+  .prose ul { margin: 0 0 1.1em; padding-left: 1.2rem; }
+  .prose li { margin: 0 0 0.45em; }
+  a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.85em;
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 0.08em 0.35em;
+    overflow-wrap: anywhere;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    margin: 1.25rem 0;
+  }
+  pre code { background: none; border: none; padding: 0; white-space: pre; font-size: inherit; }
+  blockquote {
+    margin: 1.4rem 0;
+    padding: 0 0 0 1.25rem;
+    border-left: 2px solid var(--line-strong);
+    color: var(--muted);
+    max-width: 44rem;
+  }
+  blockquote p { margin: 0 0 0.8em; font-size: 0.97rem; }
+  blockquote p:last-child { margin-bottom: 0; }
+
+  /* ---------- masthead ---------- */
+  header.masthead { padding: 4.5rem 0 0; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 1.25rem;
+  }
+  h1 {
+    font-size: clamp(2.6rem, 6vw, 4rem);
+    line-height: 1.05;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 0 0 1rem;
+    text-wrap: balance;
+  }
+  h1 .of { font-style: italic; font-weight: 400; color: var(--muted); }
+  .dek {
+    font-size: 1.3rem;
+    line-height: 1.5;
+    color: var(--muted);
+    max-width: 40rem;
+    margin: 0 0 1.75rem;
+    text-wrap: balance;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.75rem;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+    border-top: 1px solid var(--line-strong);
+    border-bottom: 1px solid var(--line-strong);
+    padding: 0.7rem 0;
+    margin-bottom: 2.5rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .meta-row b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- terminal hero ---------- */
+  .term {
+    background: var(--term-ground);
+    border: 1px solid #2c2f37;
+    border-radius: 6px;
+    padding: 1.1rem 1.4rem 1.3rem;
+    font-family: var(--mono);
+    font-size: 0.8125rem;
+    line-height: 1.75;
+    color: var(--term-ink);
+    white-space: pre;
+    overflow-x: auto;
+    margin: 0 0 1rem;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.25), 0 12px 40px -18px rgba(224,164,88,0.25);
+  }
+  .term .bar { color: var(--term-muted); display: block; margin-bottom: 0.6rem; user-select: none; }
+  /* box-drawing connectors only join at a tight leading */
+  .term .diag { display: block; line-height: 1.2; margin: 0 0 0.9rem; }
+  .term .p { color: var(--term-amber); }
+  .term .o { color: var(--term-teal); }
+  .term .e { color: var(--term-red); }
+  .term .c { color: var(--term-muted); }
+  .term-cap {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    color: var(--faint);
+    margin: 0 0 3.5rem;
+  }
+
+  /* ---------- sections ---------- */
+  section { margin: 0 0 4.5rem; }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    border-top: 2px solid var(--ink);
+    padding-top: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.1em;
+    color: var(--accent-ink);
+    white-space: nowrap;
+  }
+  h2 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin: 2.2rem 0 0.6rem;
+  }
+  h3 code { font-size: 0.85em; }
+
+  /* ---------- toc ---------- */
+  nav.toc { margin: 0 0 4.5rem; }
+  nav.toc ol {
+    list-style: none;
+    margin: 0; padding: 0;
+    columns: 2;
+    column-gap: 3rem;
+    max-width: 44rem;
+  }
+  nav.toc li { margin: 0 0 0.35rem; break-inside: avoid; }
+  nav.toc a {
+    display: flex;
+    gap: 0.75rem;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--ink);
+    padding: 0.15rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  nav.toc a:hover { color: var(--accent-ink); }
+  nav.toc .n { font-family: var(--mono); font-size: 0.7rem; color: var(--accent-ink); }
+  @media (max-width: 40rem) { nav.toc ol { columns: 1; } }
+
+  /* ---------- field notes ---------- */
+  .fieldnote {
+    border-left: 3px solid var(--accent);
+    background: var(--panel);
+    padding: 1rem 1.4rem;
+    margin: 1.75rem 0;
+    max-width: 44rem;
+  }
+  .fieldnote .fn-label {
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    display: block;
+    margin-bottom: 0.4rem;
+  }
+  .fieldnote p { margin: 0 0 0.75em; font-size: 0.95rem; }
+  .fieldnote p:last-child { margin-bottom: 0; }
+
+  /* ---------- state / stack rows ---------- */
+  .stack { border: 1px solid var(--line-strong); margin: 1.5rem 0; max-width: 48rem; }
+  .stack-row {
+    display: grid;
+    grid-template-columns: 8.5rem 1fr;
+    border-bottom: 1px solid var(--line);
+  }
+  .stack-row:last-child { border-bottom: none; }
+  .stack-row .n {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent-ink);
+    padding: 1rem 0 0.9rem 1.1rem;
+    white-space: nowrap;
+  }
+  .stack-row .desc { padding: 1rem 1.25rem 1rem 0.5rem; min-width: 0; }
+  .stack-row .desc b { display: block; font-size: 0.95rem; }
+  .stack-row .desc span { font-size: 0.875rem; color: var(--muted); }
+
+  /* ---------- ledger ---------- */
+  .ledger { border: 1px solid var(--line-strong); margin: 1.5rem 0; max-width: 48rem; }
+  .ledger-row {
+    display: grid;
+    grid-template-columns: 13rem 1fr;
+    border-bottom: 1px solid var(--line);
+  }
+  .ledger-row:last-child { border-bottom: none; }
+  .ledger-row .count {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--works);
+    padding: 0.9rem 0 0.9rem 1.1rem;
+    white-space: nowrap;
+  }
+  .ledger-row .desc { padding: 0.95rem 1.25rem 0.95rem 0.5rem; font-size: 0.9rem; color: var(--muted); min-width: 0; }
+  @media (max-width: 30rem) { .ledger-row, .stack-row { grid-template-columns: 1fr; } }
+
+  /* ---------- footer ---------- */
+  footer {
+    border-top: 2px solid var(--ink);
+    padding: 1.25rem 0 4rem;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 2rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Process archaeology &middot; github.com/mparrett/fmpl</p>
+  <h1>The Layer Underneath<span class="of">, read out of the archive</span></h1>
+  <p class="dek">FMPL&rsquo;s autonomous loop carried a requirements lattice, a hook-enforced state machine, adversarial review rounds, and an iteration log that recorded its own failures. None of it was legible from the surface of the repo. Here it is.</p>
+  <div class="meta-row">
+    <span><b>253</b> commits, 2025-12-21&ndash;2026-05-12</span>
+    <span><b>31</b> epics / <b>100</b> stories / <b>331</b> ACs</span>
+    <span><b>88</b> scenarios</span>
+    <span><b>22</b> logged iterations</span>
+    <span><b>~30k</b> lines on <code>archive/agent-harness</code></span>
+  </div>
+
+  <div class="term" role="img" aria-label="Terminal transcript: the ralph loop state machine, and a gate hook blocking a tool call that skipped the health check">
+<span class="bar">$ cat PROMPT.md   <span class="c"># the state machine the loop ran under</span></span><span class="diag o">                    ┌─── IMPLEMENT → VERIFY → REVIEW → COMMIT
+PICK_TASK → TRIAGE ─┤        ↑          │
+    ↑          │    └─── RESEARCH → DOCUMENT → COMMIT
+    └──close───┘</span><span class="bar">$ <span class="c"># … and what happened when the agent tried to skip a step</span></span><span class="p">→ Write(fmpl-core/src/vm.rs)</span>
+<span class="e">BLOCKED [state=VERIFY]: Tests must pass before more edits.</span>
+<span class="e">  Run cargo test. If tests fail, you&rsquo;ll return to IMPLEMENT.</span>
+<span class="p">→ Bash(jj describe -m &quot;feat: …&quot;)</span>
+<span class="e">BLOCKED [state=COMMIT]: Run full `cargo test` health check before</span>
+<span class="e">  committing. The VERIFY step may have used filtered tests.</span>
+  </div>
+  <p class="term-cap">Diagram from <code>PROMPT.md</code> on the archive branch; block messages from <code>ralph-gate.py</code> at <code>2a6db48</code>, abridged. A companion to the field logs <a href="fmpl-revival-log.html">Opening the Door</a> and <a href="fmpl-field-log.html">Closing the Loop</a>.</p>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#why"><span class="n">§1</span><span>Why this page exists</span></a></li>
+    <li><a href="#where"><span class="n">§2</span><span>Where the evidence lives</span></a></li>
+    <li><a href="#lattice"><span class="n">§3</span><span>The requirement lattice</span></a></li>
+    <li><a href="#machine"><span class="n">§4</span><span>The state machine that couldn&rsquo;t be skipped</span></a></li>
+    <li><a href="#par"><span class="n">§5</span><span>PAR: review by adversary</span></a></li>
+    <li><a href="#wrong"><span class="n">§6</span><span>A log that records being wrong</span></a></li>
+    <li><a href="#memory"><span class="n">§7</span><span>Memory, and its honest yield</span></a></li>
+    <li><a href="#kept"><span class="n">§8</span><span>What a fork keeps</span></a></li>
+  </ol>
+</nav>
+
+<section id="why">
+  <div class="sec-head"><span class="sec-num">§1</span><h2>Why this page exists</h2></div>
+  <div class="prose">
+    <p>Most published writing about autonomous coding agents describes either the prompt or the output. This is the middle: what a loop looks like when someone has been running it long enough to know where it lies to itself. Norman Nunley ran one against FMPL for five months, and the arrangement he assembled to keep it honest is more interesting than most of what gets written about the practice.</p>
+    <p>It reached us as thirty thousand lines to triage before we had read enough to understand them, because that is how a process layer arrives when you fork someone&rsquo;s solo project — legible to its participants, opaque from outside. Sidelining it to an archive branch was the right call for a repo with different tooling, and it made the layer invisible rather than merely unfamiliar. This page opens it back up.</p>
+    <p>Everything here is quoted from primary sources on <code>archive/agent-harness</code>: the prompt the loop ran under, the hooks that gated it, the requirement documents, the iteration log, the memory store. All of it predates the cleanup this fork performed — the state of the project as its author left it, not as we rearranged it.</p>
+  </div>
+</section>
+
+<section id="where">
+  <div class="sec-head"><span class="sec-num">§2</span><h2>Where the evidence lives</h2></div>
+  <div class="prose">
+    <p>All of it sits on one branch, <code>archive/agent-harness</code>, at the commit this fork found on arrival. Nothing was deleted to make the main branch legible; the harness was moved intact in a single commit, and the branch is the &ldquo;before&rdquo; snapshot. Four bodies of material matter:</p>
+  </div>
+
+  <div class="stack">
+    <div class="stack-row">
+      <div class="n">docs/superpowers/</div>
+      <div class="desc"><b>The planning layer &mdash; 41 files</b>
+      <span>A roadmap, 31 epic requirement documents, a dated iteration log, a coverage ledger mapping specs to stories, a behavior corpus, and design study notes.</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">.agent/</div>
+      <div class="desc"><b>The memory system &mdash; 107 files</b>
+      <span>Episodic capture, a clustering &ldquo;dream cycle,&rdquo; a candidate lifecycle with graduation and rejection, semantic and team memory files, and a review queue.</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">PROMPT.md</div>
+      <div class="desc"><b>The loop contract</b>
+      <span>A single-iteration headless prompt: state machine, pre-flight context, budget rules, and a one-line output format the driver parses.</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">.claude/hooks/</div>
+      <div class="desc"><b>The enforcement</b>
+      <span>A <code>PreToolUse</code> gate that blocks tool calls not permitted in the current state, and a <code>PostToolUse</code> transition hook that advances it.</span></div>
+    </div>
+  </div>
+
+  <div class="fieldnote">
+    <span class="fn-label">Field note &middot; adopted and aimed</span>
+    <p>Some of this is off-the-shelf and some is written for FMPL. The memory system arrived as an installed stack (<code>agentic_stack_version 0.15.0</code>, 2026-05-09, with adapters for both Claude Code and Codex); the loop driver lives in a <code>ralph-loop/</code> directory shared across the author&rsquo;s projects; <code>docs/superpowers/</code> takes its name from an existing methodology. <code>PROMPT.md</code>, the roadmap, the requirement documents, and the iteration log are this project&rsquo;s own. Nunley assembled all of it and aimed it at a language implementation for five months, which is the part that produced the artifact.</p>
+  </div>
+
+  <div class="fieldnote">
+    <span class="fn-label">Field note &middot; a caveat about the tip</span>
+    <p>Do not expect to open the archive branch and read the hooks. At the tip, <code>ralph.sh</code> and every file under <code>.claude/hooks/</code> is a <em>symlink</em> into <code>/Users/ndn/development/ralph-loop/</code> — a path that existed only on the author&rsquo;s machine. The loop driver was shared across projects and was never repo-resident.</p>
+    <p>The real sources survive earlier in history, before the symlink conversion. <code>git show 2a6db48:.claude/hooks/ralph-gate.py</code> is the full gate; <code>git show 38b551c:.claude/settings.json</code> is the wiring. Every hook quotation on this page comes from those commits.</p>
+  </div>
+</section>
+
+<section id="lattice">
+  <div class="sec-head"><span class="sec-num">§3</span><h2>The requirement lattice</h2></div>
+  <div class="prose">
+    <p>The planning layer is a five-level structure, and each level is machine-checkable against the one above it:</p>
+  </div>
+
+  <pre><code>EPIC-010  Bootstrap Parity                       31 epic documents
+  └─ STORY-0043  as a language implementor…      100 stories
+       └─ AC-1 … AC-5   impact:correctness       331 acceptance criteria
+                        seam:integration
+            └─ SCENARIO-0030  proof seam,        88 scenarios
+                 preconditions, observables,
+                 execution command
+                 └─ ITER-0001  delivered         22 logged iterations</code></pre>
+
+  <div class="prose">
+    <p>Two properties make this more than paperwork. First, every acceptance criterion carries an <code>impact</code> and a <code>seam</code> — where the claim must be proven. The distribution is a fair summary of the project&rsquo;s testing philosophy: <b>246 integration</b>, 61 unit, 12 app-level, 7 process-level, 5 end-to-end. This is a codebase that decided early that its interesting failures live between components, and staffed its acceptance criteria accordingly.</p>
+    <p>Second, scenarios carry an <em>execution command</em>. A scenario begins life with <code>Automation status: pending</code> and <code>Execution command: TBD</code>, and is &ldquo;promoted to sentinel&rdquo; when a real command exists that proves it:</p>
+  </div>
+
+  <pre><code>SCENARIO-0030: promoted to sentinel,
+  command = `cargo test -p fmpl-core --test ast_to_ir_parity parity_integer`
+SCENARIO-0031 through SCENARIO-0037: marked BLOCKED:ITER-0002</code></pre>
+
+  <div class="prose">
+    <p>A blocked scenario names the iteration that will unblock it. The coverage ledger closes the loop in the other direction, classifying each source spec by how much of it has been lifted into stories and scenarios — <code>specs/grammar-system.md</code> at 18 stories and 14 scenarios, <code>specs/vm.md</code> at 15 and 9, each marked <b>covered</b>. Requirements trace down to commands; commands trace back up to specs.</p>
+    <p>The idiom outlived the harness. <code>docs/behavior-scenarios.md</code> on the main branch is a direct descendant, and it is a literal build input: <code>fmpl-core</code>&rsquo;s build script generates a test suite from it, so moving the file breaks the build rather than silently orphaning the corpus.</p>
+  </div>
+</section>
+
+<section id="machine">
+  <div class="sec-head"><span class="sec-num">§4</span><h2>The state machine that couldn&rsquo;t be skipped</h2></div>
+  <div class="prose">
+    <p>An LLM told to run tests before committing will usually run tests before committing. Usually is the problem. The loop was configured so that the instruction was not advice: a <code>PreToolUse</code> hook read the current state from <code>.ralph-state.json</code> and returned exit code 2 — a hard block, with the reason fed back to the agent — for any tool call the state did not permit.</p>
+  </div>
+
+  <div class="stack">
+    <div class="stack-row">
+      <div class="n">HEALTH_CHECK</div>
+      <div class="desc"><b>Only <code>cargo test</code></b>
+      <span>The iteration starts by proving the tree is green. Every other tool is blocked until it is.</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">PICK_TASK</div>
+      <div class="desc"><b>Only the issue tracker</b>
+      <span><code>jj issue ready</code>, then <code>jj issue show</code>. No reading, no editing, no exploring.</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">TRIAGE</div>
+      <div class="desc"><b>Is this already done?</b>
+      <span>Tracker and tests only. Three close-and-pick loops maximum, counted in the state file — the fourth <code>jj issue close</code> is blocked, forcing the agent to commit to a task.</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">IMPLEMENT</div>
+      <div class="desc"><b>Write, under two conditions</b>
+      <span>The first <code>Write</code> is blocked until <code>docs/codebase/</code> has been read. Unfiltered cargo output is blocked — commands must pipe through <code>grep</code>/<code>head</code>, which is context budgeting enforced at the tool boundary. Re-picking a task is blocked: &ldquo;you are committed to the current task.&rdquo;</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">VERIFY</div>
+      <div class="desc"><b>Tests, then edits &mdash; not the reverse</b>
+      <span>Editing is blocked outright <em>unless</em> verification already failed, in which case the same edit demotes the state back to IMPLEMENT. Failure is a transition, not an exception.</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">REVIEW</div>
+      <div class="desc"><b>Review tools only</b>
+      <span>Diffs, logs, review skills and subagents. An attempted edit here means review found something: the state drops to IMPLEMENT and clears <code>tests_passed</code>, <code>clippy_passed</code>, and <code>health_check_passed</code>. Passing the gates once buys nothing after a change.</span></div>
+    </div>
+    <div class="stack-row">
+      <div class="n">COMMIT</div>
+      <div class="desc"><b>Green suite or no commit</b>
+      <span><code>jj describe</code> is blocked while <code>health_check_passed</code> is false, with an explicit reason: the VERIFY step may have run a filtered subset, so run the full suite now.</span></div>
+    </div>
+  </div>
+
+  <div class="prose">
+    <p>A second arc — <code>RESEARCH → DOCUMENT → COMMIT</code> — handles work that needs discovery first, and gates differently: RESEARCH allows reads and dispatched subagents but blocks <code>Bash</code> outside the issue tracker, and DOCUMENT permits writes only to <code>docs/codebase/</code> and <code>AGENTS.md</code>. Attempting to write code from either state silently transitions to IMPLEMENT rather than failing, so the machine bends where the work genuinely changed shape and holds where it did not.</p>
+    <p>The details are where the operating experience shows. The gate refuses to read <code>~/.cargo/registry</code> and points at a documentation tool instead. It refuses <code>cargo doc --open</code>, which does nothing headless. It refuses <code>rustc</code> on a file in <code>/tmp</code>, because a throwaway compile is how a loop convinces itself something works without adding a test. It honors a list of protected files, so edits a human made outside the loop cannot be reverted by it. And it checks whether the process that wrote the state file is still alive — if the driver died, the stale state is ignored rather than blocking an interactive session forever. Each of those is a scar.</p>
+    <p>The prompt carries the same texture: research budget under 40% of context and implementation under 60%; &ldquo;the issue description IS your research&rdquo;; a three-strike rule that converts a repeated error into a written spec and a stop; and a flat prohibition on the agent&rsquo;s own to-do tool, because the issue tracker is the task list and two task lists means neither is true. Each iteration ends by printing exactly one line — <code>COMPLETED:&lt;id&gt;</code> or <code>BLOCKED:&lt;id&gt;</code> — which is what makes the loop a loop.</p>
+  </div>
+</section>
+
+<section id="par">
+  <div class="sec-head"><span class="sec-num">§5</span><h2>PAR: review by adversary</h2></div>
+  <div class="prose">
+    <p>PAR — parallel adversarial review — is the load-bearing reviewer in this system. Rounds run against a plan or a diff and return a verdict with numbered findings. It is the answer to the question the first field log failed to ask: who reviews a solo agent&rsquo;s work?</p>
+    <p>ITER-0004c shows it working. Three PAR rounds ran against the iteration&rsquo;s scope before implementation began and surfaced 26 actionable findings. What they changed:</p>
+    <ul>
+      <li>An acceptance criterion asserted optimizer behavior that does not exist — the optimizer never recurses into <code>Lambda</code>, <code>Let</code>, <code>Match</code>, <code>Call</code>, <code>List</code>, <code>Map</code>, or <code>Block</code>. Verified against the source and corrected before anything was built against it.</li>
+      <li>A citation named the wrong optimization pass for the observable being tested.</li>
+      <li>The build order was rewritten to put cleanup deletions first, shrinking the migration target set before the migration started.</li>
+      <li>A scope item was split out into its own iteration rather than carried.</li>
+    </ul>
+    <p>Then the harder result. The iteration&rsquo;s plan called for a code transformer written in FMPL. It was built — grammar plus a Rust driver — and a PAR spec-compliance review failed it: three of six rules were implementable cleanly, and the other three needed left-hand-side context tracking the grammar engine cannot express. The transformer was abandoned, the change dropped, and the work continued by hand. Round one had already flagged hand-migration as viable, so the fallback was on record before the attempt.</p>
+    <p>An adversarial review that only ever approves is a formality. This one killed a piece of finished work on spec-compliance grounds and sent the iteration down its own second-choice path.</p>
+  </div>
+</section>
+
+<section id="wrong">
+  <div class="sec-head"><span class="sec-num">§6</span><h2>A log that records being wrong</h2></div>
+  <div class="prose">
+    <p>The iteration log runs to 22 entries across six days, 2026-05-08 to 2026-05-13. Most entries are what you would expect: stories delivered, tasks executed, scenarios promoted, test counts. The interesting one is ITER-0004b, whose heading carries <b>(PARTIAL)</b> and whose dates read <em>completed 2026-05-08; reconciled 2026-05-09</em>.</p>
+    <p>The iteration&rsquo;s goal was a single canonical representation for structured values. A commit landed claiming &ldquo;Final step of ITER-0004b.&rdquo; A day later the reconciliation says why that was false, under its own heading — <em>Why the gap wasn&rsquo;t caught at commit time</em>:</p>
+    <blockquote>
+      <p>The Phase C commit message claims &ldquo;Final step of ITER-0004b — single canonical representation,&rdquo; and that claim is <b>true at the Rust runtime level</b> but <b>false at the FMPL stdlib and AST/parser-surface level</b>. The 16 <code>#[ignore]</code>&rsquo;d tests in <code>optimizer_integration.rs</code> were the canary that should have failed loudly to catch the gap; instead they sit silent. Workspace tests pass because nothing currently exercises a path that would surface the parser-shape mismatch.</p>
+    </blockquote>
+    <p>The entry then enumerates exactly what was skipped — a transformer never built, five standard-library files still in the old syntax with per-file counts, an optimizer wiring step passed over, parser surfaces still present — and reschedules all of it into a named successor iteration under a rule the process calls <em>deferring-work-must-reschedule</em>. Three lessons are recorded, including one that reads as a direct rebuke of the commit that caused it: a commit message that says &ldquo;final step of X&rdquo; should be checked against X&rsquo;s stated acceptance criteria.</p>
+    <p>A green test suite said the iteration was done. The requirements lattice said otherwise, someone checked, and the disagreement went into the permanent log rather than getting resolved by moving the goalposts. That is the whole argument for keeping requirements separate from tests: the tests can only tell you about the code you wrote.</p>
+
+    <div class="fieldnote">
+      <span class="fn-label">Field note &middot; the ignored test as a contract</span>
+      <p>The third lesson from that entry is the one worth stealing: <b><code>#[ignore]</code>&rsquo;d tests are a deferred-acceptance contract.</b> The 16 silent optimizer tests were the iteration&rsquo;s own acceptance criteria, written down and then not run. They should be un-ignored by whichever iteration delivers their preconditions, or tracked as scheduled work with an owner.</p>
+      <p>This fork arrived at 185 ignored tests and turned them into <code>docs/known-gaps.md</code> — a ledger grouped by root cause, with each ignore carrying a machine-readable reason. Same idea, reached from the outside.</p>
+    </div>
+  </div>
+</section>
+
+<section id="memory">
+  <div class="sec-head"><span class="sec-num">§7</span><h2>Memory, and its honest yield</h2></div>
+  <div class="prose">
+    <p>The most ambitious piece of the harness is the memory system, installed as a versioned stack on 2026-05-09, two days into the documented sprint. Hooks capture episodic entries as the agent works. A &ldquo;dream cycle&rdquo; runs unattended: cluster the episodes, extract structured patterns, stage them as candidates with lifecycle metadata, apply a heuristic prefilter that drops obvious junk, decay old entries, and write a review queue for the next session. Its docstring is explicit about the boundaries it will not cross:</p>
+    <blockquote>
+      <p>Never: subjective validation (host agent reviews via CLI tools) &middot; promotion to <code>LESSONS.md</code> (<code>graduate.py</code> does that) &middot; git commit (unattended repo writes are dangerous on a host hook).</p>
+    </blockquote>
+    <p>A mechanical process stages; a reasoning process judges; neither writes to the repository unattended. That separation is the right one, and it is drawn in code rather than in a README.</p>
+    <p>The yield is smaller than the machinery, though the clock is a fair defense: the stack had four days between installation and the archive tip. In that window it accumulated 1,648 episodic entries, 23 candidates awaiting review, 2 graduated, 9 rejected, and 4 lessons in the semantic store. Read the queue and the reason is plain — the top-priority candidates are mostly failure telemetry (&ldquo;this skill has failed 10 times in 14 days, flag for rewrite&rdquo;), which is useful operational signal and not the durable engineering lesson the pipeline was built to distill. One graduated lesson is genuinely good, about enumerating rename targets after a compiler-checked deletion rather than before. The ratio of infrastructure to insight is roughly 107 files to 4 lessons.</p>
+    <p>Two things follow. The first is a caution for anyone reading this as a template: the review queue graduates <em>lessons</em>, not code. It is not a code review mechanism, and reading it as one would put the reviewer in the wrong place entirely — PAR is where code gets adjudicated. The second is chronological. The pre-agentic archive inside <code>.agent/</code> is dated January 2026 and records a 100-iteration, three-hour loop run against the terminal UI, tasks checked off and 222 tests passing. The commit history agrees: 131 commits in January against 48 in May. The memory stack is a late addition to a loop that had already been running for months.</p>
+  </div>
+</section>
+
+<section id="kept">
+  <div class="sec-head"><span class="sec-num">§8</span><h2>What a fork keeps</h2></div>
+  <div class="prose">
+    <p>This fork sidelined the harness for a reason that has nothing to do with its quality: we drive the repo with different agents on a different loop, and a process encoded for someone else&rsquo;s tooling sitting where a visitor looks first is misleading in both directions. That decision stands. It also had a cost, and the cost is specific.</p>
+    <p>Invariants the loop enforced <em>in code</em> — full suite green before commit, design docs read before the first write, filtered output — became prose in <code>AGENTS.md</code> that an agent is trusted to remember. Trust is weaker than a hook returning exit code 2. <code>specs/portable-invariant-enforcement.md</code> audits that gap and concludes it is narrower than it first appears: CI and the build script already enforce most of it, and the house idiom for the rest is a repo-resident test that asserts the invariant. Git hooks are rejected as a tier for the same reason they would fail here — this repo is driven with <code>jj</code>, which skips them.</p>
+    <p>What survived the move without argument, because it was portable to begin with: the specs directory and its curated index pairing each spec with the code implementing it; the behavior corpus, now a build input; the habit of an ignored test carrying its reason; and the discipline of a ledger that makes &ldquo;burn down the bucket&rdquo; a measurable goal rather than a sentiment.</p>
+  </div>
+
+  <div class="ledger">
+    <div class="ledger-row"><div class="count">31 / 100 / 331</div><div class="desc">epic documents, stories, and acceptance criteria — each AC tagged with an impact and the seam where it must be proven</div></div>
+    <div class="ledger-row"><div class="count">88</div><div class="desc">behavior scenarios, promoted to &ldquo;sentinel&rdquo; only when a real execution command proves them</div></div>
+    <div class="ledger-row"><div class="count">22</div><div class="desc">logged iterations over six days, one carrying a written reconciliation of its own false completion claim</div></div>
+    <div class="ledger-row"><div class="count">3 rounds, 26 findings</div><div class="desc">PAR scope review on ITER-0004c alone — which then failed and killed the transformer that iteration had built</div></div>
+    <div class="ledger-row"><div class="count">1,648 &rarr; 4</div><div class="desc">episodic entries to graduated lessons in the memory stack&rsquo;s four days on the project; 23 candidates still queued, 9 rejected</div></div>
+    <div class="ledger-row"><div class="count">253 commits</div><div class="desc">2025-12-21 to 2026-05-12, of which January alone accounts for 131 — the loop long predates the process stack documenting it</div></div>
+  </div>
+</section>
+
+<footer>
+  <span>FMPL &middot; MIT &middot; github.com/mparrett/fmpl (fork of nnunley/fmpl)</span>
+  <span>Written 2026-07-24 &middot; sources on <code>archive/agent-harness</code>, quoted verbatim</span>
+  <span>Companion to <a href="fmpl-revival-log.html">Opening the Door</a> &middot; <a href="fmpl-field-log.html">Closing the Loop</a> &middot; <a href="fmpl-tour.html">the engineering tour</a></span>
+</footer>
+
+</div>
+
+</body>
+</html>

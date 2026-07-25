@@ -443,16 +443,16 @@
   <div class="sec-head"><span class="sec-num">§1</span><h2>Lineage and thesis</h2></div>
   <div class="prose">
     <p>The original FMPL (&ldquo;of Accardi&rdquo;) came out of UC Berkeley&rsquo;s Experimental Computing Facility around 1992 — a MUD server language in the LambdaMOO / ColdMUD tradition, with an interpreter written by Jon Blow. Those systems shared a distinctive shape: a <em>live image</em> of prototype-based objects, edited from inside, serving many users at once, persisting across restarts. The program wasn&rsquo;t a file you ran; it was a world you inhabited.</p>
-    <p>This FMPL is <a href="https://github.com/nnunley">Norman Nunley&rsquo;s</a> — a descendant of the original, not a restoration of it. The surviving link to the 1992 language is an EBNF grammar Nunley extracted from its sources back in the late 1990s; decades later, that grammar became the seed of this project. The syntax is only lightly similar to the original, and everything beyond the grammar — the streaming model, the PEG grammar system, the indexed-RPN VM, the metacircular bootstrap — is new design. The MUD lineage is first-hand, too: Nunley co-wrote cool++, a C++ rewrite of Stephen White&rsquo;s CoolMUD (White also created MOO, the server LambdaMOO grew from).</p>
+    <p>This FMPL is <a href="https://github.com/nnunley">Norman Nunley&rsquo;s</a> — a descendant of the original, not a restoration of it. The surviving link to the 1992 language is an EBNF grammar Nunley extracted from its sources back in the late 1990s; decades later, that grammar became the seed of this project. The syntax is only lightly similar to the original, and everything beyond the grammar — the streaming model, the PEG grammar system, the indexed-RPN VM, the metacircular bootstrap — is new design. The MUD lineage is first-hand, too: Nunley was one of the developers on cool++/coldmud; ColdStore — a C++ persistent object store and VM toolkit from that era — is the better reference for what he was doing then.</p>
     <p>The project bets that the MUD shape is the right shape for AI agents. A modern agent system wants exactly what a MUD had: long-lived stateful objects, many concurrent actors (now LLMs as well as humans), capability-scoped access between them, and durable state that survives a crash mid-conversation. FMPL adds the modern half: streaming as a first-class concern, OMeta-style PEG grammars as the universal tool for parsing any stream — text, bytes, or structured values — and an async runtime for tool calls.</p>
-    <p>One more thing worth saying plainly, because it shapes the codebase: most of this implementation was written by an autonomous LLM agent loop that Nunley set up and steered, iterating against a roadmap for months. It was recently <a href="fmpl-rehab-log.html">rehabilitated for public release</a> in much the same mode it was built — Claude doing the grinding, steered by a couple dozen human prompts over a few hours — the agent harness sidelined to an archive branch (~30,000 lines), a build that works on a fresh clone, CI, and a documentation pass in which every claim in the tutorial was re-verified against a live REPL. The result is unusually honest about itself: the test suite encodes where the language <em>is</em> and, via 74 deliberately-ignored tests, where it is <em>going</em>.</p>
+    <p>One more thing worth saying plainly, because it shapes the codebase: most of this implementation was written by an autonomous LLM agent loop that Nunley set up and steered, iterating against a roadmap for months. It was recently <a href="fmpl-revival-log.html">revitalized for public release</a> in much the same mode it was built — Claude doing the grinding, steered by a couple dozen human prompts over a few hours — with the ralph harness sidelined to an archive branch (~30,000 lines, nothing deleted, since this fork runs a different loop), a build that works on a fresh clone, CI, and a documentation pass in which every claim in the tutorial was re-verified against a live REPL. The result is unusually honest about itself: the test suite encodes where the language <em>is</em> and, via 74 deliberately-ignored tests, where it is <em>going</em>.</p>
   </div>
 </section>
 
 <section id="architecture">
   <div class="sec-head"><span class="sec-num">§2</span><h2>Architecture</h2></div>
   <div class="prose">
-    <p>FMPL is a Cargo workspace of six crates around one core. The execution pipeline is conventional in outline and unconventional in detail:</p>
+    <p>FMPL is a Cargo workspace of seven crates around one core. The execution pipeline is conventional in outline and unconventional in detail:</p>
   </div>
 
   <div class="pipeline" role="img" aria-label="Pipeline: source to lexer to parser to AST to compiler to indexed RPN bytecode to VM">
@@ -591,7 +591,7 @@ code::eval(ir::compile(ir))
 <section id="gaps">
   <div class="sec-head"><span class="sec-num">§5</span><h2>The gap ledger</h2></div>
   <div class="prose">
-    <p>74 tests are <code>#[ignore]</code>d, each with a machine-readable reason, grouped by root cause in <code>docs/known-gaps.md</code>. Read as a ledger, the count is intent rather than neglect — the suite pins behavior for features before they exist:</p>
+    <p>74 tests are <code>#[ignore]</code>d, grouped by root cause in <code>docs/known-gaps.md</code>. The integration-suite ones carry a machine-readable reason; a handful of rustdoc ignore-fences do not. Read as a ledger, the count is intent rather than neglect — the suite pins behavior for features before they exist:</p>
   </div>
 
   <div class="ledger">
@@ -601,19 +601,24 @@ code::eval(ir::compile(ir))
       <span>Formerly ~120 tests and the critical path. The generated parser now parses <code>ast_to_ir.fmpl</code> end to end, and <code>fmpl_parser.fmpl</code> runs as an interpreted grammar in the VM. How it went to zero — five stacked bugs behind one error message — is written up in <a href="fmpl-field-log.html">the field log</a>.</span></div>
     </div>
     <div class="ledger-row">
-      <div class="count">~50</div>
+      <div class="count">54</div>
       <div class="desc"><b>Pattern-matching completeness</b>
       <span>Pattern unification, list-as-stream tree matching, and compilation of specific pattern shapes aren&rsquo;t wired end-to-end.</span></div>
     </div>
     <div class="ledger-row">
-      <div class="count">~9</div>
+      <div class="count">9</div>
       <div class="desc"><b>Design decisions pending</b>
       <span>For-loop bodies can&rsquo;t mutate outer bindings; recursive scoped <code>let</code> and mutable closure capture need a strategy (Y-combinator, <code>let rec</code>, or cells); <code>yield</code>.</span></div>
     </div>
     <div class="ledger-row">
-      <div class="count">~5</div>
+      <div class="count">5</div>
       <div class="desc"><b>Optimizer wiring and web storylets</b>
-      <span>The FMPL AST optimizer isn&rsquo;t in the bootstrap compile path; the web REPL&rsquo;s storylet route is mid-build.</span></div>
+      <span>The FMPL AST optimizer isn&rsquo;t in the bootstrap compile path (2); the web REPL&rsquo;s storylet route is mid-build (3).</span></div>
+    </div>
+    <div class="ledger-row">
+      <div class="count">6</div>
+      <div class="desc"><b>Unbucketed remainder</b>
+      <span>Five rustdoc ignore-fences plus one unit-test ignore outside the gap buckets above.</span></div>
     </div>
   </div>
 
@@ -657,14 +662,14 @@ just web        # web REPL    http://localhost:3000
 just tui        # terminal UI (Ctrl+L for LLM chat)</code></pre>
 
   <div class="prose">
-    <p>Start with the <a href="fmpl-guide.html">language guide</a> — the web rendering of <code>TUTORIAL.md</code> and <code>DEMO.md</code>, every snippet of which runs as documented, verified line-by-line against the REPL. <code>specs/</code> holds the implementation specs (VM, grammars, objects, persistence, tuplespace); <code>docs/known-gaps.md</code> is the honest map of the frontier. If you want to contribute, the metacircular-parser bucket is the critical path: pick a file from the ledger, run it with <code>-- --ignored</code>, and land the feature its tests describe.</p>
+    <p>Start with the <a href="fmpl-guide.html">language guide</a> — the web rendering of <code>TUTORIAL.md</code> and <code>DEMO.md</code>, every snippet of which runs as documented, verified line-by-line against the REPL. <code>specs/</code> holds the implementation specs (VM, grammars, objects, persistence, tuplespace); <code>docs/known-gaps.md</code> is the honest map of the frontier. If you want to contribute, the pattern-matching bucket is the largest lever: pick a file from the ledger, run it with <code>-- --ignored</code>, and land the feature its tests describe.</p>
   </div>
 </section>
 
 <footer>
   <span>FMPL &middot; MIT &middot; github.com/mparrett/fmpl (fork of nnunley/fmpl)</span>
   <span>Written 2026-07-20, counts updated 2026-07-22 &middot; all claims verified against a fresh REPL</span>
-  <span>Field logs: <a href="fmpl-rehab-log.html">the rehabilitation</a> &middot; <a href="fmpl-field-log.html">closing the metacircular-parser gap</a></span>
+  <span>Field logs: <a href="fmpl-revival-log.html">Opening the Door</a> &middot; <a href="fmpl-field-log.html">Closing the Loop</a> &middot; <a href="fmpl-process.html">The Layer Underneath</a></span>
 </footer>
 
 </div>
