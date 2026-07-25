@@ -111,7 +111,7 @@ Source → Lexer (logos) → Parser → AST → Compiler → Indexed RPN bytecod
 
 - [Engineering tour](https://mparrett.github.io/fmpl/fmpl-tour.html) — one-page overview: architecture, what works, what doesn't
 - [Browser REPL](https://mparrett.github.io/fmpl/repl.html) — fmpl-core as WebAssembly, live on GitHub Pages
-- Field logs — engineering retrospectives: [Opening the Door](https://mparrett.github.io/fmpl/fmpl-revival-log.html) (revitalizing the agent-written codebase) and [Closing the Loop](https://mparrett.github.io/fmpl/fmpl-field-log.html) (closing the metacircular-parser gap)
+- Field logs — engineering retrospectives: [Opening the Door](https://mparrett.github.io/fmpl/fmpl-rehab-log.html) (revitalizing the agent-written codebase) and [Closing the Loop](https://mparrett.github.io/fmpl/fmpl-field-log.html) (closing the metacircular-parser gap)
 - [The Layer Underneath](https://mparrett.github.io/fmpl/fmpl-process.html) — the agent process that wrote FMPL: requirement lattice, hook-enforced state machine, adversarial review, read out of `archive/agent-harness`
 - [`project.md`](project.md) — north star, principles, design lineage
 - [`docs/design-principles.md`](docs/design-principles.md) — durable design invariants
