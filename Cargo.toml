@@ -108,8 +108,9 @@ fmpl-core = { path = "fmpl-core" }
 fmpl-scenario-runner = { path = "fmpl-scenario-runner" }
 
 # Size-tuned profile for the browser wasm build only (pages.yml). Safe with
-# panic="abort": VM errors are Results by design (no catch_unwind in-tree),
-# so unwinding machinery is pure weight here. ~2.1MB -> ~1.1MB raw.
+# panic="abort": VM errors are Results by design, and the one catch_unwind in
+# the tree is in a test, which never builds under this profile — so unwinding
+# machinery is pure weight here. ~2.1MB -> ~1.1MB raw.
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"

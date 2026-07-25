@@ -489,12 +489,12 @@
   <p class="dek">A tutorial for experienced programmers, rendered for the web — expressions, pattern matching, grammars, objects, and the metaprogramming pipeline.</p>
   <div class="meta-row">
     <span><b>Source</b> TUTORIAL.md + DEMO.md</span>
-    <span><b>CI-verified</b> every snippet, on push</span>
+    <span><b>Live</b> every block runs here</span>
     <span><b>Companion</b> to the <a href="fmpl-tour.html">engineering tour</a></span>
     <span><b>Written by</b> <a href="https://github.com/nnunley">Norman Nunley</a></span>
   </div>
 
-  <p class="term-cap">Everything on this page comes from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, which CI executes against the real interpreter on every push — the <code>-- Returns:</code> comments are asserted, not aspirational. And it all runs here too: the <b>▸</b> cursor marks the next statement — step it, or press enter.</p>
+  <p class="term-cap">Every snippet here is transcribed from <code>TUTORIAL.md</code> / <code>DEMO.md</code>, whose blocks CI executes against the real interpreter on every push — the <code>-- Returns:</code> comments are asserted there, not aspirational. This page runs them again in your browser: the <b>▸</b> cursor marks the next statement — step it, or press enter.</p>
   <div class="term" id="hero-term">
 <span class="bar"><span>$ fmpl &nbsp;·&nbsp; live session — this terminal is real</span><span class="bar-ctls"><button id="hero-step" type="button">▸ next</button><button id="hero-end" type="button">» run to end</button><button id="hero-reset" type="button" disabled>↺ reset</button></span></span><span id="hero-screen"><span class="c">-- ▸ marks the next statement: click it, press enter, or type your own.</span>
 </span><span id="hero-pending"></span><span id="hero-inrow"><span class="p">fmpl&gt;</span> <input id="hero-cmd" autocomplete="off" spellcheck="false" aria-label="FMPL input" placeholder="…or type FMPL here"></span></div>
@@ -1099,7 +1099,7 @@ let result = agent_turn("Search for latest Rust version", [])</code></pre>
 
   <div class="two-col">
     <ul class="caps">
-      <li><span class="chip works">works</span><span class="what">Everything demonstrated above — every snippet is CI-executed against the interpreter</span></li>
+      <li><span class="chip works">works</span><span class="what">Everything demonstrated above — every snippet runs live on this page, and its source block is CI-executed</span></li>
       <li><span class="chip works">works</span><span class="what">Checked arithmetic, pattern matching, grammars, objects, lambdas, recursion</span></li>
       <li><span class="chip works">works</span><span class="what">Metaprogramming pipeline (<code>ast::parse</code> / <code>ir::compile</code> / <code>code::eval</code>)</span></li>
       <li><span class="chip works">works</span><span class="what"><code>json::parse</code>, <code>curl.get/post</code>, stream cursors, type predicates</span></li>
@@ -1119,7 +1119,7 @@ let result = agent_turn("Search for latest Rust version", [])</code></pre>
 
 <footer>
   <span>FMPL &middot; MIT &middot; github.com/nnunley/fmpl</span>
-  <span>Rendered from TUTORIAL.md + DEMO.md &middot; every snippet CI-verified</span>
+  <span>Rendered from TUTORIAL.md + DEMO.md &middot; sources CI-executed, blocks run live here</span>
 </footer>
 
 </div>
