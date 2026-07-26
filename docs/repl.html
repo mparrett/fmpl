@@ -122,6 +122,7 @@
 </div>
 <script type="module">
 import init, { repl_eval, repl_is_complete, repl_reset } from "./repl/fmpl_wasm.js";
+import { normalizeUnits } from "./fmpl-live.js";
 
 const screen = document.getElementById("screen");
 const input = document.getElementById("cmd");
@@ -250,11 +251,29 @@ for (const ex of EXAMPLES) {
   examplesEl.appendChild(b);
 }
 
+// Deep links: #code=<URI-encoded source> is fed through the normal submit
+// path after the VM loads — multi-line snippets buffer exactly as if typed.
+// Safe to auto-run: the wasm build has no network or file builtins.
+// Line normalization (multi-line @{...} and if/else joining) is shared with
+// the guide's run-in-place blocks — see fmpl-live.js.
+function runFromHash() {
+  const m = location.hash.match(/^#code=(.*)$/);
+  if (!m) return;
+  let code = "";
+  try { code = decodeURIComponent(m[1]); } catch { return; }
+  for (const { text: line } of normalizeUnits(code)) {
+    if (line.trim() !== "") { history.push(line); histIdx = history.length; }
+    submit(line);
+  }
+  if (buffer.length) submit(""); // empty line force-submits a leftover buffer
+}
+
 try {
   await init();
   screen.replaceChildren();
   print("FMPL v0.1.0 — wasm build. Type .help for commands.", "sys");
   input.disabled = false;
+  runFromHash();
   input.focus();
 } catch (e) {
   print(`Failed to load WebAssembly: ${e}`, "err");

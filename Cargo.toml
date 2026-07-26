@@ -106,3 +106,16 @@ fmpl-persistence = { path = "fmpl-persistence" }
 # centralizes the relative-path knowledge.
 fmpl-core = { path = "fmpl-core" }
 fmpl-scenario-runner = { path = "fmpl-scenario-runner" }
+
+# Size-tuned profile for the browser wasm build only (pages.yml). Safe with
+# panic="abort": VM errors are Results by design, and the one catch_unwind in
+# the tree is in a test, which never builds under this profile — so unwinding
+# machinery is pure weight here. With wasm-opt: 2.30MB -> 1.19MB raw,
+# 553KB -> 374KB gzipped (measured against the bootstrapped build).
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
