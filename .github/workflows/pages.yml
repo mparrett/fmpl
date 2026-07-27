@@ -1,12 +1,17 @@
 name: Pages
 
 # Builds the browser REPL's wasm from source and deploys docs/ to GitHub
-# Pages on every main push, so the published REPL can never drift from the
-# code (the wasm binary is never committed — docs/repl/ is gitignored).
+# Pages on every push to this branch, so the published REPL can never drift
+# from the code (the wasm binary is never committed — docs/repl/ is
+# gitignored).
+#
+# This fork's site publishes from `fork-pages`, not `main`. `main` is kept as
+# a clean mirror of nnunley/fmpl so upstream PRs branch off an identical base;
+# everything the fork publishes on top of that lives here.
 
 on:
   push:
-    branches: [main]
+    branches: [fork-pages]
   workflow_dispatch:
 
 env:
